@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Sign in · String Telephone</title>
+  <link rel="stylesheet" th:href="@{/admin/style.css}">
+</head>
+<body>
+<main class="login">
+  <p class="eyebrow">String Telephone</p>
+  <h1>Server administration</h1>
+  <p class="muted">Manage accounts, calling and your private PBX in one place.</p>
+  <p th:if="${param.error}" class="notice error" role="alert">Sign-in failed. Check your administrator username and password.</p>
+  <p th:if="${param.logout}" class="notice" role="status">You have signed out.</p>
+  <form th:action="@{/admin/login}" method="post" class="card">
+    <label for="username">Admin username</label>
+    <input id="username" name="username" autocomplete="username" required autofocus>
+    <label for="password">Admin password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Sign in</button>
+  </form>
+  <footer class="site-footer">
+    <p>© 2026 <a target="_blank" rel="noopener noreferrer" href="https://patbaumgartner.com/">Patrick Baumgartner</a> <span class="footer-separator" aria-hidden="true">–</span> <span>Crafted with ❤️</span></p>
+  </footer>
+</main>
+</body>
+</html>

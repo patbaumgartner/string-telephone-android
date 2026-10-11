@@ -1,0 +1,11 @@
+**/build/
+**/.gradle/
+**/.kotlin/
+.git/
+.idea/
+local.properties
+*.apk
+*.aab
+GATES.md
+.unlazy/
+.claude/

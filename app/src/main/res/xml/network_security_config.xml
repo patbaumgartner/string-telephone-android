@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Release policy: no cleartext traffic anywhere. All HTTP(S)/WS(S) and SIP
+  traffic must be encrypted. Native SIP is enforced separately by the engine:
+  verified TLS with mandatory SDES SRTP; there is no plaintext fallback.
+  Debug builds override this file to permit cleartext against a local server.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

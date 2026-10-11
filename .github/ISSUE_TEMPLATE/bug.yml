@@ -1,0 +1,55 @@
+---
+name: Bug report
+description: Report reproducible incorrect behaviour.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Report vulnerabilities privately using the Security link, not this form.
+        Never include SIP secrets, API or admin tokens, private server addresses,
+        contact details, message contents, or call recordings.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options: [Android app, Companion API, Asterisk or provisioning, Build or tooling, Documentation]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Environment
+      description: Device and Android version, or server OS and container/runtime versions.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Sanitized logs and screenshots only.
