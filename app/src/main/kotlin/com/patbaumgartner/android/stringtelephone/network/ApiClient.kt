@@ -1,0 +1,132 @@
+package com.patbaumgartner.android.stringtelephone.network
+
+import com.patbaumgartner.android.stringtelephone.core.ContactDto
+import com.patbaumgartner.android.stringtelephone.core.ContactsDto
+import com.patbaumgartner.android.stringtelephone.core.MeDto
+import com.patbaumgartner.android.stringtelephone.core.MessageDto
+import com.patbaumgartner.android.stringtelephone.core.MessagesPageDto
+import com.patbaumgartner.android.stringtelephone.core.SendMessageRequest
+import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
+
+/** Typed failure kinds so the UI can render precise, honest error states. */
+sealed class ApiException(message: String) : Exception(message) {
+    object Auth : ApiException("authentication failed")
+    object Forbidden : ApiException("forbidden")
+    object Server : ApiException("server error")
+    object Network : ApiException("network error")
+    data class Unexpected(val status: Int) : ApiException("unexpected status")
+    data class Protocol(val detail: String) : ApiException("protocol error")
+}
+
+data class MeResult(val username: String, val displayName: String)
+
+data class MessageResult(
+    val id: String,
+    val sender: String,
+    val recipient: String,
+    val content: String,
+    val createdAt: Long,
+    val clientKey: String,
+)
+
+data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
+
+class CompanionApiClient(
+    private val baseUrl: String,
+    private val tokenProvider: () -> String,
+    client: OkHttpClient? = null,
+) {
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    private val jsonMedia = "application/json".toMediaType()
+
+    private val http: OkHttpClient = client ?: OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    fun me(): MeResult {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/me")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> {
+                    val me = json.decodeFromString(MeDto.serializer(), r.body.string())
+                    return MeResult(me.username, me.displayName)
+                }
+            }
+        }
+    }
+
+    fun contacts(): List<ContactDto> {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/contacts")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        if (response.code == 401 || response.code == 403) { response.close(); throw ApiException.Auth }
+        if (!response.isSuccessful) { val code = response.code; response.close(); throw ApiException.Unexpected(code) }
+        val parsed = json.decodeFromString(ContactsDto.serializer(), response.body.string())
+        response.close()
+        return parsed.contacts
+    }
+
+    fun sendMessage(recipient: String, content: String, clientKey: String): MessageResult {
+        val payload = json.encodeToString(
+            SendMessageRequest.serializer(),
+            SendMessageRequest(recipient, content, clientKey),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$recipient/messages")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when (r.code) {
+                401, 403 -> throw ApiException.Auth
+                404 -> throw ApiException.Protocol("peer unknown")
+                413 -> throw ApiException.Protocol("content too large")
+                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey) }
+                else -> throw ApiException.Unexpected(r.code)
+            }
+        }
+    }
+
+    fun messages(peer: String, cursor: String?, limit: Int = 50): MessagesPage {
+        val url = buildString {
+            append("$baseUrl/v1/conversations/$peer/messages?limit=$limit")
+            if (cursor != null) append("&cursor=").append(java.net.URLEncoder.encode(cursor, "UTF-8"))
+        }
+        val response = http.newCall(Request.Builder().url(url).header("Authorization", "Bearer ${tokenProvider()}").get().build()).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("unknown peer")
+                r.code == 400 -> throw ApiException.Protocol("invalid cursor")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> {
+                    val page = json.decodeFromString(MessagesPageDto.serializer(), r.body.string())
+                    return MessagesPage(
+                        messages = page.messages.map { MessageResult(it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey) },
+                        nextCursor = page.nextCursor,
+                    )
+                }
+            }
+        }
+    }
+}

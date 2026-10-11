@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">String Telephone</string>
+    <string name="cd_back">Back</string>
+    <string name="menu_more">More</string>
+
+    <string name="onboarding_welcome">String Telephone</string>
+    <string name="onboarding_tagline">Calls and messages between people who share a server, not their contacts.</string>
+    <string name="onboarding_server_url">Server address (https://…)</string>
+    <string name="onboarding_insecure_url_warning">Unsecured http:// — development only. Use https://
+        for anything real; calls and messages would otherwise cross the network in the clear.</string>
+    <string name="onboarding_username">Username</string>
+    <string name="onboarding_password">Password</string>
+    <string name="onboarding_sign_in">Sign in</string>
+    <string name="onboarding_credentials_note">Your password is encrypted on this phone and is
+        never sent anywhere except your own server.</string>
+    <string name="contacts_title">Contacts</string>
+    <string name="contacts_empty">Nobody here yet</string>
+    <string name="contacts_empty_hint">Ask your operator to provision the people you want to
+        reach.</string>
+    <string name="back">Back</string>
+    <string name="presence_online">Online</string>
+    <string name="presence_offline">Offline</string>
+    <string name="presence_unknown">Unknown</string>
+    <string name="call_button">Call</string>
+    <string name="chat_button">Messages</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_logout">Sign out</string>
+    <string name="settings_clear_data">Clear local data</string>
+    <string name="settings_credentials_note">Credentials are encrypted on this phone and are never
+        included in messages or notifications.</string>
+
+    <string name="call_incoming">Incoming call</string>
+    <string name="call_outgoing">Calling…</string>
+    <string name="call_active">In call</string>
+    <string name="call_ended">Call ended</string>
+    <string name="call_answer">Answer</string>
+    <string name="call_reject">Reject</string>
+    <string name="call_hang_up">Hang up</string>
+    <string name="call_mute">Mute</string>
+    <string name="call_unmute">Unmute</string>
+    <string name="call_speaker">Speaker</string>
+    <string name="call_earpiece">Earpiece</string>
+    <string name="call_failed">Call failed</string>
+    <string name="call_busy">Busy</string>
+    <string name="state_call_ringing">Waiting for an answer</string>
+    <string name="state_call_ringing_out">Ringing…</string>
+    <string name="state_call_active">Connected</string>
+    <string name="chat_title">%1$s</string>
+    <string name="chat_hint">Message</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_sending">Sending…</string>
+    <string name="chat_failed_to_send">Not delivered</string>
+    <string name="chat_emoji">Emoji</string>
+    <string name="cd_emoji_picker">Show emoji picker</string>
+    <string name="notification_call_channel">Calls</string>
+    <string name="notification_message_channel">Messages</string>
+    <string name="notification_missed_call_title">Missed call</string>
+    <string name="notification_missed_call_text">Missed call from %1$s</string>
+    <string name="notification_new_message_title">New message</string>
+    <string name="notification_new_message_text">%1$s: %2$s</string>
+    <string name="notification_more_messages">and %1$d more</string>
+    <string name="cd_call">Start a call</string>
+    <string name="cd_open_chat">Open messages</string>
+    <string name="cd_answer">Answer the call</string>
+    <string name="cd_reject">Reject the call</string>
+    <string name="cd_hang_up">Hang up</string>
+    <string name="cd_mute">Mute the microphone</string>
+    <string name="cd_unmute">Unmute the microphone</string>
+    <string name="menu_settings">Settings</string>
+</resources>

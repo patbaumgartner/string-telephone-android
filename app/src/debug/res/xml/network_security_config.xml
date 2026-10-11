@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only override: permit cleartext so a local http:// / ws:// server can be
+  used during development. The release build keeps the strict config from
+  src/main and this file is not packaged into it.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

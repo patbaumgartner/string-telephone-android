@@ -1,0 +1,59 @@
+name: st-proto
+
+services:
+  asterisk:
+    build: ./asterisk
+    container_name: st-proto-asterisk
+    ports:
+      - "5060:5060/udp"
+      - "5061:5061/tcp"
+    environment:
+      # auto enables SIP/TLS on 5061 when certificates are mounted below,
+      # otherwise the PBX stays UDP-only.
+      PJSIP_TLS_ENABLE: ${PJSIP_TLS_ENABLE:-auto}
+    volumes:
+      # PEM certs (fullchain.pem + privkey.pem) for the TLS transport. Mount an
+      # empty directory (the default) to keep TLS off.
+      - ${ST_CERTS_DIR:-./certs}:/certs:ro
+    networks:
+      - pbx
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: ..
+      dockerfile: server/api/Dockerfile
+    container_name: st-proto-api-1
+    environment:
+      API_DB: /data/stringtelephone.db
+      # Prototype-only admin token; never a production secret.
+      API_ADMIN_TOKEN: proto-admin-token-000000000000
+      # Native HTTPS/WSS is opt-in: point API_TLS_KEYSTORE at a PKCS12/JKS
+      # keystore (e.g. /certs/api-keystore.p12) to add the 8443 listener.
+      # Leave unset when a TLS-terminating proxy fronts the API. The plain
+      # 8080 listener is always started regardless.
+      API_HTTPS_PORT: "8443"
+      API_TLS_KEYSTORE: ${API_TLS_KEYSTORE:-}
+      API_TLS_KEYSTORE_PASSWORD: ${API_TLS_KEYSTORE_PASSWORD:-}
+      API_TLS_KEYSTORE_TYPE: ${API_TLS_KEYSTORE_TYPE:-PKCS12}
+      API_TLS_KEY_ALIAS: ${API_TLS_KEY_ALIAS:-}
+      API_TLS_KEY_PASSWORD: ${API_TLS_KEY_PASSWORD:-}
+    ports:
+      - "${ST_API_HTTP_PORT:-8080}:8080"
+      - "${ST_API_HTTPS_PORT:-8443}:8443"
+    volumes:
+      - api-data:/data
+      # Read-only certs / optional keystore for native TLS.
+      - ${ST_CERTS_DIR:-./certs}:/certs:ro
+    networks:
+      - pbx
+
+volumes:
+  api-data:
+
+networks:
+  pbx:
