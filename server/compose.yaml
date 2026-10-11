@@ -1,0 +1,37 @@
+name: st-proto
+
+services:
+  asterisk:
+    build: ./asterisk
+    container_name: st-proto-asterisk
+    ports:
+      - "5060:5060/udp"
+    networks:
+      - pbx
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: ..
+      dockerfile: server/api/Dockerfile
+    container_name: st-proto-api-1
+    environment:
+      API_DB: /data/stringtelephone.db
+      # Prototype-only admin token; never a production secret.
+      API_ADMIN_TOKEN: proto-admin-token-000000000000
+    ports:
+      - "8080:8080"
+    volumes:
+      - api-data:/data
+    networks:
+      - pbx
+
+volumes:
+  api-data:
+
+networks:
+  pbx:

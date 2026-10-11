@@ -1,0 +1,13 @@
+String Telephone — self-hosted one-to-one calls and messages
+Copyright 2026 Patrick Baumgartner
+
+This program is free software: the Android app is licensed under the GNU
+General Public License as published by the Free Software Foundation, either
+version 3 of the License, or (at your option) any later version; the companion
+API server is licensed under the GNU Affero General Public License version 3.
+See LICENSE (GPL-3.0), server/api/LICENSE-AGPL, and THIRD_PARTY_NOTICES.md
+for details.
+
+This product includes SIP signalling and media software from linphone-sdk
+(linphone-sdk-android), licensed under the GNU General Public License v3.
+See THIRD_PARTY_NOTICES.md for details.
