@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">String Telephone</string>
+    <string name="cd_back">Back</string>
+    <string name="menu_more">More</string>
+
+    <string name="onboarding_welcome">String Telephone</string>
+    <string name="onboarding_tagline">Calls and messages between people who share a server, not their contacts.</string>
+    <string name="onboarding_server_url">Server address (https://…)</string>
+    <string name="onboarding_insecure_url_warning">Unsecured http:// — development only. Use https://
+        for anything real; calls and messages would otherwise cross the network in the clear.</string>
+    <string name="onboarding_username">Username</string>
+    <string name="onboarding_password">API token</string>
+    <string name="onboarding_sip_secret">SIP password</string>
+    <string name="onboarding_sign_in">Sign in</string>
+    <string name="onboarding_credentials_note">Use the username, API token and SIP password from your
+        server administrator. Credentials are encrypted on this phone.</string>
+    <string name="sign_in_invalid_url">Enter a valid server address starting with https://.</string>
+    <string name="sign_in_insecure_url">Use HTTPS. Unsecured HTTP servers are only allowed in debug builds.</string>
+    <string name="sign_in_missing_credentials">Enter your username, API token and SIP password.</string>
+    <string name="sign_in_authentication">Sign-in failed. Check your API token or ask your server
+        administrator for new credentials.</string>
+    <string name="sign_in_network">Cannot reach your server securely. Check the address, network
+        connection and server certificate, then try again.</string>
+    <string name="sign_in_server">The server could not complete sign-in. Try again or contact your
+        server administrator.</string>
+    <string name="sign_in_protocol">This address did not return a compatible String Telephone response.
+        Check the server address with your administrator.</string>
+    <string name="sign_in_identity">This API token belongs to a different username. Check the
+        credentials supplied by your server administrator.</string>
+    <string name="contacts_loading">Loading contacts…</string>
+    <string name="contacts_load_failed">Could not load contacts. Check your connection and try again.</string>
+    <string name="retry">Try again</string>
+    <string name="microphone_permission_title">Microphone access needed</string>
+    <string name="microphone_permission_message">Allow microphone access to start or answer calls.
+        You can still use messages without it. If Android no longer shows the permission prompt,
+        enable Microphone in this app\'s permissions in Settings.</string>
+    <string name="open_app_settings">Open app settings</string>
+    <string name="not_now">Not now</string>
+    <string name="contacts_title">Contacts</string>
+    <string name="contacts_empty">Nobody here yet</string>
+    <string name="contacts_empty_hint">Ask your operator to provision the people you want to
+        reach.</string>
+    <string name="back">Back</string>
+    <string name="presence_online">Online</string>
+    <string name="presence_offline">Offline</string>
+    <string name="presence_unknown">Unknown</string>
+    <string name="call_button">Call</string>
+    <string name="chat_button">Messages</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_logout">Sign out</string>
+    <string name="settings_clear_data">Clear local data and sign out</string>
+    <string name="settings_credentials_note">Credentials are encrypted on this phone and are never
+        included in messages or notifications. Clearing local data also signs you out; messages
+        stored on the server are not deleted.</string>
+
+    <string name="call_incoming">Incoming call</string>
+    <string name="call_outgoing">Calling…</string>
+    <string name="call_active">In call</string>
+    <string name="call_ended">Call ended</string>
+    <string name="call_answer">Answer</string>
+    <string name="call_reject">Reject</string>
+    <string name="call_hang_up">Hang up</string>
+    <string name="call_mute">Mute</string>
+    <string name="call_unmute">Unmute</string>
+    <string name="call_speaker">Speaker</string>
+    <string name="call_earpiece">Earpiece</string>
+    <string name="call_failed">Call failed</string>
+    <string name="call_registration_failed">Messages are available, but calls could not connect to
+        the PBX. Check your SIP password and server configuration, then try again.</string>
+    <string name="call_busy">Busy</string>
+    <string name="state_call_ringing">Waiting for an answer</string>
+    <string name="state_call_ringing_out">Ringing…</string>
+    <string name="state_call_active">Connected</string>
+    <string name="chat_title">%1$s</string>
+    <string name="chat_hint">Message</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_sending">Sending…</string>
+    <string name="chat_failed_to_send">Not delivered</string>
+    <string name="chat_history_failed">Could not refresh messages. Showing any messages already
+        on this phone. Check your connection and try again.</string>
+    <string name="chat_emoji">Emoji</string>
+    <string name="cd_emoji_picker">Show emoji picker</string>
+    <string name="notification_call_channel">Calls</string>
+    <string name="notification_message_channel">Messages</string>
+    <string name="notification_missed_call_title">Missed call</string>
+    <string name="notification_missed_call_text">Missed call from %1$s</string>
+    <string name="notification_new_message_title">New message</string>
+    <string name="notification_new_message_text">%1$s: %2$s</string>
+    <string name="notification_more_messages">and %1$d more</string>
+    <string name="cd_call">Start a call</string>
+    <string name="cd_open_chat">Open messages</string>
+    <string name="cd_answer">Answer the call</string>
+    <string name="cd_reject">Reject the call</string>
+    <string name="cd_hang_up">Hang up</string>
+    <string name="cd_mute">Mute the microphone</string>
+    <string name="cd_unmute">Unmute the microphone</string>
+    <string name="menu_settings">Settings</string>
+</resources>

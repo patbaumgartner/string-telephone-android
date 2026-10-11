@@ -1,0 +1,31 @@
+package com.patbaumgartner.android.stringtelephone.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+val Porcelain = Color(0xFFFAF8F5)
+val PorcelainRaised = Color(0xFFFFFFFF)
+val Ink = Color(0xFF14181A)
+val InkMuted = Color(0xFF5C6669)
+val Graphite = Color(0xFF0E1211)
+val GraphiteRaised = Color(0xFF161C1B)
+val Bone = Color(0xFFECF1EF)
+val BoneMuted = Color(0xFF97A5A2)
+
+val BrandCyan = Color(0xFF00AFE1)
+val OnBrandCyan = Color(0xFF04202B)
+val BrandCyanDeep = Color(0xFF0079A3)
+val BrandCyanLight = Color(0xFF66D7F5)
+val CyanContainer = Color(0xFFD7F3FC)
+val CyanContainerDark = Color(0xFF123642)
+val Outline = Color(0xFF6C797E)
+val OutlineDark = Color(0xFF8A9BA1)
+val OutlineVariant = Color(0xFFCEDDE2)
+val OutlineVariantDark = Color(0xFF3B4B51)
+val ErrorContainer = Color(0xFFFFE4DA)
+val ErrorContainerDark = Color(0xFF542819)
+val OnErrorContainer = Color(0xFF5A210E)
+val OnErrorContainerDark = Color(0xFFFFDBCF)
+val Coral = Color(0xFFAC4B2F)
+val CoralLight = Color(0xFFE79274)
+val Amber = Color(0xFF9A6B10)
+val AmberLight = Color(0xFFE0B45C)

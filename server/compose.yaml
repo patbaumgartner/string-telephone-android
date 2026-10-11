@@ -1,0 +1,71 @@
+---
+name: st-proto
+
+services:
+  asterisk:
+    build: ./asterisk
+    ports:
+      - "5060:5060/udp"
+      - "5061:5061/tcp"
+      - "10000-10100:10000-10100/udp"
+    environment:
+      # auto enables SIP/TLS on 5061 when certificates are mounted below,
+      # otherwise the PBX stays UDP-only.
+      PJSIP_TLS_ENABLE: ${PJSIP_TLS_ENABLE:-auto}
+      PBX_AMI_USERNAME: ${PBX_AMI_USERNAME:-stringtelephone}
+      PBX_AMI_PASSWORD: ${PBX_AMI_PASSWORD:?Set PBX_AMI_PASSWORD in your environment or .env}
+    volumes:
+      # PEM certs (fullchain.pem + privkey.pem) for the TLS transport. Mount an
+      # empty directory (the default) to keep TLS off.
+      - ${ST_CERTS_DIR:-./certs}:/certs:ro
+      - pbx-config:/managed
+    networks:
+      - pbx
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: ..
+      dockerfile: server/api/Dockerfile
+    environment:
+      API_DB: /data/stringtelephone.db
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in your environment or .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your environment or .env}
+      PBX_AMI_HOST: asterisk
+      PBX_AMI_USERNAME: ${PBX_AMI_USERNAME:-stringtelephone}
+      PBX_AMI_PASSWORD: ${PBX_AMI_PASSWORD:?Set PBX_AMI_PASSWORD in your environment or .env}
+      ASTERISK_MANAGED_DIR: /managed
+      # Native HTTPS/WSS is opt-in: point API_TLS_KEYSTORE at a PKCS12/JKS
+      # keystore (e.g. /certs/api-keystore.p12) to add the 8443 listener.
+      # Leave unset when a TLS-terminating proxy fronts the API. The plain
+      # 8080 listener is always started regardless.
+      API_HTTPS_PORT: "8443"
+      API_TLS_KEYSTORE: ${API_TLS_KEYSTORE:-}
+      API_TLS_KEYSTORE_PASSWORD: ${API_TLS_KEYSTORE_PASSWORD:-}
+      API_TLS_KEYSTORE_TYPE: ${API_TLS_KEYSTORE_TYPE:-PKCS12}
+      API_TLS_KEY_ALIAS: ${API_TLS_KEY_ALIAS:-}
+      API_TLS_KEY_PASSWORD: ${API_TLS_KEY_PASSWORD:-}
+    ports:
+      - "${ST_API_HTTP_PORT:-8080}:8080"
+      - "${ST_API_HTTPS_PORT:-8443}:8443"
+    volumes:
+      - api-data:/data
+      # Read-only certs / optional keystore for native TLS.
+      - ${ST_CERTS_DIR:-./certs}:/certs:ro
+      - pbx-config:/managed
+    depends_on:
+      asterisk:
+        condition: service_healthy
+    networks:
+      - pbx
+
+volumes:
+  api-data:
+  pbx-config:
+
+networks:
+  pbx:

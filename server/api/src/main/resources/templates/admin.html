@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Administration · String Telephone</title>
+  <link rel="stylesheet" th:href="@{/admin/style.css}">
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div><p class="eyebrow">String Telephone</p><h1>Administration</h1><p class="muted">Accounts and calling, kept in sync.</p></div>
+    <form th:action="@{/admin/logout}" method="post"><button class="secondary">Sign out</button></form>
+  </header>
+  <nav aria-label="Administration"><a href="#accounts">Accounts</a><a href="#create">Create account</a><a href="#pbx">PBX status</a><a href="#settings">Settings</a></nav>
+  <p th:if="${notice}" th:text="${notice}" class="notice" role="status"></p>
+  <p th:if="${error}" th:text="${error}" class="notice error" role="alert"></p>
+  <section th:if="${credential}" class="card credentials" aria-labelledby="credential-title">
+    <h2 id="credential-title">Save these credentials now</h2>
+    <p>Shown once. Save them in a password manager before leaving or refreshing this page. Sign in on Android using the API token and the separate SIP password.</p>
+    <dl>
+      <dt>Username</dt><dd th:text="${credential.username}"></dd>
+      <dt>API token</dt><dd th:text="${credential.apiToken}"></dd>
+      <dt>SIP password</dt><dd th:text="${credential.sipSecret}"></dd>
+    </dl>
+    <p th:unless="${credential.ready}" class="notice error">PBX setup is pending. Do not sign in until reconciliation succeeds.</p>
+  </section>
+  <section id="pbx" class="card" aria-labelledby="pbx-title">
+    <div class="section-header"><h2 id="pbx-title">PBX status</h2><a th:href="@{/admin/}">Refresh status</a></div>
+    <p th:if="${sync.ready and pbx != null}" class="badge">Configuration synchronized</p>
+    <p th:unless="${sync.ready}" class="notice error" role="alert"><strong>Synchronization required.</strong> <span th:text="${sync.error}"></span> The server retries every 15 seconds. Disabled API accounts stay blocked while PBX changes are pending.</p>
+    <p th:if="${pbxError}" th:text="${pbxError}" class="notice error" role="alert"></p>
+    <div th:if="${pbx}">
+      <p><strong th:text="${pbx.activeChannels}"></strong> active call channels</p>
+      <ul class="endpoint-list"><li th:each="endpoint : ${pbx.endpoints}"><strong th:text="${endpoint.username}"></strong><span th:text="${endpoint.state}"></span><span th:text="|${endpoint.channels} channels|"></span></li></ul>
+      <p th:if="${pbx.endpoints.isEmpty()}" class="muted">No enabled SIP endpoints yet. Create an account below.</p>
+    </div>
+    <form th:action="@{/admin/pbx/reconcile}" method="post"><button class="secondary">Reconcile and reload PBX</button></form>
+  </section>
+  <section id="accounts" aria-labelledby="accounts-title">
+    <h2 id="accounts-title">Accounts</h2>
+    <p class="muted">Disabling an account blocks API and SIP access, closes message streams and ends its calls. Enabling it restores access with its current credentials.</p>
+    <p th:if="${accounts.isEmpty()}" class="card">No accounts yet. Create your first account below.</p>
+    <div class="account-grid">
+      <article th:each="account : ${accounts}" class="card">
+        <div class="section-header"><h3 th:text="${account.username}"></h3><span class="badge" th:text="${account.active ? 'Ready' : (account.enabled ? 'Pending PBX' : 'Disabled')}"></span></div>
+        <form th:action="@{/admin/accounts/{name}/name(name=${account.username})}" method="post">
+          <label th:for="|name-${account.username}|">Display name</label>
+          <input th:id="|name-${account.username}|" name="displayName" th:value="${account.displayName}" maxlength="100" required>
+          <button class="secondary">Save display name</button>
+        </form>
+        <form th:action="@{/admin/accounts/{name}/enabled(name=${account.username})}" method="post">
+          <input type="hidden" name="enabled" th:value="${!account.enabled}">
+          <button th:class="${account.enabled ? 'danger' : 'secondary'}" th:text="${account.enabled ? 'Disable and end calls' : 'Enable account'}"></button>
+        </form>
+        <details>
+          <summary>Reset credentials and end calls</summary>
+          <p>Invalidates the current API token and SIP password. The user must sign in again.</p>
+          <form th:action="@{/admin/accounts/{name}/reset(name=${account.username})}" method="post">
+            <label th:for="|reset-${account.username}|">New SIP passphrase (optional)</label>
+            <input th:id="|reset-${account.username}|" name="sipPassword" type="password" minlength="24" maxlength="1024" autocomplete="new-password">
+            <p class="hint">Leave empty to generate a strong password. API tokens are always generated.</p>
+            <button class="danger">Replace credentials and end calls</button>
+          </form>
+        </details>
+      </article>
+    </div>
+  </section>
+  <div class="columns">
+    <section id="create" class="card" aria-labelledby="create-title">
+      <h2 id="create-title">Create account</h2>
+      <p>Creates the API identity, SIP endpoint and dialplan automatically.</p>
+      <form th:action="@{/admin/accounts}" method="post">
+        <label for="new-username">Username</label>
+        <input id="new-username" name="username" pattern="[a-z][a-z0-9\-]{0,31}" maxlength="32" autocomplete="off" required>
+        <p class="hint">Lowercase letters, numbers and hyphens; start with a letter. Names a, e, h, i, o, s and t are reserved.</p>
+        <label for="display-name">Display name</label>
+        <input id="display-name" name="displayName" maxlength="100" required>
+        <label for="sip-password">SIP passphrase (optional)</label>
+        <input id="sip-password" name="sipPassword" type="password" minlength="24" maxlength="1024" autocomplete="new-password">
+        <p class="hint">24–1024 characters. Long hyphenated passphrases are welcome. Leave empty to generate one.</p>
+        <button>Create and provision account</button>
+      </form>
+    </section>
+    <section id="settings" class="card" aria-labelledby="settings-title">
+      <h2 id="settings-title">Calling and network settings</h2>
+      <p>Validated settings are applied to enabled endpoints and reloaded automatically. Transport reloads can briefly interrupt SIP signaling; use a maintenance window for network changes.</p>
+      <form th:action="@{/admin/pbx/settings}" method="post">
+        <label for="codecs">Audio codecs, in preference order</label>
+        <input id="codecs" name="codecs" th:value="${settings.codecs}" pattern="(opus|ulaw|alaw)(,(opus|ulaw|alaw))*" required>
+        <label for="ring-seconds">Ring duration (seconds)</label>
+        <input id="ring-seconds" name="ringSeconds" type="number" min="5" max="120" th:value="${settings.ringSeconds}" required>
+        <label for="max-contacts">Devices per account</label>
+        <input id="max-contacts" name="maxContacts" type="number" min="1" max="5" th:value="${settings.maxContacts}" required>
+        <label for="external-address">External IPv4 address (optional)</label>
+        <input id="external-address" name="externalAddress" th:value="${settings.externalAddress}" placeholder="203.0.113.10">
+        <label for="local-network">Local IPv4 network (optional)</label>
+        <input id="local-network" name="localNetwork" th:value="${settings.localNetwork}" placeholder="192.168.1.0/24">
+        <p class="hint">Set both network fields for NAT, or leave both empty for a private network. Forward SIP and UDP 10000–10100 on the host firewall as appropriate. TLS certificates remain operator-managed.</p>
+        <label class="checkbox"><input type="checkbox" name="symmetricMedia" value="true" th:checked="${settings.symmetricMedia}"> Symmetric RTP for devices behind NAT</label>
+        <button>Save and apply PBX settings</button>
+      </form>
+    </section>
+  </div>
+  <footer>String Telephone · Private administration · Use HTTPS on a trusted private network.</footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon layer: alpha only, so the handset is cut out of the bubble. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,28A24,24 0,1 1,40.23 71.66L30,76L31.45,60.2A24,24 0,0 1,54 28ZM64.013 56.225c-1.538 0 -3.025 -0.25 -4.412 -0.7 -0.438 -0.15 -0.925 -0.037 -1.262 0.3l-1.963 2.462c-3.538 -1.688 -6.85 -4.875 -8.612 -8.537l2.438 -2.075c0.338 -0.35 0.438 -0.838 0.3 -1.275 -0.463 -1.388 -0.7 -2.875 -0.7 -4.412 0 -0.675 -0.562 -1.238 -1.238 -1.238L44.237 40.75C43.562 40.75 42.75 41.05 42.75 41.987 42.75 53.6 52.413 63.25 64.013 63.25c0.887 0 1.238 -0.787 1.238 -1.475v-4.312c0 -0.675 -0.562 -1.238 -1.238 -1.238z" />
+</vector>
