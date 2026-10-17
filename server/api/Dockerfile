@@ -9,7 +9,7 @@ COPY server/api server/api
 
 RUN gradle --no-daemon :server:api:installDist
 
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:24-jre
 WORKDIR /app
 COPY --from=build /workspace/server/api/build/install/api/ /app/
 ENV PATH="/app/bin:${PATH}"
