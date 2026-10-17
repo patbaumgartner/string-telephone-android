@@ -13,7 +13,7 @@ linphone = "5.4.88"
 datastore = "1.2.0"
 securityCrypto = "1.1.0"
 ktor = "3.6.0"
-logback = "1.5.38"
+logback = "1.6.5"
 sqlite = "3.53.4.0"
 coreTelecom = "1.1.0-rc01"
 
