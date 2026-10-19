@@ -1,0 +1,440 @@
+# String Telephone — Feature Roadmap
+
+Date: 2026-10-20
+Status: Planning (decisions recorded; phases not started)
+
+This document captures feature requests, the decisions behind them, and the
+planned phases. It is a working document; status updates live in GitHub issues
+and the [CHANGELOG](../CHANGELOG.md).
+
+Phases are ordered, named milestones — one PR-sized theme each. There are no
+version-numbered releases in this roadmap; a phase is "done" when its
+behaviour, tests, protocol documentation and screenshots are merged.
+
+---
+
+## Table of Contents
+
+1. [Phase overview](#planned-phases)
+2. [Phase details](#phase-details)
+3. [Planned later phases](#planned-later-phases)
+4. [Deferred indefinitely](#deferred-indefinitely)
+5. [Architecture decisions](#architecture-decisions)
+6. [Open decisions](#open-decisions)
+
+---
+
+## Planned phases
+
+Phases land in this order. Each is small enough for one focused review.
+
+| # | Phase | Size | Depends on |
+|---|-------|------|------------|
+| 1 | Chat scrollbar | Small | — |
+| 2 | Bluetooth audio routing | Small | — |
+| 3 | PostgreSQL migration | Large | — |
+| 4 | Garage media storage (server only) | Medium | Phase 3 |
+| 5 | Read receipts | Medium | Phase 3 |
+| 6 | Image sharing | Medium | Phases 3+4 |
+| 7 | Typing indicators | Small | Phase 3 |
+| 8 | Emoji reactions | Medium | Phase 5 |
+| 9 | Reply/quote | Medium | Phase 5 |
+| 10 | Message deletion | Medium | Phase 5 |
+| 11 | Voice messages | Large | Phase 4 |
+| 12 | Video calls | Large | — |
+| 11 | Voice messages | Large | Phase 4 |
+| 12 | Video calls | Large | — |
+| 13 | Last-seen & multi-device polish | Medium | — |
+| 14 | Quick reply from notification | Small | Phase 5 |
+| 15 | Conversation list: previews & search | Medium | Phase 3 |
+| 16 | Message search | Medium | Phase 3 |
+| 17 | Message editing | Medium | Phases 5+10 |
+| 18 | Chat list management (pin/mute/archive) | Medium | — |
+
+Deferred indefinitely: end-to-end encryption, push notifications. A group-chat
+scope ADR keeps today's one-to-one designs group-compatible; groups themselves
+are a future bet beyond this roadmap's horizon. See
+[Deferred indefinitely](#deferred-indefinitely).
+
+---
+
+## Phase details
+
+### Phase 1 — Chat scrollbar
+
+**Effort:** Small
+
+The `LazyColumn` in `ChatScreen.kt` has no scroll indicator. Compose has no
+built-in scrollbar for `LazyColumn`; the plan is a thin thumb on the trailing
+edge drawn from `listState.layoutInfo`, in a small `UiCommon.kt` composable so
+it stays reusable. Hide it while the list is idle
+(`derivedStateOf { listState.isScrollInProgress }`), like mainstream
+messengers. Thumb size and position derive from `listState.layoutInfo`, not
+the pre-computed `rows` list, so the thumb stays correct across day
+separators and is proportional to the real scrollable distance.
+
+**Tests:** screenshot with a long conversation; drag behaviour is manual.
+
+---
+
+### Phase 2 — Bluetooth audio routing
+
+**Effort:** Small
+
+Calls can switch between speaker and earpiece but not to paired Bluetooth
+devices. Linphone already enumerates them (`AudioDevice.Type.Bluetooth`);
+the engine filters them out today (`LinphoneCallEngine.setSpeaker`).
+
+**Changes:**
+
+1. `CallEngine.kt`: replace `speakerOn: Boolean` with
+   `audioRoute: AudioRoute` (`EARPIECE`, `SPEAKER`, `BLUETOOTH`).
+2. `LinphoneCallEngine.kt`: implement `setAudioRoute(route)`; add
+   `onAudioDevicesListUpdated` to the core listener so availability updates
+   reach the state flow.
+3. `CallScreen.kt` + `AppViewModel.kt`: third route button, shown only when a
+   Bluetooth output exists; auto-switch when the device connects mid-call.
+4. `FakeCallEngine.kt`: mirror the new interface.
+
+**Tests:** route-selection unit tests; existing speaker tests migrate to the
+new API.
+
+**ADR:** none — the `CallEngine` interface already abstracts audio routing.
+
+---
+
+### Phase 3 — PostgreSQL
+
+Implements [ADR-0008](adr/0008-database-postgresql.md).
+
+**Effort:** Medium
+
+- Replace per-operation SQLite connections with HikariCP + PostgreSQL JDBC;
+  keep the `read`/`tx` seam so callers do not change.
+- Explicit forward-only SQL migrations checked into the repository (no ORM).
+- Compose gains a stock `postgres:18-alpine` service with a named volume.
+- A **pgweb** container joins the dev compose stack only, bound to loopback
+  (never published, never in production docs) — same policy as the plain HTTP
+  API port.
+- Configuration via `DB_*` environment variables; `API_DB` is removed.
+- **Fresh install only:** no SQLite import tooling. Existing volumes stay
+  untouched; operators start a new database (ADR-0007 semantics).
+- Integration tests run against a real PostgreSQL instance (Testcontainers).
+
+**Tests:** API integration tests move to PostgreSQL; message idempotency and
+cursor pagination verified against the new engine.
+
+---
+
+### Phase 4 — Garage media storage (server only)
+
+Implements [ADR-0009](adr/0009-media-storage-s3.md) with **Garage** as the
+prototype-stack default object store. This phase ships storage, upload and
+download endpoints; it does not change the chat UI (that is Phase 6).
+
+**Effort:** Medium
+
+- `MediaStore` interface (put/get/delete); first implementation uses the
+  AWS S3 SDK v2 against Garage's S3 endpoint. In-memory fake for unit tests;
+  Testcontainers Garage for integration tests.
+- `media` metadata table in PostgreSQL: id, owner, conversation peer,
+  content type, byte size, SHA-256, state, timestamps.
+- `POST /v1/media` (authenticated multipart upload) and
+  `GET /v1/media/{id}` (participant-checked streaming; no presigned URLs).
+- **Limits:** images up to 16 MB; audio up to 50 MB; content-type
+  allow-listing; per-type enforcement server-side.
+- **Thumbnails:** generated server-side at upload (Java ImageIO; JPEG/PNG).
+- **Retention:** indefinite. Nothing is deleted automatically (ADR-0007);
+  no TTL job.
+- Compose gains a Garage container (single-node dev layout) with its S3
+  credentials in `server/.env.example`; production docs describe pointing the
+  API at any S3-compatible endpoint.
+
+**Tests:** MediaStore seam with fakes; upload/download authorisation paths
+("recipient can fetch, stranger cannot"); size and content-type rejection.
+
+---
+
+### Phase 5 — Read receipts
+
+Implements [ADR-0010](adr/0010-message-delivery-states.md).
+
+**Effort:** Medium
+
+- Server: `read_at` per message; `POST /v1/conversations/{peer}/read` with
+  optional `upToMessageId`; `readAt` field in history responses;
+  `message-read` WebSocket event.
+- The mark endpoint is called **only** from the foreground chat screen when
+  messages are rendered — never from notification handlers, background sync,
+  or cursor catch-up.
+- **Always on, mutual.** No opt-out; both participants always exchange read
+  state. A future off-switch would be a protocol change.
+- Client: `SendState` becomes `PENDING / SENT / READ / FAILED` (DELIVERED
+  reserved); double tick in brand colour when read.
+
+**Tests:** cursor sync while chat is closed must not mark read; offline reads
+must reach the sender after reconnect; screenshot for every tick state.
+
+---
+
+### Phase 6 — Image messaging
+
+**Effort:** Medium
+
+- `POST /v1/conversations/{peer}/messages` gains a media variant: message
+  `type` (`TEXT` | `IMAGE`), `mediaId`, `thumbnailId`, dimensions.
+- App: attachment button in the Composer, Photo Picker (Android 13+ with
+  legacy fallback), client-side downscale before upload (max 1920px, JPEG 85),
+  background upload with progress, inline thumbnail in the bubble, tap to
+  open a fullscreen viewer.
+- Failed uploads behave like failed text messages: visible, tap to retry.
+
+**Depends on:** Phases 3+4. **Tests:** compression unit tests, image bubble
+screenshots, upload integration test.
+
+---
+
+### Phase 7 — Typing indicators
+
+**Effort:** Small
+
+Ephemeral WebSocket-only signals, no persistence, no REST:
+
+```json
+// Client -> Server
+{"type":"typing","payload":{"typing":true}}
+// Server -> Recipient (in-memory fan-out, no storage)
+{"type":"typing","payload":{"peer":"alice","typing":true}}
+```
+
+Client debounces sends (500 ms after last keystroke), UI expires the
+indicator after ~5 s without refresh, clears on message sent. Shown in the
+chat header presence area.
+
+**Tests:** debounce unit tests; header rendering states.
+
+---
+
+### Phase 8 — Emoji reactions
+
+**Effort:** Medium
+Implements the reaction part of [ADR-0011](adr/0011-message-extras.md).
+
+- Any emoji from the keyboard/picker (no curated set).
+- Storage: one reactions table keyed by (message, author); API to add/remove;
+  fan-out to participants over the existing stream.
+- UI: long-press bubble → reaction; count chips under the bubble;
+  tap-to-toggle own reaction.
+
+---
+
+### Phase 9 — Reply/quote
+
+**Effort:** Medium
+Implements the reply part of [ADR-0011](adr/0011-message-extras.md).
+
+- `replyToId` on the message model; server validates the referenced message
+  belongs to the same conversation.
+- UI: long-press → reply; quoted snapshot (author + text/thumb) rendered above
+  the reply; tap scrolls to the original.
+
+---
+
+### Phase 10 — Message deletion
+
+**Effort:** Medium
+Implements the deletion part of [ADR-0011](adr/0011-message-extras.md).
+
+- **Delete for me:** local hide, no server change.
+- **Delete for both sides:** soft-delete tombstone synced over the stream;
+  bubble renders as a placeholder ("message deleted") on both phones.
+- No time window in the first cut (decided; revisit if abuse appears).
+
+---
+
+### Phase 11 — Voice messages (full parity)
+
+**Effort:** Large
+
+Full WhatsApp-style experience on top of the Phase 4 media pipeline:
+
+- Hold-to-record with **lock gesture** (slide up to lock hands-free recording).
+- Waveform rendering with **scrubbing**, playback **speed control**,
+  **pause/resume**, draft kept if cancelled mid-record.
+- Opus audio, 50 MB cap, duration metadata, mic-permission gating consistent
+  with calls.
+
+---
+
+### Phase 12 — Video calls
+
+**Effort:** Large
+
+liblinphone supports video; the work is camera capture integration,
+video codecs/NAT (the server stack currently manages audio only), call-UI
+video surface, camera permissions, and PBX settings for video. Requires its
+own review of `server/asterisk/` codec and bandwidth configuration.
+
+---
+
+### Phase 13 — Last-seen and multi-device polish
+
+**Effort:** Medium
+
+- Last-seen timestamps on contacts (privacy-visible, always-on like
+  presence today).
+- Multi-device hardening: the stream already supports multiple sessions per
+  user; this phase covers consistent notification behaviour, unread counts
+  and read-state across simultaneously connected devices.
+
+---
+
+### Phase 14 — Quick reply from notification
+
+**Effort:** Small
+Depends on: Phase 5 (read receipts share the marking path).
+
+Message notifications currently have no actions; tapping opens the app
+(`AppNotifications.kt` has Answer/Decline on call notifications only).
+
+- Add a `RemoteInput` quick-reply action to message notifications: a text
+  field directly in the notification shade, sending through the same
+  repository path (client key, optimistic append, delivery state) as the
+  composer.
+- Add a **"Mark as read"** notification action that marks the conversation
+  read — explicitly allowed here: the user acted on the notification itself,
+  which is a different decision from background sync marking messages read
+  behind their back (ADR-0010's rule is about *automatic* marking).
+- Sending from the shade must not open the activity; errors surface as a
+  follow-up notification ("not sent — tap to retry").
+
+**Tests:** notification action unit tests (Robolectric), RemoteInput round-trip
+with the mocked repository.
+
+---
+
+### Phase 15 — Conversation list: previews and search
+
+**Effort:** Medium
+Depends on Phase 3 (PostgreSQL).
+
+The contacts screen today shows only a name and unread badge. WhatsApp/Signal
+style rows carry a last-message snippet and timestamp.
+
+- Last-message preview per conversation: `ChatCache` gains a preview accessor
+  (text or media placeholder); repository exposes a per-peer preview flow.
+- Relative timestamp on each row (today → time, this week → weekday, older →
+  date), matching the DayChip label logic already in the chat.
+- Tombstoned messages preview as "message deleted" (Phase 10); replies
+  preview the reply text (ADR-0011 preview rules).
+- A search bar filters conversations by name server-side or client-side on
+  the loaded contact list (local filtering is enough at the expected scale).
+
+**Tests:** preview derivation unit tests; screenshot with unread badges and
+previews.
+
+---
+
+### Phase 16 — Message search
+
+**Effort:** Medium
+Depends on Phase 3 (PostgreSQL full-text search).
+
+- Server: `GET /v1/search?peer=&q=` over the messages table using PostgreSQL
+  full-text search (tsvector column + GIN index added by migration); scoped
+  to the authenticated pair's conversation, paginated like history.
+- App: search entry in the chat header; results as a list, tap scrolls the
+  LazyColumn to the message (jump by index found in `rows`).
+- Case: the server stores raw text; diacritics-insensitive matching via
+  `unaccent`/`simple` config is a migration-time decision, documented then.
+
+**Tests:** server search endpoint tests (match, no-match, other-user access
+denied); app scroll-to-result logic unit tests.
+
+---
+
+### Phase 17 — Message editing
+
+**Effort:** Medium
+Depends on: Phase 5 (message state plumbing) and Phase 10 (tombstones share
+the edit-state sync path).
+
+- Server: `edited_at` on the message record; `PUT /v1/conversations/{peer}/
+  messages/{id}` re-stores content with the same idempotency rules;
+  `message-edited` WebSocket event. Only the author may edit.
+- No time window in the first cut (consistent with deletion's no-window
+  decision; ADR-0011 pattern).
+- Client: own messages get an edit action; edited bubbles show an "edited"
+  hint next to the time; the content description announces it.
+- Deletes take precedence: editing a tombstoned message is a `409`.
+
+**Tests:** edit + sync round-trip, edit-then-read interaction, screenshot of
+the edited hint.
+
+---
+
+### Phase 18 — Chat list management (pin/mute/archive)
+
+**Effort:** Medium
+
+Conversation-level state, stored per user (the server stores it on the user's
+record so all devices agree):
+
+- **Pin:** up to a handful of conversations pinned at the top of the list.
+- **Mute:** suppress notifications for the conversation; unread badges stay.
+- **Archive:** hide from the main list behind an "Archived" entry; a new
+  incoming message un-archives (WhatsApp behaviour).
+- REST surface: a user-conversation-state table (`username, peer, pinned,
+  muted, archived`) with one update endpoint; the app applies filters locally
+  from synced state.
+
+**Tests:** state-transition unit tests; list-ordering tests; screenshot with
+pinned/muted/archived states.
+
+---
+
+## Deferred indefinitely
+
+| Feature | Reason |
+|---------|--------|
+| **End-to-end encryption** | Signal Protocol changes client, server and protocol fundamentally. Would need its own ADR before any work; revisit only when there is demand. |
+| **Push notifications (FCM)** | Requires Google Play Services, conflicting with the self-hosted rule; would need its own ADR. Background delivery remains documented as a limitation. |
+| **Group chats** | The single largest structural gap versus WhatsApp/Signal, touching schema (membership), protocol (fan-out, per-member delivery), PBX (conference bridge) and UI. Kept out of this roadmap's horizon — but [ADR-0012](adr/0012-group-chat-scope.md) records compatibility constraints today's one-to-one designs must keep so a later group phase does not force rework of read receipts, reactions or deletion. |
+
+---
+
+## Architecture decisions
+
+| ADR | Area | Status |
+|-----|------|--------|
+| [ADR-0008](adr/0008-database-postgresql.md) | PostgreSQL 18 migration | Accepted (supersedes SQLite from ADR-0003/0007) |
+| [ADR-0009](adr/0009-media-storage-s3.md) | Media storage — Garage default, S3-compatible interface | Accepted |
+| [ADR-0010](adr/0010-message-delivery-states.md) | Read receipts (always-on) | Accepted |
+| [ADR-0011](adr/0011-message-extras.md) | Reactions, replies, deletion semantics | Accepted (planned) |
+| [ADR-0012](adr/0012-group-chat-scope.md) | Group chats — scope and one-to-one compatibility constraints | Accepted (scope only; implementation deferred) |
+
+---
+
+## Open decisions
+
+Remaining small choices, resolved during the phase that needs them:
+
+1. **pgweb binding details** — loopback dev-only is decided; exact compose
+   profile wiring happens in Phase 3.
+2. **HikariCP sizing** — start min=5/max=20; document tuning in
+   `docs/operations.md` after measuring real load (Phase 3).
+3. **Video call server-side settings** — codec and NAT configuration review
+   happens in Phase 12, before any client work.
+4. **Search text normalisation** — diacritics/case folding config for the
+   PostgreSQL tsvector column is decided in the Phase 16 migration.
+5. **Pin limit count** — how many conversations can be pinned at once is a
+   Phase 18 UI decision.
+
+---
+
+## Related documents
+
+- [Architecture](architecture.md) — module boundaries and data flow
+- [Protocol](protocol.md) — current API and WebSocket contracts
+- [Operations](operations.md) — deployment and configuration
+- [ADRs](adr/) — architecture decision records

@@ -63,11 +63,11 @@ are included there too.
 - `app/` — the Android application (GPL-3.0-or-later).
 - `core/` — pure-Kotlin protocol and domain models shared by app and tests.
 - `server/api/` — Kotlin/Spring Boot API, WebSockets, Thymeleaf administration
-  and SQLite (AGPL-3.0-or-later).
+  and SQLite (AGPL-3.0-or-later); PostgreSQL 18 migration planned per
+  ADR-0008.
 - `server/asterisk/` — Asterisk 22 PJSIP configuration and container image.
 - `server/compose.yaml` — prototype stack (Asterisk + API).
 - `integration-tests/sip/` — dependency-free Node SIP scripts used as oracles.
-- `docs/adr/` — architecture decision records.
 - `docs/screenshots/` — committed app screenshots, regenerated with the UI.
 - `scripts/` — development and verification scripts.
 
@@ -85,8 +85,15 @@ are included there too.
   authentication, idempotent sends, and cursor sync (promised by ADR-0003).
 - [docs/operations.md](docs/operations.md) — running the prototype stack,
   provisioning users, environment variables, and the SIP prototype test.
+- [docs/feature-plan.md](docs/feature-plan.md) — phased feature roadmap
+  (scrollbar, Bluetooth audio, PostgreSQL 18, Garage media storage, read
+  receipts, images, typing, reactions, replies, deletion, voice messages,
+  notification quick reply, previews/search, editing, chat management) with
+  the decisions behind them.
 - [docs/adr/](docs/adr/) — architecture decision records (PBX choice, SIP
-  engine, messaging, licensing, SDK levels, background call policy).
+  engine, messaging, licensing, SDK levels, background call policy; planned
+  PostgreSQL 18 migration, Garage media storage, read receipts, message
+  reactions/replies/deletion, group-chat scope constraints).
 - [SECURITY.md](SECURITY.md) — how to report vulnerabilities privately.
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — third-party components
   and licences.

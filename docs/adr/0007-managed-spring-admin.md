@@ -3,7 +3,9 @@
 ## Status
 
 Accepted. Supersedes the Ktor framework choice in ADR-0003 and the manual
-account-installation prototype workflow described by ADR-0001.
+account-installation prototype workflow described by ADR-0001. The SQLite
+persistence choice retained in this ADR is superseded by
+[ADR-0008](0008-database-postgresql.md).
 
 ## Context
 
@@ -43,9 +45,9 @@ running API and the same authentication/provisioning path.
 
 - Administrators can manage accounts and validated codec/NAT/calling
   settings without editing PBX files.
-- No transaction spans SQLite, managed files and Asterisk. Pending state and
-  explicit failure reporting are required; unreachable PBX means revocation
-  cannot guarantee immediate SIP disconnection.
+- No transaction spans the persistence store, managed files and Asterisk.
+  Pending state and explicit failure reporting are required; unreachable PBX
+  means revocation cannot guarantee immediate SIP disconnection.
 - Configuration is single-writer. Multiple API replicas against one
   database/PBX pair are unsupported.
 - SIP digest material is credential-equivalent and needs protected volumes

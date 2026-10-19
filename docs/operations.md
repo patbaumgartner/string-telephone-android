@@ -16,8 +16,12 @@ and Thymeleaf administration. It writes managed PJSIP/dialplan files to the
 
 | Service | Published ports | Persistent state |
 | --- | --- | --- |
-| API | 127.0.0.1:8080 HTTP by default; 8443 HTTPS when enabled | `api-data`: SQLite users, messages, desired PBX identities and settings |
+| API | 127.0.0.1:8080 HTTP by default; 8443 HTTPS when enabled | `api-data`: SQLite users, messages, desired PBX identities and settings (PostgreSQL + pgweb planned per ADR-0008) |
 | Asterisk | 5060/UDP SIP; 5061/TCP SIP/TLS; 10000-10100/UDP RTP | `pbx-config`: generated configuration |
+
+Planned additions (not yet implemented): a PostgreSQL `db` service with a
+loopback-only pgweb container (ADR-0008) and a Garage object store for media
+(ADR-0009) — see the [feature roadmap](feature-plan.md).
 
 AMI port 5038 is **not published**. Both services need the same private AMI
 username/password. Never expose AMI through the host or public router.
@@ -38,7 +42,7 @@ default admin passwords.
 | `PBX_AMI_PORT` | `5038` | AMI port, API only |
 | `PBX_REQUIRE_TLS` | `false` | API-managed endpoints require TLS and mandatory SRTP; omits the managed UDP transport. Enable for production with a deployment-provided `transport-tls` and no published 5060 port. |
 | `ASTERISK_MANAGED_DIR` | `data/pbx` outside Docker | Shared managed-config directory; Compose uses `/managed` in both containers |
-| `API_DB` | `data/stringtelephone.db` | SQLite database; Compose uses `/data/stringtelephone.db` |
+| `API_DB` | `data/stringtelephone.db` | SQLite database; Compose uses `/data/stringtelephone.db`. Will be replaced by `DB_*` PostgreSQL variables per ADR-0008 (not yet implemented) |
 | `API_PORT` | `8080` | Plain HTTP/WS listener |
 | `API_HTTPS_PORT` | `8443` | Additional HTTPS/WSS listener when a keystore is configured |
 | `API_TLS_KEYSTORE` | unset | PKCS12/JKS file enabling native TLS |
@@ -103,7 +107,7 @@ material, not a substitute for encrypted disks and protected backups.
 ### Command-line administration
 
 The installed CLI now authenticates to the **running API**. It never
-modifies SQLite independently or bypasses PBX synchronization.
+modifies the database independently or bypasses PBX synchronization.
 
 Inside Compose it inherits the configured admin credentials:
 
@@ -179,11 +183,11 @@ it is not a hardened public edge.
 
 ## Failure handling and reconciliation
 
-SQLite is the desired-state source. Managed files are written atomically
-per file. AMI reloads and endpoint-set verification must succeed before the
-dashboard reports synchronized. Changes that remove/replace identities first
-remove the old endpoint, then hang up its channels, then apply the final
-configuration.
+SQLite is the desired-state source (PostgreSQL planned per ADR-0008). Managed
+files are written atomically per file. AMI reloads and endpoint-set
+verification must succeed before the dashboard reports synchronized. Changes
+that remove/replace identities first remove the old endpoint, then hang up its
+channels, then apply the final configuration.
 
 There is no transaction spanning SQLite and Asterisk. If PBX access fails:
 

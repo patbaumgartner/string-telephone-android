@@ -9,15 +9,23 @@ boundaries reflect calling and messaging.
 
 ```text
 app (Android, GPL) -------> core (Kotlin models and protocol helpers)
-server/api (Spring Boot, AGPL) --> SQLite
+server/api (Spring Boot, AGPL) --> SQLite (PostgreSQL planned, ADR-0008)
 
-app -- REST + WebSocket --> server/api --> SQLite
+app -- REST + WebSocket --> server/api --> SQLite (ADR-0008: PostgreSQL)
 app -- SIP + media -----> Asterisk
 ```
 
 The server never links Android or liblinphone code. Network contracts, not
 in-process dependencies, connect the app to the deployed services. See
 [ADR-0004](adr/0004-licensing-gpl-agpl.md) for licensing boundaries.
+
+The planned feature roadmap (PostgreSQL 18, Garage-backed media storage, read
+receipts, image and voice messaging, reactions/replies/deletion, notification
+quick reply, previews/search, editing, chat management) lives in
+[feature-plan.md](feature-plan.md) with its decision records
+[ADR-0008](adr/0008-database-postgresql.md)–[ADR-0012](adr/0012-group-chat-scope.md).
+Group chats stay out of scope, but ADR-0012 records the compatibility
+constraints the one-to-one designs must keep.
 
 ## Android components
 
@@ -72,7 +80,8 @@ Sources live under `server/api/src/main/kotlin/com/patbaumgartner/stringtelephon
 - `Messages` handles persistence, idempotent sends, and cursor-based sync.
 - `WsHub` fans new-message events out to connected senders and recipients.
 - `Database` uses bounded-wait SQLite connections per operation, avoiding
-  a shared JDBC transaction across servlet/WebSocket threads.
+  a shared JDBC transaction across servlet/WebSocket threads. PostgreSQL
+  migration is planned per [ADR-0008](adr/0008-database-postgresql.md).
   `ProvisioningCli` provides `stringtelephone-provision`, which authenticates
   to the running API rather than writing the database independently.
 - `ServerTls` configures the optional TLS listener.
@@ -81,7 +90,8 @@ Sources live under `server/api/src/main/kotlin/com/patbaumgartner/stringtelephon
 container entrypoint. `server/compose.yaml` assembles the prototype stack.
 The API and PBX share the `pbx-config` volume. Only the API writes desired
 account/configuration changes; AMI is reachable privately and never published.
-There are no hard-coded accounts. See [ADR-0007](adr/0007-managed-spring-admin.md).
+There are no hard-coded accounts. See [ADR-0007](adr/0007-managed-spring-admin.md)
+and [ADR-0008](adr/0008-database-postgresql.md).
 The app derives its SIP registrar from the configured companion host; that host
 must also route to the PBX.
 
@@ -89,6 +99,7 @@ must also route to the PBX.
 
 ```text
 Compose -> AppViewModel -> repository -> REST send -> Messages -> SQLite
+                                            (PostgreSQL per ADR-0008)
                               |                         |
                               v                         v
                           ChatCache <--- WebSocket <-- WsHub

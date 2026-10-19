@@ -16,6 +16,11 @@ const required = [
   { pattern: /^\d{4}-android-sdk-levels/, area: 'SDK levels' },
   { pattern: /^\d{4}-background/, area: 'background policy' },
   { pattern: /^\d{4}-managed-spring-admin/, area: 'managed administration' },
+  { pattern: /^\d{4}-database-postgresql/, area: 'database choice' },
+  { pattern: /^\d{4}-media-storage/, area: 'media storage' },
+  { pattern: /^\d{4}-message-delivery/, area: 'message delivery states' },
+  { pattern: /^\d{4}-message-extras/, area: 'message reactions replies deletion' },
+  { pattern: /^\d{4}-group-chat/, area: 'group chat scope' },
 ];
 
 let files;
