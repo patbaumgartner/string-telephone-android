@@ -78,7 +78,12 @@ import java.time.format.TextStyle
 import java.util.Date
 
 @Composable
-internal fun ChatScreen(peer: String, viewModel: AppViewModel, onCall: (String) -> Unit = viewModel::startCall) {
+internal fun ChatScreen(
+    peer: String,
+    viewModel: AppViewModel,
+    onCall: (String) -> Unit = viewModel::startCall,
+    scrollbarVisible: Boolean? = null,
+) {
     val messages by viewModel.messagesFor(peer).collectAsState()
     val historyFailed by viewModel.historyErrorFor(peer).collectAsState()
     val contactsState by viewModel.contactsState().collectAsState()
@@ -137,6 +142,11 @@ internal fun ChatScreen(peer: String, viewModel: AppViewModel, onCall: (String) 
                         }
                     }
                 }
+                ChatScrollbar(
+                    listState = listState,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    visibleOverride = scrollbarVisible,
+                )
             }
             if (emojiPickerVisible) {
                 EmojiPickerRow(onEmoji = { viewModel.onChatInputChanged(peer, viewModel.chatInput + it) })

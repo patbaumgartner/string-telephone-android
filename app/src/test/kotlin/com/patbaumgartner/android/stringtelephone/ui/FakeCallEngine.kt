@@ -72,14 +72,38 @@ class FakeCredentialStore : CredentialStore {
  * preview data, so screenshot tests render populated screens.
  */
 /** Fixed past timestamps keep the rendered day chips and times stable (screenshots run in UTC). */
-private val PREVIEW_CHAT = listOf(
-    Triple(false, "Hello Alice! Are you free for a call later?", "2025-06-12T18:02:00Z"),
-    Triple(true, "Hi Bob, yes. After dinner works for me.", "2025-06-12T18:05:00Z"),
-    Triple(false, "Great \uD83D\uDC4D", "2025-06-13T08:41:00Z"),
-    Triple(false, "I tried earlier but you were offline. Ring me whenever you are back home.", "2025-06-13T08:42:00Z"),
-    Triple(true, "On my way now", "2025-06-13T09:10:00Z"),
-    Triple(true, "Call you in ten minutes!", "2025-06-13T09:11:00Z"),
-)
+// Long enough (well over SCROLLBAR_MIN_ITEMS rows) that the chat screenshot
+// exercises the scroll thumb; the failed/queued states stay on the last two
+// entries so the existing renders keep their status fixtures.
+private val PREVIEW_CHAT = buildList {
+    add(Triple(false, "Hello Alice! Are you free for a call later?", "2025-06-12T18:02:00Z"))
+    add(Triple(true, "Hi Bob, yes. After dinner works for me.", "2025-06-12T18:05:00Z"))
+    repeat(12) { round ->
+        add(
+            Triple(
+                false,
+                "Round ${round + 1}: anything new on your side?",
+                "2025-06-13T08:${(10 + round).toString().padStart(2, '0')}:00Z",
+            ),
+        )
+        add(
+            Triple(
+                true,
+                "Round ${round + 1}: nothing new here. Still on for the weekend?" +
+                    if (round == 6) {
+                        " This one runs long enough to wrap over several lines, keeping row heights varied."
+                    } else {
+                        ""
+                    },
+                "2025-06-13T08:${(20 + round).toString().padStart(2, '0')}:00Z",
+            ),
+        )
+    }
+    add(Triple(false, "Great 👍", "2025-06-13T09:40:00Z"))
+    add(Triple(false, "I tried earlier but you were offline. Ring me whenever you are back home.", "2025-06-13T09:41:00Z"))
+    add(Triple(true, "On my way now", "2025-06-13T10:10:00Z"))
+    add(Triple(true, "Call you in ten minutes!", "2025-06-13T10:11:00Z"))
+}
 
 object PreviewFactory {
     fun viewModel(context: Context, callEngine: CallEngine = FakeCallEngine()): AppViewModel {

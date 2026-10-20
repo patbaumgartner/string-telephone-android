@@ -63,6 +63,8 @@ class ScreenshotActivity : ComponentActivity() {
                         ScreenshotRoute.ONBOARDING.ordinal -> OnboardingScreen(viewModel)
                         ScreenshotRoute.CONTACTS.ordinal -> ContactsScreen(viewModel)
                         ScreenshotRoute.CHAT.ordinal -> ChatScreen(peer, viewModel)
+                        ScreenshotRoute.CHAT_SCROLLBAR.ordinal ->
+                            ChatScreen(peer, viewModel, scrollbarVisible = true)
                         ScreenshotRoute.CALL.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
                         else -> SettingsScreen(viewModel)
                     }
@@ -79,4 +81,4 @@ class ScreenshotActivity : ComponentActivity() {
     }
 }
 
-enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS }
+enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR }

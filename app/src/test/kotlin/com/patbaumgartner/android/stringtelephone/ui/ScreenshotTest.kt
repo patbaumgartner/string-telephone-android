@@ -54,6 +54,11 @@ class ScreenshotTest {
     }
 
     @Test
+    fun captureChatScrollbar() {
+        capture("09-chat-scrollbar", ScreenshotRoute.CHAT_SCROLLBAR)
+    }
+
+    @Test
     fun captureCall() {
         capture("04-call", ScreenshotRoute.CALL)
     }
@@ -66,7 +71,7 @@ class ScreenshotTest {
     @Test
     fun captureDarkScreens() {
         ScreenshotRoute.entries.forEach { route ->
-            capture("dark-${route.name.lowercase()}", route, dark = true)
+            capture("dark-${route.name.lowercase().replace('_', '-')}", route, dark = true)
         }
     }
 

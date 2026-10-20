@@ -77,6 +77,11 @@ No public release has been published yet.
 
 ### Added
 
+- The chat shows a scroll-position thumb on the trailing edge while scrolling:
+  it derives size and position from the live `LazyListLayoutInfo`, lingers
+  briefly after scrolling stops, then fades, and never appears in short
+  conversations. Geometry is a pure, unit-tested function
+  (`ScrollbarMetricsTest`).
 - Visual redesign: Manrope typeface (light/medium/regular/semibold, OFL) with
   a semantic Material 3 palette — cyan brand, porcelain/ink neutrals,
   coral/amber accents — with full light and dark variants, redesigned screens,

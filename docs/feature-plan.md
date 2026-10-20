@@ -28,28 +28,26 @@ behaviour, tests, protocol documentation and screenshots are merged.
 
 Phases land in this order. Each is small enough for one focused review.
 
-| # | Phase | Size | Depends on |
-|---|-------|------|------------|
-| 1 | Chat scrollbar | Small | — |
-| 2 | Bluetooth audio routing | Small | — |
-| 3 | PostgreSQL migration | Large | — |
-| 4 | Garage media storage (server only) | Medium | Phase 3 |
-| 5 | Read receipts | Medium | Phase 3 |
-| 6 | Image sharing | Medium | Phases 3+4 |
-| 7 | Typing indicators | Small | Phase 3 |
-| 8 | Emoji reactions | Medium | Phase 5 |
-| 9 | Reply/quote | Medium | Phase 5 |
-| 10 | Message deletion | Medium | Phase 5 |
-| 11 | Voice messages | Large | Phase 4 |
-| 12 | Video calls | Large | — |
-| 11 | Voice messages | Large | Phase 4 |
-| 12 | Video calls | Large | — |
-| 13 | Last-seen & multi-device polish | Medium | — |
-| 14 | Quick reply from notification | Small | Phase 5 |
-| 15 | Conversation list: previews & search | Medium | Phase 3 |
-| 16 | Message search | Medium | Phase 3 |
-| 17 | Message editing | Medium | Phases 5+10 |
-| 18 | Chat list management (pin/mute/archive) | Medium | — |
+| # | Phase | Size | Status | Depends on |
+|---|-------|------|--------|------------|
+| 1 | Chat scrollbar | Small | Done | — |
+| 2 | Bluetooth audio routing | Small | Planned | — |
+| 3 | PostgreSQL migration | Large | Planned | — |
+| 4 | Garage media storage (server only) | Medium | Planned | Phase 3 |
+| 5 | Read receipts | Medium | Planned | Phase 3 |
+| 6 | Image sharing | Medium | Planned | Phases 3+4 |
+| 7 | Typing indicators | Small | Planned | Phase 3 |
+| 8 | Emoji reactions | Medium | Planned | Phase 5 |
+| 9 | Reply/quote | Medium | Planned | Phase 5 |
+| 10 | Message deletion | Medium | Planned | Phase 5 |
+| 11 | Voice messages | Large | Planned | Phase 4 |
+| 12 | Video calls | Large | Planned | — |
+| 13 | Last-seen & multi-device polish | Medium | Planned | — |
+| 14 | Quick reply from notification | Small | Planned | Phase 5 |
+| 15 | Conversation list: previews & search | Medium | Planned | Phase 3 |
+| 16 | Message search | Medium | Planned | Phase 3 |
+| 17 | Message editing | Medium | Planned | Phases 5+10 |
+| 18 | Chat list management (pin/mute/archive) | Medium | Planned | — |
 
 Deferred indefinitely: end-to-end encryption, push notifications. A group-chat
 scope ADR keeps today's one-to-one designs group-compatible; groups themselves
@@ -63,17 +61,21 @@ are a future bet beyond this roadmap's horizon. See
 ### Phase 1 — Chat scrollbar
 
 **Effort:** Small
+**Status:** Done (2026-10-20)
 
-The `LazyColumn` in `ChatScreen.kt` has no scroll indicator. Compose has no
-built-in scrollbar for `LazyColumn`; the plan is a thin thumb on the trailing
-edge drawn from `listState.layoutInfo`, in a small `UiCommon.kt` composable so
-it stays reusable. Hide it while the list is idle
-(`derivedStateOf { listState.isScrollInProgress }`), like mainstream
-messengers. Thumb size and position derive from `listState.layoutInfo`, not
-the pre-computed `rows` list, so the thumb stays correct across day
-separators and is proportional to the real scrollable distance.
+The chat conversation previously had no scroll indicator. Compose has no
+built-in scrollbar for `LazyColumn`, so the chat now draws a thin thumb on
+the trailing edge from `listState.layoutInfo` via a reusable `ChatScrollbar`
+composable in `UiCommon.kt`. Thumb size and position derive from the live
+`LazyListLayoutInfo` (not the pre-computed `rows` list), so the thumb stays
+correct across day separators and is proportional to the real scrollable
+distance. It appears while scrolling, lingers briefly, then fades; short
+conversations (under 8 rows) never show one. The thumb is decorative by
+design: the chat auto-pins to the newest message, so a draggable handle
+would fight the auto-scroll.
 
-**Tests:** screenshot with a long conversation; drag behaviour is manual.
+**Tests:** `ScrollbarMetricsTest` (9 geometry cases), `verify-scrollbar.mjs`
+composition checks, and the refreshed chat screenshots.
 
 ---
 
