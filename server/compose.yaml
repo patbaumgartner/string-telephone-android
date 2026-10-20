@@ -77,6 +77,13 @@ services:
       API_TLS_KEYSTORE_TYPE: ${API_TLS_KEYSTORE_TYPE:-PKCS12}
       API_TLS_KEY_ALIAS: ${API_TLS_KEY_ALIAS:-}
       API_TLS_KEY_PASSWORD: ${API_TLS_KEY_PASSWORD:-}
+    healthcheck:
+      # /ready checks PostgreSQL, not just the process.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     ports:
       - "${ST_API_HTTP_BIND:-127.0.0.1}:${ST_API_HTTP_PORT:-8080}:8080"
       - "${ST_API_HTTPS_PORT:-8443}:8443"

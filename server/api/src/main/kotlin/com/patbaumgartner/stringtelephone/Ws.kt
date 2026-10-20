@@ -13,26 +13,35 @@ import org.springframework.web.socket.handler.TextWebSocketHandler
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator
 import java.util.concurrent.ConcurrentHashMap
 
-class WsHub : TextWebSocketHandler() {
+/**
+ * Registry and broadcaster for realtime sessions, plus a thin
+ * [TextWebSocketHandler] view of itself: Spring's handler registry needs a
+ * handler instance, while the services need the registry. Exposing the
+ * subclass keeps both seams without field injection or a nullable back
+ * reference.
+ */
+class WsHub(
+    private val users: Users,
+    private val presence: Presence,
+) {
     private val sessions = ConcurrentHashMap<String, ConcurrentHashMap<String, WebSocketSession>>()
-    lateinit var users: Users
-    var presence: Presence? = null
+    private val log = org.slf4j.LoggerFactory.getLogger(WsHub::class.java)
+    val handler: TextWebSocketHandler = object : TextWebSocketHandler() {
+        override fun afterConnectionEstablished(session: WebSocketSession) = this@WsHub.afterConnectionEstablished(session)
+        override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) = this@WsHub.afterConnectionClosed(session, status)
+    }
 
     fun isConnected(username: String): Boolean = sessions[username]?.isNotEmpty() == true
 
     fun hasSessions(): Boolean = sessions.values.any { it.isNotEmpty() }
 
-    override fun afterConnectionEstablished(session: WebSocketSession) {
+    private fun afterConnectionEstablished(session: WebSocketSession) {
         val user = bearerToken(session.handshakeHeaders.getFirst("Authorization"))?.let(users::findByToken)
         if (user == null) {
             session.close(CloseStatus.POLICY_VIOLATION)
             return
         }
         val firstSession = synchronized(this) {
-            if (users.findByToken(bearerToken(session.handshakeHeaders.getFirst("Authorization")).orEmpty()) == null) {
-                session.close(CloseStatus.POLICY_VIOLATION)
-                return
-            }
             session.attributes["username"] = user.username
             val userSessions = sessions.computeIfAbsent(user.username) { ConcurrentHashMap() }
             val wasEmpty = userSessions.isEmpty()
@@ -42,7 +51,7 @@ class WsHub : TextWebSocketHandler() {
         if (firstSession) presenceChanged(user.username)
     }
 
-    override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
+    private fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
         val username = session.attributes["username"] as? String ?: return
         val lastSession = synchronized(this) {
             val userSessions = sessions[username] ?: return
@@ -53,7 +62,6 @@ class WsHub : TextWebSocketHandler() {
 
     /** Pushes the subject's current presence to every other connected user. */
     fun presenceChanged(username: String) {
-        val presence = presence ?: return
         val snapshot = presence.of(username)
         val payload = Json.encodeToString(WsMessageDto("presence", Json.encodeToString(
             WsPresenceEvent(username, snapshot.presence, snapshot.observedAtEpochMs),
@@ -64,7 +72,6 @@ class WsHub : TextWebSocketHandler() {
         }
     }
 
-    @Synchronized
     fun disconnect(username: String) {
         sessions.remove(username)?.values?.forEach { session ->
             if (session.isOpen) session.close(CloseStatus.POLICY_VIOLATION)
@@ -85,7 +92,7 @@ class WsHub : TextWebSocketHandler() {
         try {
             session.sendMessage(TextMessage(payload))
         } catch (error: java.io.IOException) {
-            org.slf4j.LoggerFactory.getLogger(WsHub::class.java).warn("WebSocket delivery failed for {}", username, error)
+            log.warn("WebSocket delivery failed for {}", username, error)
             sessions[username]?.remove(session.id)
         }
     }
@@ -93,13 +100,8 @@ class WsHub : TextWebSocketHandler() {
 
 @Configuration(proxyBeanMethods = false)
 @EnableWebSocket
-class WebSocketConfiguration(private val hub: WsHub, users: Users, presence: Presence) : WebSocketConfigurer {
-    init {
-        hub.users = users
-        hub.presence = presence
-    }
-
+class WebSocketConfiguration(private val hub: WsHub) : WebSocketConfigurer {
     override fun registerWebSocketHandlers(registry: WebSocketHandlerRegistry) {
-        registry.addHandler(hub, "/v1/ws")
+        registry.addHandler(hub.handler, "/v1/ws")
     }
 }

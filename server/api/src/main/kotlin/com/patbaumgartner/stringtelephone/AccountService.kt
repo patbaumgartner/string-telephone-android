@@ -18,7 +18,8 @@ class AccountService(
     private val hub: WsHub,
 ) {
     private val log = org.slf4j.LoggerFactory.getLogger(AccountService::class.java)
-    private var appliedFingerprint: String? = null
+    private val reconcileLock = java.util.concurrent.locks.ReentrantLock()
+    @Volatile private var appliedFingerprint: String? = null
     @Volatile var syncStatus = SyncStatus(false, "PBX has not yet been reconciled")
         private set
 
@@ -33,7 +34,6 @@ class AccountService(
     // Multi-statement writes run in one transaction so a half-applied account
     // never survives; the PBX reconciliation below stays outside it — no
     // network I/O while a database transaction is open.
-    @Synchronized
     fun create(username: String, displayName: String, password: String?): AccountCredentials {
         validateUsername(username)
         require(displayName.isNotBlank() && displayName.length <= 100) { "Display name must be 1 to 100 characters" }
@@ -53,7 +53,6 @@ class AccountService(
         return AccountCredentials(username, displayName.trim(), token, secret, syncStatus.ready)
     }
 
-    @Synchronized
     fun reset(username: String, password: String?): AccountCredentials {
         val user = users.find(username) ?: throw ApiFailure(org.springframework.http.HttpStatus.NOT_FOUND, "No such user")
         val secret = password?.takeIf { it.isNotEmpty() } ?: Secrets.generate(32)
@@ -73,7 +72,6 @@ class AccountService(
         return AccountCredentials(username, user.displayName, token, secret, syncStatus.ready)
     }
 
-    @Synchronized
     fun enabled(username: String, enabled: Boolean) {
         validateUsername(username)
         tx.executeWithoutResult {
@@ -82,7 +80,11 @@ class AccountService(
                 .param(username)
                 .update()
             if (updated == 0) throw ApiFailure(org.springframework.http.HttpStatus.NOT_FOUND, "No managed account")
-            db.sql("UPDATE users SET active=0,revoked_at=? WHERE username=?")
+            // `active` follows `enabled` in the same statement: relying on the
+            // reconcile below to restore it left the account deactivated
+            // whenever the PBX was unreachable.
+            db.sql("UPDATE users SET active=?,revoked_at=? WHERE username=?")
+                .param(if (enabled) 1 else 0)
                 .param(if (enabled) null else System.currentTimeMillis())
                 .param(username)
                 .update()
@@ -92,7 +94,6 @@ class AccountService(
         if (!syncStatus.ready) throw PbxUnavailable(syncStatus.error.orEmpty())
     }
 
-    @Synchronized
     fun rename(username: String, displayName: String) {
         require(displayName.isNotBlank() && displayName.length <= 100) { "Display name must be 1 to 100 characters" }
         val updated = db.sql("UPDATE users SET display_name=? WHERE username=?")
@@ -109,7 +110,6 @@ class AccountService(
         return stored?.let { Json.decodeFromString(it) } ?: PbxSettings()
     }
 
-    @Synchronized
     fun settings(settings: PbxSettings) {
         settings.validate()
         db.sql("INSERT INTO pbx_settings(id,settings) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET settings=excluded.settings")
@@ -119,9 +119,24 @@ class AccountService(
         if (!syncStatus.ready) throw PbxUnavailable(syncStatus.error.orEmpty())
     }
 
-    @Synchronized
     @Scheduled(initialDelay = 1500, fixedDelay = 15000)
-    fun reconcile() {
+    fun reconcile() = withReconcileLock { reconcileLocked() }
+
+    /**
+     * Reconciles desired state to the PBX while holding only the reconcile
+     * lock, so one slow AMI call serialises against another reconcile without
+     * blocking unrelated admin requests.
+     */
+    fun <T> withReconcileLock(block: () -> T): T {
+        reconcileLock.lock()
+        return try {
+            block()
+        } finally {
+            reconcileLock.unlock()
+        }
+    }
+
+    private fun reconcileLocked() {
         try {
             val rows = db.sql("SELECT username,digest,enabled,kill_required FROM pbx_accounts ORDER BY username")
                 .query { rs, _ -> DesiredAccount(rs.getString(1), rs.getString(2), rs.getBoolean(3), rs.getBoolean(4)) }

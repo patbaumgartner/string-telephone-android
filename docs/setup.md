@@ -83,10 +83,13 @@ Do not commit this file or share screenshots of it. Then start the stack
 
 ```bash
 ST_API_HTTP_BIND=0.0.0.0 docker compose -f server/compose.yaml up -d --build --wait
-curl --fail http://localhost:8080/health
+curl --fail http://localhost:8080/ready
 ```
 
-The health response should be `{"status":"ok"}`. The first build downloads
+The readiness response should be `{"status":"ok","database":"up"}`. `/health`
+answers `{"status":"ok"}` without checking the database; `/ready` fails with
+`503` when PostgreSQL is down, which is the check to trust. The first build
+downloads
 Gradle dependencies and container images and can take several minutes.
 The development command explicitly exposes HTTP to the private LAN so an
 emulator or phone can reach it; never use this setting on an Internet-facing

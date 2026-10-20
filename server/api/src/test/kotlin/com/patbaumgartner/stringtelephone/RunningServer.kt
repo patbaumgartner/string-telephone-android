@@ -56,6 +56,9 @@ class RunningServer(extra: Map<String, String> = emptyMap(), val http: HttpClien
     )
     val base = "http://localhost:${context.environment.getProperty("local.server.port")}"
     val pbx = context.getBean(FakePbx::class.java)
+
+    /** Direct SQL for assertions that must observe committed state, not a DTO. */
+    val db: org.springframework.jdbc.core.simple.JdbcClient = context.getBean(org.springframework.jdbc.core.simple.JdbcClient::class.java)
     var csrf = ""
 
     fun get(path: String, bearer: String? = null): HttpResponse<String> {

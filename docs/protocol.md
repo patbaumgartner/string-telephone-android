@@ -39,6 +39,18 @@ Timestamps are epoch milliseconds. Errors are `{"error":"<reason>"}`:
 Liveness does not imply that PBX reconciliation or phone reachability works;
 inspect the admin dashboard for PBX readiness.
 
+`GET /ready` is unauthenticated readiness and probes PostgreSQL:
+
+```json
+{"status":"ok","database":"up"}
+```
+
+When the database is unreachable it answers `503` with `"database":"down"`.
+Gate deployments and the Compose `api` healthcheck on `/ready`, never on
+`/health` alone, now that PostgreSQL holds the state. `GET /actuator/health`
+exposes the same probe (plus `info`); those are the only published Actuator
+endpoints.
+
 ## User API (`/v1`)
 
 ### `GET /v1/me`

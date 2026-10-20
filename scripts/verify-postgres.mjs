@@ -155,6 +155,11 @@ const assertions = [
   [compose.includes('postgres:18-alpine'), 'compose pins postgres:18-alpine'],
   [compose.includes('pg_isready'), 'db service has a pg_isready healthcheck'],
   [
+    // The API probe must check the database, not just the process.
+    compose.includes('/ready'),
+    'api healthcheck checks database readiness',
+  ],
+  [
     // PostgreSQL 18 images mount the parent directory, not .../data.
     compose.includes('db-data:/var/lib/postgresql'),
     'db service stores data on a named volume',

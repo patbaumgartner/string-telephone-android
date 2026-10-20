@@ -74,8 +74,12 @@ No public release has been published yet.
   stays 17 for Android D8 compatibility (ADR-0005 amended)
 - `docs/protocol.md` documents the implemented `/v1/ws` realtime stream
   (Authorization bearer auth, `1008` on bad token, `new-message` envelopes)
-- The companion API now stores users, messages, desired PBX identities and
-  settings in PostgreSQL 18 instead of SQLite (ADR-0008). Access goes through
+- The API's Compose healthcheck now probes `/ready`, which runs a PostgreSQL
+  `SELECT 1` (via Spring Boot Actuator's data-source health indicator) instead
+  of trusting a process-only `/health`; enabling a revoked account now sets
+  `active` in the same statement, so a PBX outage can no longer leave the
+  account deactivated. The companion API now stores users, messages, desired
+  PBX identities and settings in PostgreSQL 18 instead of SQLite (ADR-0008). Access goes through
   Spring Boot's auto-configured HikariCP `DataSource` and `JdbcClient` with
   narrowly scoped transactions; the schema ships as forward-only Flyway
   migrations applied at startup. The compose stack gains a `db` service with a

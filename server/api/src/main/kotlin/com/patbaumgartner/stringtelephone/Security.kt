@@ -14,6 +14,16 @@ import org.springframework.security.web.SecurityFilterChain
 @Configuration(proxyBeanMethods = false)
 class SecurityConfiguration {
     @Bean
+    @Order(1)
+    fun probeSecurity(http: HttpSecurity): SecurityFilterChain {
+        http.securityMatcher("/health", "/ready", "/actuator/health", "/actuator/health/**")
+            .csrf { it.disable() }
+            .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
+            .authorizeHttpRequests { it.anyRequest().permitAll() }
+        return http.build()
+    }
+
+    @Bean
     fun adminIdentity(env: Environment): InMemoryUserDetailsManager {
         val username = env.getProperty("st.admin.username").orEmpty()
         val password = env.getProperty("st.admin.password").orEmpty()
@@ -28,7 +38,7 @@ class SecurityConfiguration {
     }
 
     @Bean
-    @Order(1)
+    @Order(2)
     fun androidSecurity(http: HttpSecurity): SecurityFilterChain {
         http.securityMatcher("/v1/me", "/v1/contacts", "/v1/conversations/**", "/v1/ws")
             // These stateless routes authenticate with bearer headers, not browser session cookies.
@@ -41,8 +51,8 @@ class SecurityConfiguration {
     @Bean
     fun adminSecurity(http: HttpSecurity): SecurityFilterChain {
         http.authorizeHttpRequests {
-            it.requestMatchers("/health", "/admin/login", "/admin/style.css", "/error").permitAll()
-                .anyRequest().hasRole("ADMIN")
+            it.requestMatchers("/admin/login", "/admin/style.css", "/error").permitAll()
+            it.anyRequest().hasRole("ADMIN")
         }.formLogin {
             it.loginPage("/admin/login").loginProcessingUrl("/admin/login")
                 .defaultSuccessUrl("/admin/", true).failureUrl("/admin/login?error").permitAll()

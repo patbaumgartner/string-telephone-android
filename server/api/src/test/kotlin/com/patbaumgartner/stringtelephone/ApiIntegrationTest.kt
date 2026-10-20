@@ -170,6 +170,41 @@ class ApiIntegrationTest {
     }
 
     @Test
+    fun `re-enabling does not depend on a reachable PBX to restore API access`() {
+        server.login()
+        val created = server.create("alice", "Alice")
+        assertEquals(200, server.post("/v1/admin/revoke-user", """{"username":"alice"}""").statusCode())
+        val token = created.getValue("apiToken").jsonPrimitive.content
+        assertEquals(401, server.get("/v1/me", token).statusCode())
+        val revoked = server.db.sql("SELECT revoked_at FROM users WHERE username='alice'")
+            .query(Long::class.javaObjectType).optional()
+        assertNotNull(revoked.orElse(null))
+        // The account is enabled again while the PBX is down: the deliberate
+        // state must be committed, not deferred to a reconcile that cannot run.
+        server.pbx.available = false
+        assertEquals(503, server.post("/v1/admin/set-enabled", """{"username":"alice","enabled":true}""").statusCode())
+        server.pbx.available = true
+        assertEquals(
+            1,
+            server.db.sql("SELECT active FROM users WHERE username='alice'").query(Int::class.java).single(),
+        )
+        assertNull(
+            server.db.sql("SELECT revoked_at FROM users WHERE username='alice'")
+                .query(Long::class.javaObjectType).optional().orElse(null),
+        )
+        assertEquals(200, server.get("/v1/me", token).statusCode())
+    }
+
+    @Test
+    fun `ready reports database reachability while health stays a process check`() {
+        assertEquals(200, server.get("/health").statusCode())
+        val ready = server.get("/ready")
+        assertEquals(200, ready.statusCode())
+        assertTrue(ready.body().contains("\"database\":\"up\""))
+        assertEquals(200, server.get("/actuator/health").statusCode())
+    }
+
+    @Test
     fun `PBX outage is explicit pending creation retains one time credentials and retry reconciles desired state`() {
         server.login()
         server.pbx.available = false

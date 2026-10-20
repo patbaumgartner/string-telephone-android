@@ -11,16 +11,43 @@ fun bearerToken(header: String?): String? =
 class ApiFailure(val status: HttpStatus, message: String) : RuntimeException(message)
 
 @RestController
-class ApiController(private val users: Users, private val messages: Messages, private val presence: Presence) {
+class ApiController(
+    private val users: Users,
+    private val messages: Messages,
+    private val presence: Presence,
+    private val healthProbe: HealthProbe,
+    private val rateLimiter: RateLimiter,
+) {
     @GetMapping("/health")
     fun health() = mapOf("status" to "ok")
 
-    private fun principal(request: HttpServletRequest): UserRecord =
-        bearerToken(request.getHeader("Authorization"))?.let(users::findByToken)
+    /**
+     * Liveness plus database reachability, the same probe as `/actuator/health`
+     * below. Returns 503 when PostgreSQL is unreachable, so uptime checks and
+     * rolling deployments never route to an instance whose DataSource is dead.
+     */
+    @GetMapping("/ready")
+    fun ready(): ResponseEntity<Map<String, String>> =
+        if (healthProbe.isReachable()) {
+            ResponseEntity.ok(mapOf("status" to "ok", "database" to "up"))
+        } else {
+            ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(mapOf("status" to "unavailable", "database" to "down"))
+        }
+
+    private fun principal(request: HttpServletRequest, attemptKey: String? = null): UserRecord {
+        val token = bearerToken(request.getHeader("Authorization"))
+        if (attemptKey != null && !rateLimiter.allow(attemptKey)) {
+            throw RateLimited("Too many authentication attempts; retry in a minute")
+        }
+        return token?.let(users::findByToken)
             ?: throw ApiFailure(HttpStatus.UNAUTHORIZED, "unauthorized")
+    }
 
     @GetMapping("/v1/me")
-    fun me(request: HttpServletRequest): MeDto = principal(request).let { MeDto(it.username, it.displayName) }
+    fun me(request: HttpServletRequest): MeDto =
+        principal(request, attemptKey = "me:" + remoteAddressOf(request.remoteAddr))
+            .let { MeDto(it.username, it.displayName) }
 
     @GetMapping("/v1/contacts")
     fun contacts(request: HttpServletRequest): ContactsDto {
@@ -65,19 +92,3 @@ class ApiController(private val users: Users, private val messages: Messages, pr
 
 private fun messageDto(record: MessageRecord) =
     MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey)
-
-@RestControllerAdvice
-class ApiErrors {
-    @ExceptionHandler(IllegalArgumentException::class)
-    fun invalid(error: IllegalArgumentException): ResponseEntity<ErrorDto> = ResponseEntity.badRequest().body(ErrorDto(error.message.orEmpty()))
-
-    @ExceptionHandler(PbxUnavailable::class)
-    fun pbx(error: PbxUnavailable): ResponseEntity<ErrorDto> = ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ErrorDto(error.message.orEmpty()))
-
-    @ExceptionHandler(ApiFailure::class)
-    fun failure(error: ApiFailure): ResponseEntity<ErrorDto> = ResponseEntity.status(error.status).body(ErrorDto(error.message.orEmpty()))
-
-    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException::class,
-        org.springframework.web.method.annotation.MethodArgumentTypeMismatchException::class)
-    fun malformed(): ResponseEntity<ErrorDto> = ResponseEntity.badRequest().body(ErrorDto("invalid request"))
-}

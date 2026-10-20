@@ -20,6 +20,10 @@ socket, shell access or privileged container is required.
 | --- | --- | --- |
 | API | 127.0.0.1:8080 HTTP by default; 8443 HTTPS when enabled | none — application state lives in `db` |
 | PostgreSQL (`db`) | none; 5432 is internal to the compose network | `db-data`: users, messages, desired PBX identities and settings |
+
+The API's Compose healthcheck probes `/ready`, which checks PostgreSQL rather
+than just the process; `/health` stays a plain liveness alias, and
+`/actuator/health` exposes the database probe for external monitoring.
 | Asterisk | 5060/UDP SIP; 5061/TCP SIP/TLS; 10000-10100/UDP RTP | `pbx-config`: generated configuration |
 
 Planned addition (not yet implemented): a Garage object store for media

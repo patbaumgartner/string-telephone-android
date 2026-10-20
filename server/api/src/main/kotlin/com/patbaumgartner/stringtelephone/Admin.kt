@@ -1,15 +1,26 @@
 package com.patbaumgartner.stringtelephone
 
 import jakarta.servlet.http.HttpServletResponse
+import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.stereotype.Controller
 import org.springframework.ui.Model
 import org.springframework.web.bind.annotation.*
 
-data class AdminCreateRequest(val username: String, val displayName: String, val sipPassword: String? = null)
-data class ResetRequest(val username: String, val sipPassword: String? = null)
-data class EnabledRequest(val username: String, val enabled: Boolean)
+data class AdminCreateRequest(
+    @field:jakarta.validation.constraints.NotBlank val username: String,
+    @field:jakarta.validation.constraints.NotBlank val displayName: String,
+    val sipPassword: String? = null,
+)
+data class ResetRequest(
+    @field:jakarta.validation.constraints.NotBlank val username: String,
+    val sipPassword: String? = null,
+)
+data class EnabledRequest(
+    @field:jakarta.validation.constraints.NotBlank val username: String,
+    val enabled: Boolean,
+)
 
 @RestController
 @RequestMapping("/v1/admin")
@@ -18,22 +29,22 @@ class AdminApi(private val accounts: AccountService, private val pbx: PbxGateway
     fun list() = mapOf("users" to accounts.list())
 
     @PostMapping("/create-user")
-    fun create(@RequestBody body: AdminCreateRequest): ResponseEntity<AccountCredentials> {
+    fun create(@Valid @RequestBody body: AdminCreateRequest): ResponseEntity<AccountCredentials> {
         val result = accounts.create(body.username, body.displayName, body.sipPassword)
         return ResponseEntity.status(if (result.ready) HttpStatus.CREATED else HttpStatus.ACCEPTED).body(result)
     }
 
     @PostMapping("/reset-user")
-    fun reset(@RequestBody body: ResetRequest) = accounts.reset(body.username, body.sipPassword)
+    fun reset(@Valid @RequestBody body: ResetRequest) = accounts.reset(body.username, body.sipPassword)
 
     @PostMapping("/revoke-user")
-    fun revoke(@RequestBody body: RevokeRequest): RevokeResponse {
+    fun revoke(@Valid @RequestBody body: RevokeRequest): RevokeResponse {
         accounts.enabled(body.username, false)
         return RevokeResponse(body.username, true)
     }
 
     @PostMapping("/set-enabled")
-    fun enabled(@RequestBody body: EnabledRequest): Map<String, Boolean> {
+    fun enabled(@Valid @RequestBody body: EnabledRequest): Map<String, Boolean> {
         accounts.enabled(body.username, body.enabled)
         return mapOf("enabled" to body.enabled)
     }

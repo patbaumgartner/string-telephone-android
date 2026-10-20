@@ -10,7 +10,10 @@ class PresenceTest {
         applied = listOf(PbxAccount("bob", "digest"), PbxAccount("carol", "digest"))
     }
     private var now = 1_000L
-    private val presence = Presence(pbx, WsHub(), Users(TestPostgres.newJdbcClient()), clock = { now }, cacheMs = 5_000)
+    private val users = Users(TestPostgres.newJdbcClient())
+    private val dummyPresence = Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, object : Presence(pbx, object : WsHub(users, null!!), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000), users, clock = { 0L }, cacheMs = 5_000)
+    private val hub = WsHub(users, dummyPresence)
+    private val presence = Presence(pbx, hub, users, clock = { now }, cacheMs = 5_000)
 
     @Test
     fun `registered endpoints are online and unavailable endpoints offline`() {

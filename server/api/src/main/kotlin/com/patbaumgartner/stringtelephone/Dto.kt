@@ -27,7 +27,11 @@ data class MessageDto(
 )
 
 @kotlinx.serialization.Serializable
-data class SendMessageRequest(val recipient: String, val content: String, val clientKey: String)
+data class SendMessageRequest(
+    @field:jakarta.validation.constraints.NotBlank val recipient: String,
+    @field:jakarta.validation.constraints.NotBlank val content: String,
+    @field:jakarta.validation.constraints.NotBlank val clientKey: String,
+)
 
 @kotlinx.serialization.Serializable
 data class MessagesPageDto(val messages: List<MessageDto>, val nextCursor: String?)
