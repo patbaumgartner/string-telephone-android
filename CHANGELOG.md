@@ -74,6 +74,15 @@ No public release has been published yet.
   stays 17 for Android D8 compatibility (ADR-0005 amended)
 - `docs/protocol.md` documents the implemented `/v1/ws` realtime stream
   (Authorization bearer auth, `1008` on bad token, `new-message` envelopes)
+- The companion API now stores users, messages, desired PBX identities and
+  settings in PostgreSQL 18 instead of SQLite (ADR-0008). Access goes through
+  Spring Boot's auto-configured HikariCP `DataSource` and `JdbcClient` with
+  narrowly scoped transactions; the schema ships as forward-only Flyway
+  migrations applied at startup. The compose stack gains a `db` service with a
+  mandatory `DB_PASSWORD` (`API_DB` and the `api-data` volume are removed), an
+  optional loopback-only pgweb developer overlay, and the server tests run on
+  Testcontainers PostgreSQL locally and in CI. Fresh installations only — no
+  SQLite import (ADR-0007/0008 semantics).
 
 ### Added
 

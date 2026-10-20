@@ -41,12 +41,16 @@ under the Apache License 2.0.
 - Spring Boot, Spring Framework, Spring Security, Thymeleaf, Kotlin,
   kotlinx.serialization, kotlinx.coroutines: Apache-2.0.
 - Logback: EPL-1.0 / LGPL-2.1 dual licence.
-- sqlite-jdbc (Xerial): Apache-2.0; bundles SQLite, public domain.
+- HikariCP connection pool and Flyway migration runner: Apache-2.0.
+- PostgreSQL JDBC driver: BSD-2-Clause.
+- Testcontainers (test-time only): MIT.
 
 ## Server-side images (not distributed to app users)
 
 - Asterisk 22 LTS container image `andrius/asterisk` (GPL-2.0 components
   server-side only; never distributed to app users).
+- PostgreSQL 18 container image `postgres` (PostgreSQL License, BSD-style).
+- pgweb container image `sosedoff/pgweb` (MIT), developer overlay only.
 - Node.js-based SIP test scripts in `integration-tests/` are original to this
   project and licensed with the repository (GPL-3.0-or-later). SIPp, if later
   adopted for load testing, is GPL-2.0 and test tooling only.

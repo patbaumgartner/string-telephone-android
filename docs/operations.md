@@ -8,23 +8,28 @@ network and use HTTPS for anything beyond loopback development.
 
 ## Stack layout
 
-`server/compose.yaml` starts a Kotlin/Spring Boot companion API and
-Asterisk 22.11.0. The API provides REST, WebSockets, Spring Security login
-and Thymeleaf administration. It writes managed PJSIP/dialplan files to the
-`pbx-config` volume and reloads Asterisk over its private Manager Interface
-(AMI). No Docker socket, shell access or privileged container is required.
+`server/compose.yaml` starts a Kotlin/Spring Boot companion API, PostgreSQL 18
+and Asterisk 22.11.0. The API provides REST, WebSockets, Spring Security login
+and Thymeleaf administration. It stores users, messages, desired PBX
+identities and settings in the `db` service (schema applied by Flyway when the
+API starts), writes managed PJSIP/dialplan files to the `pbx-config` volume
+and reloads Asterisk over its private Manager Interface (AMI). No Docker
+socket, shell access or privileged container is required.
 
 | Service | Published ports | Persistent state |
 | --- | --- | --- |
-| API | 127.0.0.1:8080 HTTP by default; 8443 HTTPS when enabled | `api-data`: SQLite users, messages, desired PBX identities and settings (PostgreSQL + pgweb planned per ADR-0008) |
+| API | 127.0.0.1:8080 HTTP by default; 8443 HTTPS when enabled | none — application state lives in `db` |
+| PostgreSQL (`db`) | none; 5432 is internal to the compose network | `db-data`: users, messages, desired PBX identities and settings |
 | Asterisk | 5060/UDP SIP; 5061/TCP SIP/TLS; 10000-10100/UDP RTP | `pbx-config`: generated configuration |
 
-Planned additions (not yet implemented): a PostgreSQL `db` service with a
-loopback-only pgweb container (ADR-0008) and a Garage object store for media
-(ADR-0009) — see the [feature roadmap](feature-plan.md).
+Planned addition (not yet implemented): a Garage object store for media
+(ADR-0009) — see the [feature roadmap](feature-plan.md). For interactive
+database inspection a loopback-only pgweb container ships in the developer
+overlay `server/compose.dev.yaml`, never in the production stack.
 
-AMI port 5038 is **not published**. Both services need the same private AMI
-username/password. Never expose AMI through the host or public router.
+AMI port 5038 is **not published**. The API and Asterisk share the same
+private AMI username/password. Never expose AMI through the host or public
+router.
 
 ## Environment variables
 
@@ -42,7 +47,11 @@ default admin passwords.
 | `PBX_AMI_PORT` | `5038` | AMI port, API only |
 | `PBX_REQUIRE_TLS` | `false` | API-managed endpoints require TLS and mandatory SRTP; omits the managed UDP transport. Enable for production with a deployment-provided `transport-tls` and no published 5060 port. |
 | `ASTERISK_MANAGED_DIR` | `data/pbx` outside Docker | Shared managed-config directory; Compose uses `/managed` in both containers |
-| `API_DB` | `data/stringtelephone.db` | SQLite database; Compose uses `/data/stringtelephone.db`. Will be replaced by `DB_*` PostgreSQL variables per ADR-0008 (not yet implemented) |
+| `DB_PASSWORD` | required | PostgreSQL password, shared by the `db` service and the API; the API fails startup without it (`openssl rand -hex 32`) |
+| `DB_NAME` | `stringtelephone` | PostgreSQL database name |
+| `DB_USER` | `stringtelephone` | PostgreSQL user |
+| `DB_HOST` | `localhost` (`db` under Compose) | PostgreSQL host as seen by the API |
+| `DB_PORT` | `5432` | PostgreSQL port |
 | `API_PORT` | `8080` | Plain HTTP/WS listener |
 | `API_HTTPS_PORT` | `8443` | Additional HTTPS/WSS listener when a keystore is configured |
 | `API_TLS_KEYSTORE` | unset | PKCS12/JKS file enabling native TLS |
@@ -184,13 +193,13 @@ it is not a hardened public edge.
 
 ## Failure handling and reconciliation
 
-SQLite is the desired-state source (PostgreSQL planned per ADR-0008). Managed
+PostgreSQL is the desired-state source (ADR-0008). Managed
 files are written atomically per file. AMI reloads and endpoint-set
 verification must succeed before the dashboard reports synchronized. Changes
 that remove/replace identities first remove the old endpoint, then hang up its
 channels, then apply the final configuration.
 
-There is no transaction spanning SQLite and Asterisk. If PBX access fails:
+There is no transaction spanning PostgreSQL and Asterisk. If PBX access fails:
 
 - The dashboard shows an error and the pending state, never a success message.
 - New/reset identities remain API-inactive until the change is confirmed.
@@ -207,19 +216,39 @@ Inspect without printing credentials:
 
 ```bash
 docker compose -f server/compose.yaml ps
-docker compose -f server/compose.yaml logs --tail=100 api asterisk
+docker compose -f server/compose.yaml logs --tail=100 api asterisk db
 docker compose -f server/compose.yaml exec asterisk asterisk -rx 'pjsip show endpoints'
 ```
 
 ## Backups, upgrades and fresh installation
 
-Stop the API while taking consistent backups of `api-data` and `pbx-config`,
-and protect the backups as credentials. Keep admin/AMI environment secrets
-and certificates separately. After restoring both volumes, start the stack
-and reconcile; desired PBX configuration can be rebuilt from the database.
+Take a logical `pg_dump` of the database and a filesystem copy of the
+`pbx-config` volume; protect the backups as credentials. Keep
+admin/AMI/database environment secrets and certificates separately. Compose
+reads `server/.env` itself and never exports it, so load it before dumping:
+
+```bash
+set -a; . server/.env; set +a
+docker compose -f server/compose.yaml exec -T -e PGPASSWORD="$DB_PASSWORD" \
+  db pg_dump -U "${DB_USER:-stringtelephone}" \
+  "${DB_NAME:-stringtelephone}" > stringtelephone.sql
+```
+
+`pg_dump` is consistent while the stack runs; stop the API only if you need a
+frozen point in time. After restoring the dump and the `pbx-config` volume,
+start the stack and reconcile; desired PBX configuration can be rebuilt from
+the database.
+
+The `db` service's bootstrap user (`DB_USER`) is also the cluster superuser,
+because the official image creates it that way. The API only needs schema
+ownership, so treat the API container as trusted: it can reach cluster admin
+through its own connection. A split app/admin role is future hardening; until
+then, never share the database password with anything but this stack.
 
 This version supports a **fresh installation**, not automatic import of
-legacy hand-written PBX accounts. Existing tables/messages are not deleted
+legacy hand-written PBX accounts and not import of the old file-based
+database (ADR-0008): keep an old `api-data` volume (now unused) for the record
+and start a new database. Existing tables/messages are not deleted
 on startup, but unmanaged users are not silently assigned new SIP passwords.
 Back up an old installation and retain its volumes before switching.
 

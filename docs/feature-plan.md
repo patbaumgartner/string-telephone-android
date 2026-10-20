@@ -1,7 +1,7 @@
 # String Telephone — Feature Roadmap
 
 Date: 2026-10-20
-Status: Planning (decisions recorded; phases not started)
+Status: In progress (phases 1 to 3 done; see the table below)
 
 This document captures feature requests, the decisions behind them, and the
 planned phases. It is a working document; status updates live in GitHub issues
@@ -32,7 +32,7 @@ Phases land in this order. Each is small enough for one focused review.
 |---|-------|------|--------|------------|
 | 1 | Chat scrollbar | Small | Done | — |
 | 2 | Bluetooth audio routing | Small | Done | — |
-| 3 | PostgreSQL migration | Large | Planned | — |
+| 3 | PostgreSQL migration | Large | Done | — |
 | 4 | Garage media storage (server only) | Medium | Planned | Phase 3 |
 | 5 | Read receipts | Medium | Planned | Phase 3 |
 | 6 | Image sharing | Medium | Planned | Phases 3+4 |
@@ -112,24 +112,35 @@ scripts `verify-audio-route.mjs`, `verify-call-ui-routes.mjs` and
 
 ### Phase 3 — PostgreSQL
 
+**Effort:** Large
+**Status:** Done (2026-10-20)
+
 Implements [ADR-0008](adr/0008-database-postgresql.md).
 
-**Effort:** Medium
-
-- Replace per-operation SQLite connections with HikariCP + PostgreSQL JDBC;
-  keep the `read`/`tx` seam so callers do not change.
-- Explicit forward-only SQL migrations checked into the repository (no ORM).
-- Compose gains a stock `postgres:18-alpine` service with a named volume.
-- A **pgweb** container joins the dev compose stack only, bound to loopback
-  (never published, never in production docs) — same policy as the plain HTTP
-  API port.
-- Configuration via `DB_*` environment variables; `API_DB` is removed.
+- Persistence moves to PostgreSQL through Spring Boot: an auto-configured
+  HikariCP `DataSource` (`spring.datasource.*` from `DB_*` environment
+  variables) and Spring's `JdbcClient` replace the hand-rolled `Database`
+  class; multi-statement writes run inside narrowly scoped
+  `TransactionTemplate` transactions, never across PBX network calls, and all
+  statement values are bound with `param()`.
+- Explicit forward-only SQL migrations checked into the repository, applied by
+  Spring Boot's Flyway auto-configuration at startup (no ORM).
+- Compose gains a stock `postgres:18-alpine` service with a named volume and a
+  health-gated API startup.
+- A **pgweb** container lives in a separate developer overlay
+  (`server/compose.dev.yaml`), bound to loopback (never published, never in
+  production docs) — same policy as the plain HTTP API port.
+- Configuration via `DB_*` environment variables; `API_DB` is removed, and
+  `DB_PASSWORD` is mandatory (the API fails startup without it).
 - **Fresh install only:** no SQLite import tooling. Existing volumes stay
   untouched; operators start a new database (ADR-0007 semantics).
-- Integration tests run against a real PostgreSQL instance (Testcontainers).
+- Integration tests run against real PostgreSQL via Testcontainers, locally and
+  in CI.
 
-**Tests:** API integration tests move to PostgreSQL; message idempotency and
-cursor pagination verified against the new engine.
+**Tests:** API integration tests run on PostgreSQL (Testcontainers); message
+idempotency and cursor pagination are verified against the new engine; the
+`scripts/verify-postgres.mjs` oracle checks sources, build, configuration,
+compose, tests and guidance docs.
 
 ---
 
@@ -426,10 +437,11 @@ pinned/muted/archived states.
 
 Remaining small choices, resolved during the phase that needs them:
 
-1. **pgweb binding details** — loopback dev-only is decided; exact compose
-   profile wiring happens in Phase 3.
-2. **HikariCP sizing** — start min=5/max=20; document tuning in
-   `docs/operations.md` after measuring real load (Phase 3).
+1. **pgweb binding details** — decided in Phase 3: a separate developer
+   overlay (`server/compose.dev.yaml`), no compose profile, loopback only.
+2. **HikariCP sizing** — resolved in Phase 3: Spring Boot's defaults (pool
+   max 10) are enough for the prototype; tune `spring.datasource.hikari.*`
+   and document it in `docs/operations.md` once real load is measured.
 3. **Video call server-side settings** — codec and NAT configuration review
    happens in Phase 12, before any client work.
 4. **Search text normalisation** — diacritics/case folding config for the

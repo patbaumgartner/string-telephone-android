@@ -6,10 +6,16 @@ Accepted. Supersedes the SQLite storage choice in ADR-0003 and retained by
 ADR-0007 ("Keep SQLite and the existing messaging/idempotency behavior" is
 reversed by this decision).
 
+Amended 2026-10-20: persistence access moves from the hand-rolled `Database`
+class with its `read`/`tx` seam to a Spring Boot auto-configured HikariCP
+`DataSource` plus `JdbcClient`, with narrowly scoped `TransactionTemplate`
+transactions; migrations run through Spring Boot's Flyway auto-configuration.
+
 ## Context
 
-The companion API currently stores users, messages, PBX account state and PBX
-settings in SQLite (`server/api/.../Database.kt`). SQLite was adequate for the
+At the time of this decision the companion API stored users, messages, PBX
+account state and PBX settings in SQLite (`server/api/.../Database.kt`, since
+removed). SQLite was adequate for the
 prototype: a single API process, low write concurrency, and one writer at a
 time. The planned feature set changes the workload:
 
@@ -21,9 +27,10 @@ time. The planned feature set changes the workload:
   PBX reconciliation retries every 15 seconds, message sends, read marks).
 
 SQLite's single-writer model means every write serialises through one lock.
-The current code already works around this with bounded-wait connections per
-operation (see `Database.kt`), but that approach caps throughput and makes
-horizontal scaling impossible. Operational tooling (point-in-time recovery,
+The code at the time of this decision worked around this with bounded-wait
+connections per operation (the original `Database.kt`, now in git history),
+but that approach caps throughput and makes horizontal scaling impossible.
+Operational tooling (point-in-time recovery,
 replication, monitoring) is also weaker than for a client/server database.
 
 Options considered:
@@ -43,20 +50,28 @@ Options considered:
 Use **PostgreSQL 18** (current major with support until 2030) as the
 companion API's only datastore.
 
-- Access via HikariCP connection pooling and the PostgreSQL JDBC driver;
-  replace the per-operation `DriverManager` connections in `Database` with a
-  pooled `DataSource`. The `read`/`tx` seam stays so callers do not change.
+- Access via a Spring Boot auto-configured HikariCP `DataSource`
+  (`spring.datasource.*` from `DB_*` environment variables) and Spring's
+  `JdbcClient`; the per-operation `DriverManager` connections in `Database`
+  are gone. Multi-statement writes run inside narrowly scoped
+  `TransactionTemplate` transactions — PBX network calls never hold a
+  transaction open. All statement values are bound with `param()`/`params()`,
+  never concatenated into SQL. *(Amended 2026-10-20: the earlier `read`/`tx`
+  seam decision is replaced by this access pattern.)*
 - Schema is created and migrated by explicit SQL migrations checked into the
-  repository (numbered, forward-only). No ORM is introduced.
+  repository (numbered, forward-only, `server/api/src/main/resources/db/migration`),
+  applied by Spring Boot's Flyway auto-configuration at startup. No ORM is
+  introduced.
 - All existing invariants are preserved: server-assigned opaque message IDs,
   authorship derived from the authenticated principal, idempotent sends keyed
   on `(sender, recipient, client_key)`, and cursor pagination on
   `(created_at, id)`.
-- Deployment: `docker-compose.yaml` gains a `db` service (`postgres:18-alpine`
-  with a named volume) plus a **pgweb** container for database inspection,
-  bound to loopback in the development stack only — same exposure policy as
-  the plain HTTP API port; never published in production docs. The API
-  configures `DB_*` environment variables (replacing `API_DB`).
+- Deployment: `server/compose.yaml` gains a `db` service (`postgres:18-alpine`
+  with a named volume) plus a **pgweb** container for database inspection in a
+  separate developer overlay (`server/compose.dev.yaml`), bound to loopback —
+  same exposure policy as the plain HTTP API port; never published in
+  production docs. The API configures `DB_*` environment variables (replacing
+  `API_DB`).
   SQLite support is removed rather than kept behind a flag — one datastore
   keeps the tested path honest.
 - Fresh-installation semantics from ADR-0007 apply: no automatic migration of
@@ -72,8 +87,7 @@ companion API's only datastore.
   forbids running two API writers against one PBX.
 - Deployment requires one more service and its credentials; `docs/operations.md`
   and `docs/setup.md` must document backup and upgrade steps.
-- Integration tests run against a real PostgreSQL instance (Testcontainers or
-  a compose-provided database) so behaviour matches production, not an H2
-  emulation.
+- Integration tests run against a real PostgreSQL instance via Testcontainers
+  so behaviour matches production, not an H2 emulation.
 - The schema-migration directory becomes part of the reviewed change surface:
   protocol changes that touch persistence now ship with a migration.

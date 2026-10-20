@@ -25,12 +25,16 @@ dependencies {
     implementation(kotlin("reflect"))
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.sqlite.jdbc)
+    implementation("org.springframework.boot:spring-boot-starter-jdbc")
+    implementation("org.springframework.boot:spring-boot-starter-flyway")
+    implementation("org.postgresql:postgresql")
+    implementation("org.flywaydb:flyway-database-postgresql")
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
+    testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.kotlinx.coroutines.test)
 }
 

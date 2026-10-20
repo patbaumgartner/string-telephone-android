@@ -1,21 +1,16 @@
 package com.patbaumgartner.stringtelephone
 
-import java.nio.file.Files
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class PresenceTest {
-    private val db = Database(Files.createTempDirectory("st-presence").resolve("test.db").toString())
     private val pbx = FakePbx().apply {
         applied = listOf(PbxAccount("bob", "digest"), PbxAccount("carol", "digest"))
     }
     private var now = 1_000L
-    private val presence = Presence(pbx, WsHub(), Users(db), clock = { now }, cacheMs = 5_000)
-
-    @AfterTest fun tearDown() = db.close()
+    private val presence = Presence(pbx, WsHub(), Users(TestPostgres.newJdbcClient()), clock = { now }, cacheMs = 5_000)
 
     @Test
     fun `registered endpoints are online and unavailable endpoints offline`() {

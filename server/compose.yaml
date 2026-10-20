@@ -27,12 +27,40 @@ services:
       timeout: 5s
       retries: 12
 
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-stringtelephone}
+      POSTGRES_USER: ${DB_USER:-stringtelephone}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your environment or .env}
+    volumes:
+      # PostgreSQL 18 image layout: mount the parent directory, data lives in
+      # a versioned subdirectory (see docker-library/postgres#37).
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      # -h 127.0.0.1 probes the real TCP listener, not the entrypoint's
+      # temporary setup socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${DB_USER:-stringtelephone} -d ${DB_NAME:-stringtelephone}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - pbx
+
   api:
     build:
       context: ..
       dockerfile: server/api/Dockerfile
     environment:
-      API_DB: /data/stringtelephone.db
+      # PostgreSQL connection (ADR-0008) — replaces the former file-database
+      # settings.
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-stringtelephone}
+      DB_USER: ${DB_USER:-stringtelephone}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your environment or .env}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in your environment or .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in your environment or .env}
       PBX_AMI_HOST: asterisk
@@ -53,18 +81,20 @@ services:
       - "${ST_API_HTTP_BIND:-127.0.0.1}:${ST_API_HTTP_PORT:-8080}:8080"
       - "${ST_API_HTTPS_PORT:-8443}:8443"
     volumes:
-      - api-data:/data
       # Read-only certs / optional keystore for native TLS.
       - ${ST_CERTS_DIR:-./certs}:/certs:ro
       - pbx-config:/managed
     depends_on:
       asterisk:
         condition: service_healthy
+      db:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - pbx
 
 volumes:
-  api-data:
+  db-data:
   pbx-config:
 
 networks:

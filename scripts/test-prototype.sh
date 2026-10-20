@@ -23,6 +23,7 @@ STATE_FILE="$(mktemp)"
 export ADMIN_USERNAME="prototype-operator"
 export ADMIN_PASSWORD="prototest-admin-maple-robin-lantern-pebble-willow-1234"
 export PBX_AMI_PASSWORD="prototest-manager-maple-robin-lantern-pebble-willow-1234"
+export DB_PASSWORD="prototest-db-maple-robin-lantern-pebble-willow-1234"
 SIP_PASSWORD="prototest-robin-maple-meadow-lantern-pebble-willow-scarlet-1234"
 
 # Prints two host ports for the companion API (plain HTTP, then HTTPS),
@@ -54,7 +55,7 @@ cleanup() {
     if [[ "$result" -ne 0 ]]; then
         if [[ -n "$CALLER_LOG" && -f "$CALLER_LOG" ]]; then tail -30 "$CALLER_LOG" >&2; fi
         if [[ -n "$CALLEE_LOG" && -f "$CALLEE_LOG" ]]; then tail -30 "$CALLEE_LOG" >&2; fi
-        docker compose -f "$COMPOSE_FILE" -p "$PROJECT" logs --tail=70 api asterisk >&2 || true
+        docker compose -f "$COMPOSE_FILE" -p "$PROJECT" logs --tail=70 api asterisk db >&2 || true
     fi
     docker compose -f "$COMPOSE_FILE" -p "$PROJECT" down -v --remove-orphans >/dev/null 2>&1 || true
     if [[ -n "$CERTS_TMP" ]]; then

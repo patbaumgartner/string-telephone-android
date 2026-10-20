@@ -11,7 +11,6 @@ import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
-import java.nio.file.Files
 import java.time.Duration
 import kotlinx.serialization.json.*
 import kotlin.test.assertEquals
@@ -50,11 +49,10 @@ class FakePbxConfiguration {
 
 class RunningServer(extra: Map<String, String> = emptyMap(), val http: HttpClient = HttpClient.newBuilder()
     .cookieHandler(CookieManager(null, CookiePolicy.ACCEPT_ORIGINAL_SERVER)).connectTimeout(Duration.ofSeconds(5)).build()) : AutoCloseable {
-    private val directory = Files.createTempDirectory("st-spring-test")
     val context = SpringApplicationBuilder(StringTelephoneServer::class.java, FakePbxConfiguration::class.java).run(
-        *(mapOf("server.port" to "0", "server.shutdown" to "immediate", "st.database" to directory.resolve("test.db").toString(),
+        *(mapOf("server.port" to "0", "server.shutdown" to "immediate",
             "st.admin.username" to "operator", "st.admin.password" to TEST_PASSPHRASE, "st.pbx.password" to TEST_PASSPHRASE,
-            "logging.level.root" to "ERROR") + extra).map { "--${it.key}=${it.value}" }.toTypedArray(),
+            "logging.level.root" to "ERROR") + TestPostgres.springArgs() + extra).map { "--${it.key}=${it.value}" }.toTypedArray(),
     )
     val base = "http://localhost:${context.environment.getProperty("local.server.port")}"
     val pbx = context.getBean(FakePbx::class.java)
@@ -96,8 +94,6 @@ class RunningServer(extra: Map<String, String> = emptyMap(), val http: HttpClien
 
     override fun close() {
         context.close()
-        Files.list(directory).use { files -> files.forEach { Files.delete(it) } }
-        Files.delete(directory)
     }
 }
 

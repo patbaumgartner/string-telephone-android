@@ -108,7 +108,8 @@ Commit the refreshed `docs/screenshots/` images together with the UI change
 so the README stays truthful. If a screenshot change is intentional, mention
 it in the pull request; if it is unexpected, investigate before merging.
 
-Docker is required only for the SIP prototype:
+Docker is required for the server test suite (Testcontainers starts a
+PostgreSQL 18 container for `:server:api:test`) and for the SIP prototype:
 
 The prototype script uses a uniquely named `st-admin-test-*` project and
 deletes only its own throwaway volumes. Stop a demo first to free SIP/RTP

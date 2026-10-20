@@ -9,9 +9,9 @@ boundaries reflect calling and messaging.
 
 ```text
 app (Android, GPL) -------> core (Kotlin models and protocol helpers)
-server/api (Spring Boot, AGPL) --> SQLite (PostgreSQL planned, ADR-0008)
+server/api (Spring Boot, AGPL) --> PostgreSQL 18 (ADR-0008)
 
-app -- REST + WebSocket --> server/api --> SQLite (ADR-0008: PostgreSQL)
+app -- REST + WebSocket --> server/api --> PostgreSQL 18
 app -- SIP + media -----> Asterisk
 ```
 
@@ -19,7 +19,7 @@ The server never links Android or liblinphone code. Network contracts, not
 in-process dependencies, connect the app to the deployed services. See
 [ADR-0004](adr/0004-licensing-gpl-agpl.md) for licensing boundaries.
 
-The planned feature roadmap (PostgreSQL 18, Garage-backed media storage, read
+The planned feature roadmap (Garage-backed media storage, read
 receipts, image and voice messaging, reactions/replies/deletion, notification
 quick reply, previews/search, editing, chat management) lives in
 [feature-plan.md](feature-plan.md) with its decision records
@@ -79,9 +79,10 @@ Sources live under `server/api/src/main/kotlin/com/patbaumgartner/stringtelephon
 - `Users` manages provisioned identities and token lookup.
 - `Messages` handles persistence, idempotent sends, and cursor-based sync.
 - `WsHub` fans new-message events out to connected senders and recipients.
-- `Database` uses bounded-wait SQLite connections per operation, avoiding
-  a shared JDBC transaction across servlet/WebSocket threads. PostgreSQL
-  migration is planned per [ADR-0008](adr/0008-database-postgresql.md).
+- `Database` access is PostgreSQL 18 through a Spring Boot auto-configured
+  HikariCP `DataSource` and `JdbcClient`; multi-statement writes use narrowly
+  scoped transactions and Flyway applies `db/migration` at startup
+  ([ADR-0008](adr/0008-database-postgresql.md)).
   `ProvisioningCli` provides `stringtelephone-provision`, which authenticates
   to the running API rather than writing the database independently.
 - `ServerTls` configures the optional TLS listener.
@@ -98,8 +99,7 @@ must also route to the PBX.
 ## Message and call flows
 
 ```text
-Compose -> AppViewModel -> repository -> REST send -> Messages -> SQLite
-                                            (PostgreSQL per ADR-0008)
+Compose -> AppViewModel -> repository -> REST send -> Messages -> PostgreSQL
                               |                         |
                               v                         v
                           ChatCache <--- WebSocket <-- WsHub

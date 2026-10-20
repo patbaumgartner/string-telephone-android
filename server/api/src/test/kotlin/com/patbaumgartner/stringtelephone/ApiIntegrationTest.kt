@@ -74,16 +74,10 @@ class ApiIntegrationTest {
             assertEquals(201, response.statusCode())
         }
 
-        server.context.getBean(Database::class.java).tx { connection ->
-            connection.prepareStatement(
-                "UPDATE messages SET created_at=? WHERE sender=? AND recipient=?",
-            ).use { statement ->
-                statement.setLong(1, 1_700_000_000_000)
-                statement.setString(2, "alice")
-                statement.setString(3, "bob")
-                statement.executeUpdate()
-            }
-        }
+        server.context.getBean(org.springframework.jdbc.core.simple.JdbcClient::class.java)
+            .sql("UPDATE messages SET created_at=? WHERE sender=? AND recipient=?")
+            .params(1_700_000_000_000, "alice", "bob")
+            .update()
 
         val firstPage = Json.parseToJsonElement(
             server.get("/v1/conversations/bob/messages?limit=2", alice).body(),

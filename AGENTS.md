@@ -9,7 +9,9 @@ to get wrong. If a convention changes, correct this file in the same commit.
 
 Gradle needs the SDK location from `ANDROID_HOME` or `sdk.dir` in
 `local.properties`. The build runs on JDK 27 (bytecode target stays 17);
-CI builds on JDK 27 too.
+CI builds on JDK 27 too. `:server:api:test` needs a running Docker daemon
+(Testcontainers provisions PostgreSQL per test JVM; GitHub-hosted runners
+provide Docker already).
 
 ```bash
 export ANDROID_HOME="$HOME/Android/Sdk"
@@ -81,10 +83,10 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
 - The Gradle configuration cache is on; avoid reading files at configuration
   time.
 - Admin uses Spring Security sessions, Thymeleaf POST forms and CSRF.
-  `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `PBX_AMI_PASSWORD` are mandatory.
-  Keep Android bearer/WebSocket routes stateless and wire-compatible.
+  `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `PBX_AMI_PASSWORD` and `DB_PASSWORD` are
+  mandatory. Keep Android bearer/WebSocket routes stateless and wire-compatible.
   Never expose AMI or mount the Docker socket. The provisioning CLI calls the
-  running API; it must not write SQLite independently. Failed PBX changes stay
+  running API; it must not write the database directly. Failed PBX changes stay
   visibly pending and are retried. Disable/reset must disconnect API,
   WebSockets and PBX calls, not just mark a user inactive.
 
@@ -101,6 +103,14 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
   cursor sync; `ChatCache` is framework-free and unit-tested (ADR-0003).
 - The server derives message authorship from the authenticated principal and
   ignores client-provided sender identity.
+- Server persistence is PostgreSQL 18 (ADR-0008): Spring Boot auto-configures
+  the HikariCP `DataSource` (`spring.datasource.*` from `DB_*` env vars) and
+  the `JdbcClient` bean; services bind every value with `param()`/`params()`,
+  never concatenate SQL. Multi-statement writes run inside narrowly scoped
+  `TransactionTemplate` transactions — never across PBX or HTTP calls. Schema
+  changes ship as forward-only Flyway migrations in
+  `server/api/src/main/resources/db/migration`; no ORM, no `DriverManager`,
+  no hand-rolled commit/rollback.
 
 ## Licensing invariants
 
@@ -113,8 +123,10 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
 
 ## Verification layers
 
-1. Unit tests: `:core:test`, `:app:testDebugUnitTest`, `:server:api:test`.
-   The `ScreenshotTest` suite renders every screen to
+1. Unit tests: `:core:test`, `:app:testDebugUnitTest`, `:server:api:test`
+   (Docker required — Testcontainers starts a PostgreSQL 18 container that
+   gives each test its own database). The `ScreenshotTest` suite renders every
+   screen to
    `app/build/screenshots/` — refresh `docs/screenshots/` in the same commit
    whenever UI output changes.
 2. Static gates: `node scripts/check-adrs.mjs`,
@@ -122,8 +134,9 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    `node scripts/check-design.mjs`, plus YAML lint, ShellCheck, and
    `node --test scripts/test-deploy.mjs`. Feature oracles
    `scripts/verify-scrollbar.mjs`, `verify-plan-status.mjs`,
-   `verify-audio-route.mjs`, `verify-call-ui-routes.mjs` and
-   `verify-screenshots.mjs` run from the gate ledgers; the last three are
+   `verify-postgres.mjs`, `verify-audio-route.mjs`,
+   `verify-call-ui-routes.mjs` and `verify-screenshots.mjs` run from the gate
+   ledgers; the last three are
    also appended to `scripts/run-session-verify.sh`
    (`verify-screenshots.mjs` needs the suite's `app/build/screenshots`).
 3. Live prototype: `scripts/test-prototype.sh` (Docker) proves REGISTER,

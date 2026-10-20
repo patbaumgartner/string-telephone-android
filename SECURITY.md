@@ -44,6 +44,6 @@ users have a reasonable opportunity to update.
 - The live verification script uses throwaway placeholder passwords
   (`prototest-*`); the normal Compose stack requires configured secrets.
 - PBX management uses private AMI and generated configuration. Never publish
-  AMI or mount the Docker socket. Treat SIP digests, SQLite volumes and their
+  AMI or mount the Docker socket. Treat SIP digests, database volumes and their
   backups as credentials. PBX outages can delay SIP revocation even though
   API access is already blocked; the dashboard must report this explicitly.

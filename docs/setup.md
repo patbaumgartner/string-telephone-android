@@ -75,8 +75,11 @@ Edit `server/.env` in a text editor:
   of at least 24 characters. Long hyphenated phrases are supported.
 - Set `PBX_AMI_PASSWORD` to the random hex value printed above. This is a
   separate private API-to-PBX credential; do not reuse the admin password.
+- Set `DB_PASSWORD` to another fresh `openssl rand -hex 32` value. This is the
+  PostgreSQL password; the API refuses to start without it.
 
-Do not commit this file or share screenshots of it. Then start both services:
+Do not commit this file or share screenshots of it. Then start the stack
+(API, PostgreSQL and Asterisk):
 
 ```bash
 ST_API_HTTP_BIND=0.0.0.0 docker compose -f server/compose.yaml up -d --build --wait
@@ -92,13 +95,22 @@ If startup fails:
 
 ```bash
 docker compose -f server/compose.yaml ps
-docker compose -f server/compose.yaml logs --tail=100 api asterisk
+docker compose -f server/compose.yaml logs --tail=100 api asterisk db
 ```
 
 Ports 8080, 8443, 5060/UDP, 5061/TCP and UDP 10000-10100 must be available. To
 move the API HTTP port, for example, start Compose with
 `ST_API_HTTP_BIND=0.0.0.0 ST_API_HTTP_PORT=18080` and use that port in the
 debug app. The default stack is a prototype, not an Internet-ready deployment.
+
+To browse the database while developing, start the optional loopback-only
+pgweb overlay (reads the same `server/.env`):
+
+```bash
+docker compose -f server/compose.yaml -f server/compose.dev.yaml up -d pgweb
+# open http://127.0.0.1:8081, then stop it with:
+docker compose -f server/compose.yaml -f server/compose.dev.yaml stop pgweb
+```
 
 ## 3. Create two accounts (PBX setup is automatic)
 
@@ -130,7 +142,7 @@ docker compose -f server/compose.yaml exec api \
 
 Each CLI create command prints an `api_token` and `sip_secret` **once**. Store
 them privately. Do not paste them into issues, screenshots or Git. Accounts
-persist in the Compose `api-data` volume; do not rerun `create-user` for an
+persist in the Compose `db-data` volume; do not rerun `create-user` for an
 existing username.
 
 If a credential is lost, use **Reset credentials and end calls** in the

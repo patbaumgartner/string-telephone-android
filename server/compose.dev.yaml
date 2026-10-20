@@ -1,0 +1,29 @@
+---
+# Developer overlay — web UI for the local PostgreSQL database.
+# It is intentionally NOT part of compose.yaml: run it explicitly and only
+# when you need to inspect data.
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d pgweb
+#
+#   http://127.0.0.1:8081
+#
+# The port binds to loopback only and the session is read-only. pgweb accepts
+# the password only as a command-line argument, so it is visible to a local
+# `docker inspect`; use a throwaway development database, never a password
+# shared with another service.
+services:
+  pgweb:
+    image: sosedoff/pgweb:0.17.0
+    command:
+      - --bind
+      - 0.0.0.0
+      - --readonly
+      - --url
+      - postgres://${DB_USER:-stringtelephone}:${DB_PASSWORD:?DB_PASSWORD required}@db:5432/${DB_NAME:-stringtelephone}
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - pbx
