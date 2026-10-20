@@ -73,6 +73,7 @@
     <string name="call_unmute">Unmute</string>
     <string name="call_speaker">Speaker</string>
     <string name="call_earpiece">Earpiece</string>
+    <string name="call_bluetooth">Bluetooth</string>
     <string name="call_failed">Call failed</string>
     <string name="call_registration_failed">Messages are available, but calls could not connect to
         the PBX. Check your SIP password and server configuration, then try again.</string>

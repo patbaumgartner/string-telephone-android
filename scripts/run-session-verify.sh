@@ -18,5 +18,8 @@ node scripts/check-adrs.mjs
 node scripts/check-secrets.mjs
 node --test scripts/test-deploy.mjs scripts/test-admin-ui.mjs
 node --test scripts/test-provisioning.mjs
+node scripts/verify-audio-route.mjs
+node scripts/verify-call-ui-routes.mjs
+node scripts/verify-screenshots.mjs
 
 echo "SESSION-VERIFY-OK"

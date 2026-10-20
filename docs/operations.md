@@ -172,7 +172,8 @@ RTP range. For phones outside the Docker bridge:
    CIDR (not the phone's Wi-Fi network). Save and apply.
 3. Allow SIP and UDP 10000-10100 through the host firewall only from the
    intended private network. Ensure both directions of routing work.
-4. Test two real phones, microphone permission, mute and speaker routing.
+4. Test two real phones, microphone permission, mute, speaker and Bluetooth
+   routing.
 
 Do not expose development HTTP/SIP/UDP directly to the Internet. For an
 Internet-facing release deployment, publish HTTPS/WSS and SIP/TLS only,

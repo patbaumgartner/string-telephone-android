@@ -36,6 +36,9 @@ internal object StringTelephoneIcons {
     val Speaker: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_speaker)
 
+    val Bluetooth: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_bluetooth)
+
     val Headphones: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_headphones)
 

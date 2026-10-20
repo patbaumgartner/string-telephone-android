@@ -217,7 +217,8 @@ that real incoming calls or microphone routing work.
 On both phones, grant microphone and notification permission, then:
 
 1. Call Bob from Alice and answer.
-2. Speak in both directions; test mute, unmute, speaker and earpiece.
+2. Speak in both directions; test mute, unmute, speaker, earpiece and, with a
+   paired headset connected, Bluetooth routing.
 3. Hang up and call in the other direction.
 4. Reject an incoming call and verify both devices leave the call screen.
 5. Press Home on Bob's phone, call again, and verify it rings with a call

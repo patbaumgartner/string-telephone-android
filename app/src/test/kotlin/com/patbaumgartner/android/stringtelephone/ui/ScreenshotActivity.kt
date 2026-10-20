@@ -47,7 +47,13 @@ class ScreenshotActivity : ComponentActivity() {
                 FakeCallEngine(
                     com.patbaumgartner.android.stringtelephone.call.CallSessionInfo(
                         peer, com.patbaumgartner.android.stringtelephone.core.CallState.OUTGOING,
-                        muted = true, speakerOn = true,
+                        muted = true,
+                        audioRoute = com.patbaumgartner.android.stringtelephone.call.AudioRoute.SPEAKER,
+                        availableAudioRoutes = setOf(
+                            com.patbaumgartner.android.stringtelephone.call.AudioRoute.EARPIECE,
+                            com.patbaumgartner.android.stringtelephone.call.AudioRoute.SPEAKER,
+                            com.patbaumgartner.android.stringtelephone.call.AudioRoute.BLUETOOTH,
+                        ),
                     ),
                 ),
             ).apply {

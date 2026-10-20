@@ -120,7 +120,12 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
 2. Static gates: `node scripts/check-adrs.mjs`,
    `node scripts/check-secrets.mjs`, and locally
    `node scripts/check-design.mjs`, plus YAML lint, ShellCheck, and
-   `node --test scripts/test-deploy.mjs`.
+   `node --test scripts/test-deploy.mjs`. Feature oracles
+   `scripts/verify-scrollbar.mjs`, `verify-plan-status.mjs`,
+   `verify-audio-route.mjs`, `verify-call-ui-routes.mjs` and
+   `verify-screenshots.mjs` run from the gate ledgers; the last three are
+   also appended to `scripts/run-session-verify.sh`
+   (`verify-screenshots.mjs` needs the suite's `app/build/screenshots`).
 3. Live prototype: `scripts/test-prototype.sh` (Docker) proves REGISTER,
    INVITE/BYE, and the negative auth path against real Asterisk config.
    It provisions users automatically and verifies revocation of active calls

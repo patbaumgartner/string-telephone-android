@@ -77,6 +77,13 @@ No public release has been published yet.
 
 ### Added
 
+- Calls can hand audio to a paired Bluetooth headset. The call screen shows
+  one button per available route — earpiece, speaker, and Bluetooth only
+  while a Bluetooth output exists — and the engine follows device-list
+  changes: it takes over when a headset connects mid-call, falls back to the
+  earpiece when it disconnects, honours an explicit button choice across a
+  transient device-list flap, and mirrors the route liblinphone actually
+  selected (`AudioRouteTest` covers the resolution rules).
 - The chat shows a scroll-position thumb on the trailing edge while scrolling:
   it derives size and position from the live `LazyListLayoutInfo`, lingers
   briefly after scrolling stops, then fades, and never appears in short

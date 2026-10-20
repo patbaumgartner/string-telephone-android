@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.patbaumgartner.android.stringtelephone.BuildConfig
+import com.patbaumgartner.android.stringtelephone.call.AudioRoute
 import com.patbaumgartner.android.stringtelephone.call.CallEngine
 import com.patbaumgartner.android.stringtelephone.call.CallEvent
 import com.patbaumgartner.android.stringtelephone.call.CallFailure
@@ -348,8 +349,8 @@ class AppViewModel(
         engine.setMute(!_callState.value.muted)
     }
 
-    fun toggleSpeaker() {
-        engine.setSpeaker(!_callState.value.speakerOn)
+    fun setAudioRoute(route: AudioRoute) {
+        engine.setAudioRoute(route)
     }
 
     fun logout() {

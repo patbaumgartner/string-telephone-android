@@ -31,7 +31,7 @@ Phases land in this order. Each is small enough for one focused review.
 | # | Phase | Size | Status | Depends on |
 |---|-------|------|--------|------------|
 | 1 | Chat scrollbar | Small | Done | — |
-| 2 | Bluetooth audio routing | Small | Planned | — |
+| 2 | Bluetooth audio routing | Small | Done | — |
 | 3 | PostgreSQL migration | Large | Planned | — |
 | 4 | Garage media storage (server only) | Medium | Planned | Phase 3 |
 | 5 | Read receipts | Medium | Planned | Phase 3 |
@@ -82,24 +82,29 @@ composition checks, and the refreshed chat screenshots.
 ### Phase 2 — Bluetooth audio routing
 
 **Effort:** Small
+**Status:** Done (2026-10-20)
 
-Calls can switch between speaker and earpiece but not to paired Bluetooth
-devices. Linphone already enumerates them (`AudioDevice.Type.Bluetooth`);
-the engine filters them out today (`LinphoneCallEngine.setSpeaker`).
+Calls can now hand audio to a paired Bluetooth headset alongside the existing
+speaker and earpiece options. `CallEngine` exposes a three-value `AudioRoute`
+(`EARPIECE`, `SPEAKER`, `BLUETOOTH`) plus the set of routes the device
+currently offers, and `LinphoneCallEngine` maps each route to liblinphone
+output devices (HFP preferred over A2DP for a live call). The engine follows
+`onAudioDevicesListUpdated` and mirrors the route liblinphone selected
+itself, so the buttons show what the audio actually does for those three
+routes — wired headset and USB outputs are deliberately outside this phase's
+vocabulary: when one takes over, the buttons keep showing the fallback route
+(known limitation). A pure `resolveAudioRoute` rule falls back to the
+earpiece when a headset disconnects, takes over when one connects mid-call,
+honours an explicit button choice across a transient device-list flap, and
+otherwise keeps the user's choice. The call screen renders one button per
+available route; the Bluetooth button appears only while a Bluetooth output
+exists, and the control row scrolls horizontally so narrow windows never
+clip the hang-up button.
 
-**Changes:**
-
-1. `CallEngine.kt`: replace `speakerOn: Boolean` with
-   `audioRoute: AudioRoute` (`EARPIECE`, `SPEAKER`, `BLUETOOTH`).
-2. `LinphoneCallEngine.kt`: implement `setAudioRoute(route)`; add
-   `onAudioDevicesListUpdated` to the core listener so availability updates
-   reach the state flow.
-3. `CallScreen.kt` + `AppViewModel.kt`: third route button, shown only when a
-   Bluetooth output exists; auto-switch when the device connects mid-call.
-4. `FakeCallEngine.kt`: mirror the new interface.
-
-**Tests:** route-selection unit tests; existing speaker tests migrate to the
-new API.
+**Tests:** `AudioRouteTest` (10 route-selection cases) and refreshed call
+screenshots showing all three route buttons, plus the session verification
+scripts `verify-audio-route.mjs`, `verify-call-ui-routes.mjs` and
+`verify-screenshots.mjs` (all run by `run-session-verify.sh`).
 
 **ADR:** none — the `CallEngine` interface already abstracts audio routing.
 

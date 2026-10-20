@@ -1,5 +1,6 @@
 package com.patbaumgartner.android.stringtelephone.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,6 +31,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.patbaumgartner.android.stringtelephone.R
+import com.patbaumgartner.android.stringtelephone.call.AudioRoute
 import com.patbaumgartner.android.stringtelephone.call.CallFailure
 import com.patbaumgartner.android.stringtelephone.core.CallState
 import com.patbaumgartner.android.stringtelephone.ui.theme.StringTelephoneTheme
@@ -84,7 +87,12 @@ internal fun CallScreen(
 
         Spacer(Modifier.weight(1f))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+        // horizontalScroll keeps all five controls reachable in narrow
+        // split-screen windows instead of clipping the hang-up button.
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
             if (failure != null) {
                 CircleAction(
                     onClick = viewModel::dismissCallFailure,
@@ -121,18 +129,29 @@ internal fun CallScreen(
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.semantics { selected = call.muted },
                 )
-                CircleAction(
-                    onClick = viewModel::toggleSpeaker,
-                    icon = StringTelephoneIcons.Speaker,
-                    contentDescription = stringResource(
-                        if (call.speakerOn) R.string.call_earpiece else R.string.call_speaker,
-                    ),
-                    containerColor = if (call.speakerOn) Color(0xFF303030)
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = if (call.speakerOn) Color.White
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.semantics { selected = call.speakerOn },
-                )
+                AudioRoute.entries.filter { it in call.availableAudioRoutes }.forEach { route ->
+                    val routeSelected = call.audioRoute == route
+                    CircleAction(
+                        onClick = { viewModel.setAudioRoute(route) },
+                        icon = when (route) {
+                            AudioRoute.EARPIECE -> StringTelephoneIcons.Call
+                            AudioRoute.SPEAKER -> StringTelephoneIcons.Speaker
+                            AudioRoute.BLUETOOTH -> StringTelephoneIcons.Bluetooth
+                        },
+                        contentDescription = stringResource(
+                            when (route) {
+                                AudioRoute.EARPIECE -> R.string.call_earpiece
+                                AudioRoute.SPEAKER -> R.string.call_speaker
+                                AudioRoute.BLUETOOTH -> R.string.call_bluetooth
+                            },
+                        ),
+                        containerColor = if (routeSelected) Color(0xFF303030)
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (routeSelected) Color.White
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.semantics { selected = routeSelected },
+                    )
+                }
                 CircleAction(
                     onClick = viewModel::hangUp,
                     icon = StringTelephoneIcons.Stop,

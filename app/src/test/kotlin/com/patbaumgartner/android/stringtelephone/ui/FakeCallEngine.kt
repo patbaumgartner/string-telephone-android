@@ -1,6 +1,7 @@
 package com.patbaumgartner.android.stringtelephone.ui
 
 import android.content.Context
+import com.patbaumgartner.android.stringtelephone.call.AudioRoute
 import com.patbaumgartner.android.stringtelephone.call.CallEngine
 import com.patbaumgartner.android.stringtelephone.call.CallEvent
 import com.patbaumgartner.android.stringtelephone.call.CallSessionInfo
@@ -28,6 +29,7 @@ class FakeCallEngine(initial: CallSessionInfo = CallSessionInfo("", CallState.ID
     override fun start(config: EngineConfig) { startedConfig = config }
     override fun stop() { startedConfig = null }
     val calls = mutableListOf<String>()
+    val routed = mutableListOf<AudioRoute>()
     var hungUp = false
         private set
 
@@ -39,7 +41,10 @@ class FakeCallEngine(initial: CallSessionInfo = CallSessionInfo("", CallState.ID
     override fun reject() { rejected = true }
     override fun hangUp() { hungUp = true }
     override fun setMute(muted: Boolean) {}
-    override fun setSpeaker(on: Boolean) {}
+    override fun setAudioRoute(route: AudioRoute) {
+        routed += route
+        _state.value = _state.value.copy(audioRoute = route)
+    }
 }
 
 /** In-memory credential store for previews and screenshot tests. */

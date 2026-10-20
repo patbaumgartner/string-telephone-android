@@ -3,13 +3,44 @@ package com.patbaumgartner.android.stringtelephone.call
 import com.patbaumgartner.android.stringtelephone.core.CallState
 import kotlinx.coroutines.flow.StateFlow
 
+/** Where call audio plays. [BLUETOOTH] covers HFP and A2DP headsets. */
+enum class AudioRoute { EARPIECE, SPEAKER, BLUETOOTH }
+
 data class CallSessionInfo(
     val remoteUser: String,
     val state: CallState,
     val muted: Boolean = false,
-    val speakerOn: Boolean = false,
+    val audioRoute: AudioRoute = AudioRoute.EARPIECE,
+    val availableAudioRoutes: Set<AudioRoute> = setOf(AudioRoute.EARPIECE, AudioRoute.SPEAKER),
     val startedAtEpochMs: Long? = null,
 )
+
+/**
+ * Decides the route after the output-device list changed: fall back when the
+ * selected route disappeared, take over when a headset connects mid-call,
+ * and otherwise keep the user's choice. Framework-free so unit tests cover it.
+ *
+ * [userPinnedRoute] is the route the user last tapped explicitly (null when
+ * they never chose). A headset reconnecting after a transient device-list
+ * flap must not steal the audio back from an explicit non-Bluetooth choice.
+ */
+internal fun resolveAudioRoute(
+    previousAvailable: Set<AudioRoute>,
+    current: AudioRoute,
+    available: Set<AudioRoute>,
+    userPinnedRoute: AudioRoute? = null,
+): AudioRoute = when {
+    current !in available && AudioRoute.EARPIECE in available -> AudioRoute.EARPIECE
+    // Speaker before Bluetooth keeps the fallback independent of the order
+    // liblinphone happened to enumerate its devices in.
+    current !in available ->
+        listOf(AudioRoute.SPEAKER, AudioRoute.BLUETOOTH).firstOrNull { it in available } ?: current
+    AudioRoute.BLUETOOTH in available &&
+        AudioRoute.BLUETOOTH !in previousAvailable &&
+        userPinnedRoute != AudioRoute.SPEAKER &&
+        userPinnedRoute != AudioRoute.EARPIECE -> AudioRoute.BLUETOOTH
+    else -> current
+}
 
 sealed interface CallEvent {
     data object Registered : CallEvent
@@ -55,7 +86,7 @@ interface CallEngine {
     fun reject()
     fun hangUp()
     fun setMute(muted: Boolean)
-    fun setSpeaker(on: Boolean)
+    fun setAudioRoute(route: AudioRoute)
 }
 
 data class EngineConfig(
