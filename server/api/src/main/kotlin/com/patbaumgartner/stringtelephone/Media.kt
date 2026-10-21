@@ -23,6 +23,8 @@ data class MediaRecord(
     val state: String,
     val thumbnailKey: String?,
     val createdAt: Long,
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 class MediaService(
@@ -58,41 +60,61 @@ class MediaService(
         store.put(key, contentType, bytes.size.toLong(), ByteArrayInputStream(bytes))
 
         var thumbKey: String? = null
+        var dimensions: Pair<Int, Int>? = null
         if (contentType.lowercase() in IMAGE_TYPES) {
             thumbKey = generateThumbnail(id, bytes)
+            dimensions = imageDimensions(bytes)
         }
 
         val now = clock()
         db.sql(
-            "INSERT INTO media(id,owner,peer,content_type,byte_size,sha256,state,thumbnail_key,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        ).params(id, owner, peer, contentType, bytes.size.toLong(), sha, "ready", thumbKey ?: "", now)
+            "INSERT INTO media(id,owner,peer,content_type,byte_size,sha256,state,thumbnail_key,created_at,width,height) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ).params(id, owner, peer, contentType, bytes.size.toLong(), sha, "ready", thumbKey ?: "", now, dimensions?.first ?: 0, dimensions?.second ?: 0)
             .update()
-        return MediaRecord(id, owner, peer, contentType, bytes.size.toLong(), sha, "ready", thumbKey, now)
+        return MediaRecord(id, owner, peer, contentType, bytes.size.toLong(), sha, "ready", thumbKey, now, dimensions?.first, dimensions?.second)
     }
 
     /** Only the owner or peer may fetch media for the conversation. */
     fun authorizeAndGet(id: String, requester: String): MediaObject {
-        val record = db.sql(
-            "SELECT id,owner,peer,content_type,byte_size,sha256,state,thumbnail_key,created_at FROM media WHERE id=?",
-        ).params(id)
-            .query { rs, _ ->
-                MediaRecord(
-                    rs.getString("id"),
-                    rs.getString("owner"),
-                    rs.getString("peer"),
-                    rs.getString("content_type"),
-                    rs.getLong("byte_size"),
-                    rs.getString("sha256"),
-                    rs.getString("state"),
-                    rs.getString("thumbnail_key"),
-                    rs.getLong("created_at"),
-                )
-            }.single()
+        val record = mediaRecord(id) ?: throw ApiFailure(org.springframework.http.HttpStatus.NOT_FOUND, "not found")
         if (requester != record.owner && requester != record.peer) {
             throw ApiFailure(org.springframework.http.HttpStatus.FORBIDDEN, "forbidden")
         }
         val key = mediaKey(id, "original")
         return store.get(key)
+    }
+
+    /** Streams the server-generated thumbnail (falls back to the original for non-images). */
+    fun authorizeAndGetThumbnail(id: String, requester: String): MediaObject {
+        val record = mediaRecord(id) ?: throw ApiFailure(org.springframework.http.HttpStatus.NOT_FOUND, "not found")
+        if (requester != record.owner && requester != record.peer) {
+            throw ApiFailure(org.springframework.http.HttpStatus.FORBIDDEN, "forbidden")
+        }
+        val key = if (record.thumbnailKey.isNullOrBlank() || record.thumbnailKey == "") {
+            mediaKey(id, "original")
+        } else {
+            mediaKey(id, "thumb")
+        }
+        return store.get(key)
+    }
+
+    private fun mediaRecord(id: String): MediaRecord? = db.sql(
+        "SELECT id,owner,peer,content_type,byte_size,sha256,state,thumbnail_key,created_at,width,height FROM media WHERE id=?",
+    ).params(id).query { rs, _ ->
+        MediaRecord(
+            rs.getString("id"), rs.getString("owner"), rs.getString("peer"),
+            rs.getString("content_type"), rs.getLong("byte_size"), rs.getString("sha256"),
+            rs.getString("state"), rs.getString("thumbnail_key"), rs.getLong("created_at"),
+            rs.getObject("width", Integer::class.java)?.toInt()?.takeIf { it > 0 },
+            rs.getObject("height", Integer::class.java)?.toInt()?.takeIf { it > 0 },
+        )
+    }.optional().orElse(null)
+
+    fun getRecord(id: String): MediaRecord? = mediaRecord(id)
+
+    private fun imageDimensions(bytes: ByteArray): Pair<Int, Int>? {
+        val image = ImageIO.read(ByteArrayInputStream(bytes)) ?: return null
+        return image.width to image.height
     }
 
     private fun generateThumbnail(id: String, bytes: ByteArray): String? {

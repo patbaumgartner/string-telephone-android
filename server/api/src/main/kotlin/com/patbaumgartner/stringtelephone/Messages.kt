@@ -10,6 +10,10 @@ data class MessageRecord(
     val createdAt: Long,
     val clientKey: String,
     val readAt: Long? = null,
+    val type: String = "TEXT",
+    val mediaId: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 /** Result of marking a conversation read: the affected ids and the read timestamp. */
@@ -33,6 +37,10 @@ class Messages(
         rs.getLong("created_at"),
         rs.getString("client_key"),
         rs.getLong("read_at").let { if (rs.wasNull()) null else it },
+        rs.getString("type") ?: "TEXT",
+        rs.getString("media_id"),
+        rs.getObject("width", Integer::class.java)?.toInt()?.takeIf { it > 0 },
+        rs.getObject("height", Integer::class.java)?.toInt()?.takeIf { it > 0 },
     )
 
     // A single INSERT ... ON CONFLICT DO NOTHING is atomic by itself; the
@@ -45,8 +53,20 @@ class Messages(
         val id = newId()
         val now = System.currentTimeMillis()
         val inserted = db.sql(
-            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-        ).params(id, sender, recipient, content, now, clientKey).update()
+            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+        ).params(id, sender, recipient, content, now, clientKey, "TEXT").update()
+        val stored = find(sender, recipient, clientKey)
+            ?: error("stored message disappeared after insert")
+        if (inserted > 0) onNewMessage(stored)
+        return stored
+    }
+
+    fun insertMedia(sender: String, recipient: String, clientKey: String, mediaId: String, media: MediaRecord): MessageRecord {
+        val id = newId()
+        val now = System.currentTimeMillis()
+        val inserted = db.sql(
+            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, media_id, width, height) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+        ).params(id, sender, recipient, "", now, clientKey, "IMAGE", mediaId, media.width ?: 0, media.height ?: 0).update()
         val stored = find(sender, recipient, clientKey)
             ?: error("stored message disappeared after insert")
         if (inserted > 0) onNewMessage(stored)
@@ -55,7 +75,7 @@ class Messages(
 
     fun page(sender: String, recipient: String, before: Pair<Long, String>?, limit: Int): List<MessageRecord> {
         val effectiveLimit = limit.coerceIn(1, MAX_PAGE)
-        val columns = "id, sender, recipient, content, created_at, client_key, read_at"
+        val columns = "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height"
         val sql = if (before == null) {
             "SELECT $columns FROM messages " +
                 "WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) " +
@@ -73,13 +93,13 @@ class Messages(
 
     fun find(sender: String, recipient: String, clientKey: String): MessageRecord? =
         db.sql(
-            "SELECT id, sender, recipient, content, created_at, client_key, read_at FROM messages " +
+            "SELECT id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height FROM messages " +
                 "WHERE sender = ? AND recipient = ? AND client_key = ?",
         ).params(sender, recipient, clientKey).query { rs, _ -> fromRow(rs) }.optional().orElse(null)
 
     fun findById(id: String): MessageRecord? =
         db.sql(
-            "SELECT id, sender, recipient, content, created_at, client_key, read_at FROM messages WHERE id = ?",
+            "SELECT id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height FROM messages WHERE id = ?",
         ).param(id).query { rs, _ -> fromRow(rs) }.optional().orElse(null)
 
     /**

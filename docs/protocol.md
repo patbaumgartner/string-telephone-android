@@ -25,8 +25,9 @@ tokens. The old `API_ADMIN_TOKEN` is removed.
 
 JSON bodies retain the Android v1 shapes. Unknown DTO fields are ignored.
 Timestamps are epoch milliseconds. Errors are `{"error":"<reason>"}`:
-`400` validation, `401` unauthorized, `404` missing user, `409` conflict,
-`413` invalid message size, `503` PBX operation not confirmed.
+`400` validation, `401` unauthorized, `403` forbidden (e.g. media outside the
+caller's conversation), `404` missing user or record, `409` conflict,
+`413` invalid message or media size, `503` PBX operation not confirmed.
 
 ## Health
 
@@ -89,7 +90,8 @@ unknown). PBX state is cached for about five seconds.
 ```
 
 - `recipient` must match `{peer}` (`400`).
-- Content must be nonempty and at most 8192 UTF-8 bytes (`413`).
+- Text messages: `content` must be nonempty and at most 8192 UTF-8 bytes
+  (`413`); `type` defaults to `TEXT`.
 - The peer must exist and be active (`404`); self-messaging returns `400`.
 - Extra sender fields never change authorship.
 - Idempotency is per `(sender, recipient, clientKey)`. Retrying the same
@@ -104,13 +106,31 @@ Response `201`:
   "recipient":"bob",
   "content":"hello",
   "createdAt":1760000000000,
-  "clientKey":"random-per-logical-message"
+  "clientKey":"random-per-logical-message",
+  "type":"TEXT"
 }
 ```
 
 `readAt` is the epoch millisecond at which the recipient read the message. It
 is omitted while the message is unread, so a message the caller just sent
 never carries it.
+
+#### Image messages
+
+Send `{"type":"IMAGE","recipient":"bob","mediaId":"<id>","clientKey":"..."}`.
+The `content` field stays empty for image messages.
+
+- `mediaId` must reference media uploaded to `POST /v1/media` by the caller
+  for this peer (`404` unknown media, `403` when the record belongs to
+  another conversation, `400` when it is not `ready`, missing `mediaId` is
+  `400`).
+- The server derives the author from the authenticated principal and stores
+  `width`/`height` from the upload record — clients cannot fake dimensions.
+
+Image fields in responses: `type` (`"TEXT"` default, or `"IMAGE"`),
+`mediaId` (null for text), `width`/`height` (decoded pixel dimensions of the
+original image; `0`/absent when unknown). The same fields appear in history
+responses and in the `new-message` event payload.
 
 ### `GET /v1/conversations/{peer}/messages`
 
@@ -175,6 +195,61 @@ Clients call this only while the conversation is on screen. A notification, a
 background sync or a cursor catch-up must not mark anything read — a receipt
 means a human looked at the message.
 
+## Media (`/v1/media`)
+
+Media endpoints share the Android bearer authentication and are exempt from
+CSRF. Uploads are `multipart/form-data` with the parts `file` (binary) and
+`peer` (username). Tomcat accepts request bodies up to 54 MB with files up to
+52 MB; the service caps images at 16 MB and audio at 50 MB. Store limits
+follow [ADR-0009](adr/0009-media-storage-s3.md) (in-memory store by default,
+S3-compatible object storage when enabled).
+
+### `POST /v1/media`
+
+Authenticated multipart upload for the chat peer `{peer}` given as a form
+field. The server records ownership (`owner` = authenticated principal,
+`peer`), never client-supplied identity.
+
+- Content types are allow-listed: images (`image/jpeg`, `image/png`,
+  `image/webp`, `image/gif`) and audio (`audio/mpeg`, `audio/ogg`,
+  `audio/mp4`, `audio/aac`, `audio/wav`). Anything else is `400`.
+- Images: `400` above 16 MB; audio: `400` above 50 MB; oversize multipart
+  requests fail with the servlet's limit error before reaching the handler.
+- For images the server decodes dimensions and generates a JPEG thumbnail
+  (long edge capped at 256px, never enlarged) at upload time.
+
+Response `201`:
+
+```json
+{
+  "id":"uuid",
+  "owner":"alice",
+  "peer":"bob",
+  "contentType":"image/jpeg",
+  "byteSize":123456,
+  "sha256":"<hex>",
+  "createdAt":1760000000000,
+  "width":320,
+  "height":200
+}
+```
+
+`width`/`height` are null for non-image content. Sending this `id` with
+`POST /v1/conversations/{peer}/messages` (`type=IMAGE`) attaches it to a
+message; only a participant of the owning conversation may reference it.
+
+### `GET /v1/media/{id}`
+
+Streams the original bytes. Only the owner or the conversation peer may fetch
+(`403` otherwise, `404` unknown id). Content type and length come from the
+stored object; responses are `no-store` because bearer auth cannot use shared
+caches.
+
+### `GET /v1/media/{id}/thumbnail`
+
+Streams the server-generated JPEG thumbnail for images (falls back to the
+original for non-images). Same authorization as `GET /v1/media/{id}`.
+
 ## Realtime stream (`/v1/ws`)
 
 Upgrade `GET /v1/ws` over WSS with the active user token in the
@@ -186,7 +261,7 @@ Invalid credentials close with `1008` immediately after upgrade.
 - Server text frames retain the Android envelope:
   `{"type":"new-message","payload":"<JSON string>"}`. Decode `payload` as
   a message record containing `id`, `sender`, `recipient`, `content`,
-  `createdAt`, `clientKey`.
+  `createdAt`, `clientKey`, `type`, `mediaId`, `width`, `height`.
 - Events go to sender and recipient. They accelerate updates but do not
   replace durable cursor synchronization after reconnection.
 - `{"type":"presence","payload":"<JSON string>"}` goes to every other

@@ -76,6 +76,21 @@ class RunningServer(extra: Map<String, String> = emptyMap(), val http: HttpClien
         return http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
 
+    /** Multipart upload with raw bytes (used for media uploads); returns the raw body bytes. */
+    fun postMultipart(path: String, peer: String, fileName: String, contentType: String, bytes: ByteArray, bearer: String): HttpResponse<ByteArray> {
+        val boundary = "----stit" + System.nanoTime()
+        val head = ("--$boundary\r\nContent-Disposition: form-data; name=\"peer\"\r\n\r\n$peer\r\n" +
+            "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n" +
+            "Content-Type: $contentType\r\n\r\n").toByteArray(Charsets.ISO_8859_1)
+        val tail = "\r\n--$boundary--\r\n".toByteArray()
+        val body = java.io.ByteArrayOutputStream().apply { write(head); write(bytes); write(tail) }.toByteArray()
+        val builder = HttpRequest.newBuilder(URI("$base$path")).timeout(Duration.ofSeconds(30))
+            .header("Content-Type", "multipart/form-data; boundary=$boundary")
+            .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+        builder.header("Authorization", "Bearer $bearer")
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray())
+    }
+
     fun login() {
         csrf = csrfToken(get("/admin/login").body())
         val response = post("/admin/login", "username=operator&password=${URLEncoder.encode(TEST_PASSPHRASE, Charsets.UTF_8)}&_csrf=$csrf", form = true)

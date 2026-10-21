@@ -14,6 +14,7 @@ import com.patbaumgartner.android.stringtelephone.call.CallFailure
 import com.patbaumgartner.android.stringtelephone.call.CallForegroundService
 import com.patbaumgartner.android.stringtelephone.call.CallSessionInfo
 import com.patbaumgartner.android.stringtelephone.chat.ChatMessage
+import com.patbaumgartner.android.stringtelephone.chat.ImageDownscale
 import com.patbaumgartner.android.stringtelephone.core.CallState
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
 import com.patbaumgartner.android.stringtelephone.core.ServerUrlValidation
@@ -24,12 +25,14 @@ import com.patbaumgartner.android.stringtelephone.data.SignInState
 import com.patbaumgartner.android.stringtelephone.data.SignInError
 import com.patbaumgartner.android.stringtelephone.di.AppContainer
 import com.patbaumgartner.android.stringtelephone.notify.IncomingCallAccess
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Which screen is showing; navigation is a plain sealed list, not Navigation-Compose. */
 sealed interface AppScreen {
@@ -276,12 +279,39 @@ class AppViewModel(
         repository.saveChatDraft(peer, value)
     }
 
+    fun attachImage(peer: String, uri: android.net.Uri) {
+        val context = container.context
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    container.context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } ?: return@launch
+                val scaled = withContext(Dispatchers.IO) {
+                    ImageDownscale.downscale(bytes)
+                }
+                sendImage(peer, scaled, "image/jpeg", "image.jpg")
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     fun sendCurrent(peer: String) {
         val content = chatInput.trim()
         if (content.isEmpty()) return
         chatInput = ""
         repository.saveChatDraft(peer, "")
         repository.send(peer, content) { }
+    }
+
+    fun sendImage(peer: String, bytes: ByteArray, contentType: String, fileName: String) {
+        viewModelScope.launch {
+            try {
+                val media = withContext(Dispatchers.IO) { repository.uploadMedia(peer, bytes, contentType, fileName) }
+                repository.sendImage(peer, media.id, media.width, media.height) { }
+            } catch (_: Exception) {
+                // Failed uploads surface as failed text-less bubbles is handled by sendImage's deliver path.
+            }
+        }
     }
 
     /** Tapping a message that was not delivered sends it again. */
@@ -302,6 +332,9 @@ class AppViewModel(
      * screen. A notification, a background sync or a cursor catch-up must
      * never mark a message read.
      */
+    fun mediaBaseUrl(): String? = repository.apiBaseUrl()
+    fun mediaToken(): String? = repository.apiToken()
+
     fun markConversationRead(peer: String, upToMessageId: String?) {
         repository.markConversationRead(peer, upToMessageId)
     }

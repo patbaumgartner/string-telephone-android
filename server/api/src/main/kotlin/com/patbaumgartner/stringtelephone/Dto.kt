@@ -26,13 +26,24 @@ data class MessageDto(
     val clientKey: String,
     /** Epoch millisecond at which the recipient read the message; null when unread (ADR-0010). */
     val readAt: Long? = null,
+    /** Message kind: TEXT (default) or IMAGE (Phase 6). */
+    val type: String = "TEXT",
+    /** Media id referenced by an IMAGE message; null for text. */
+    val mediaId: String? = null,
+    /** Decoded image width in pixels for IMAGE messages. */
+    val width: Int? = null,
+    /** Decoded image height in pixels for IMAGE messages. */
+    val height: Int? = null,
 )
 
 @kotlinx.serialization.Serializable
 data class SendMessageRequest(
     @field:jakarta.validation.constraints.NotBlank val recipient: String,
-    @field:jakarta.validation.constraints.NotBlank val content: String,
-    @field:jakarta.validation.constraints.NotBlank val clientKey: String,
+    val content: String = "",
+    val clientKey: String,
+    /** TEXT (default) or IMAGE. An IMAGE message references [mediaId]. */
+    val type: String = "TEXT",
+    val mediaId: String? = null,
 )
 
 /** Marks the peer's messages read; `upToMessageId` bounds the mark to one point in the history. */
@@ -86,6 +97,10 @@ data class WsNewMessageEvent(
     val content: String,
     val createdAt: Long,
     val clientKey: String,
+    val type: String = "TEXT",
+    val mediaId: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 /** Read-receipt event pushed on /v1/ws as `{"type":"message-read"}` (ADR-0010). */

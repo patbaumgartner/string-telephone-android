@@ -130,15 +130,30 @@ object PreviewFactory {
         com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED,
     )
 
+    /**
+     * The image-message preview (Phase 6): one received photo plus text around
+     * it, so the bubble, its placeholder and the meta row are visible together.
+     */
+    private val IMAGE_CHAT = listOf(
+        Triple(false, "Here is the picture from the hike:", "2025-06-13T09:40:00Z"),
+        Triple(true, "Looks great — thanks!", "2025-06-13T09:41:00Z"),
+    )
+
     fun viewModel(
         context: Context,
         callEngine: CallEngine = FakeCallEngine(),
         deliveryStates: Boolean = false,
+        chatImage: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
-        val conversation = if (deliveryStates) DELIVERY_STATE_CHAT else PREVIEW_CHAT
+        val conversation: List<Triple<Boolean, String, String>> = when {
+            chatImage -> IMAGE_CHAT
+            deliveryStates -> DELIVERY_STATE_CHAT
+            else -> PREVIEW_CHAT
+        }
         conversation.forEachIndexed { index, (fromMe, content, at) ->
             val state = when {
+                chatImage -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
                 deliveryStates -> DELIVERY_STATES[index]
                 index == conversation.lastIndex -> com.patbaumgartner.android.stringtelephone.chat.SendState.PENDING
                 index == conversation.lastIndex - 1 -> com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED
@@ -154,6 +169,23 @@ object PreviewFactory {
                     } else {
                         null
                     },
+                ),
+            )
+        }
+        if (chatImage) {
+            cache.append(
+                "bob",
+                com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
+                    serverId = "preview-media",
+                    clientKey = "preview-media",
+                    fromMe = false,
+                    content = "",
+                    sentAtEpochMs = java.time.Instant.parse("2025-06-13T09:40:30Z").toEpochMilli(),
+                    state = com.patbaumgartner.android.stringtelephone.chat.SendState.SENT,
+                    type = "IMAGE",
+                    mediaId = "preview-media-1",
+                    width = 4032,
+                    height = 3024,
                 ),
             )
         }

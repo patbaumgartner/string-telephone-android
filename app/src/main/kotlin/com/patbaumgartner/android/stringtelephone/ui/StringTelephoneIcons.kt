@@ -66,4 +66,8 @@ internal object StringTelephoneIcons {
 
     val Mood: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_mood)
+
+    /** Placeholder while a chat image loads (Phase 6). */
+    val Image: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_image)
 }

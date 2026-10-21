@@ -32,6 +32,17 @@ class MediaApi(
         return ResponseEntity.status(HttpStatus.CREATED).body(MediaRecordDto.from(record))
     }
 
+    @GetMapping("/v1/media/{id}/thumbnail")
+    fun thumbnail(request: HttpServletRequest, @PathVariable id: String): ResponseEntity<org.springframework.core.io.InputStreamResource> {
+        val me = principal(request)
+        val obj = media.authorizeAndGetThumbnail(id, me.username)
+        val headers = HttpHeaders()
+        headers.contentType = MediaType.parseMediaType(obj.contentType)
+        if (obj.contentLength >= 0) headers.contentLength = obj.contentLength
+        headers.cacheControl = org.springframework.http.CacheControl.noStore().headerValue
+        return ResponseEntity.ok().headers(headers).body(org.springframework.core.io.InputStreamResource(obj.body))
+    }
+
     @GetMapping("/v1/media/{id}")
     fun get(request: HttpServletRequest, @PathVariable id: String): ResponseEntity<org.springframework.core.io.InputStreamResource> {
         val me = principal(request)
@@ -52,8 +63,10 @@ data class MediaRecordDto(
     val byteSize: Long,
     val sha256: String,
     val createdAt: Long,
+    val width: Int? = null,
+    val height: Int? = null,
 ) {
     companion object {
-        fun from(r: MediaRecord) = MediaRecordDto(r.id, r.owner, r.peer, r.contentType, r.byteSize, r.sha256, r.createdAt)
+        fun from(r: MediaRecord) = MediaRecordDto(r.id, r.owner, r.peer, r.contentType, r.byteSize, r.sha256, r.createdAt, r.width, r.height)
     }
 }

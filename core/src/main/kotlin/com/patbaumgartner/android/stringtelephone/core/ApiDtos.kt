@@ -26,13 +26,40 @@ data class MessageDto(
     val clientKey: String,
     /** Epoch millisecond at which the recipient read the message; null when unread (ADR-0010). */
     val readAt: Long? = null,
+    /** Message kind: TEXT (default) or IMAGE (Phase 6). */
+    val type: String = "TEXT",
+    /** Media id referenced by an IMAGE message; null for text. */
+    val mediaId: String? = null,
+    /** Decoded image width in pixels for IMAGE messages. */
+    val width: Int? = null,
+    /** Decoded image height in pixels for IMAGE messages. */
+    val height: Int? = null,
 )
 
 @Serializable
-data class SendMessageRequest(val recipient: String, val content: String, val clientKey: String)
+data class SendMessageRequest(
+    val recipient: String,
+    val content: String = "",
+    val clientKey: String,
+    val type: String = "TEXT",
+    val mediaId: String? = null,
+)
 
 @Serializable
 data class MessagesPageDto(val messages: List<MessageDto>, val nextCursor: String?)
+
+@Serializable
+data class MediaRecordDto(
+    val id: String,
+    val owner: String,
+    val peer: String,
+    val contentType: String,
+    val byteSize: Long,
+    val sha256: String,
+    val createdAt: Long,
+    val width: Int? = null,
+    val height: Int? = null,
+)
 
 /** Marks the peer's messages read; `upToMessageId` bounds the mark to one point in the history. */
 @Serializable
@@ -53,6 +80,10 @@ data class WsNewMessageDto(
     val content: String,
     val createdAt: Long,
     val clientKey: String,
+    val type: String = "TEXT",
+    val mediaId: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 @Serializable
@@ -70,6 +101,10 @@ sealed interface RealtimeEvent {
         val content: String,
         val createdAtEpochMs: Long,
         val clientKey: String,
+        val type: String = "TEXT",
+        val mediaId: String? = null,
+        val width: Int? = null,
+        val height: Int? = null,
     ) : RealtimeEvent
 
     data class Presence(
@@ -105,6 +140,10 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 content = event.content,
                 createdAtEpochMs = event.createdAt,
                 clientKey = event.clientKey,
+                type = event.type,
+                mediaId = event.mediaId,
+                width = event.width,
+                height = event.height,
             )
         }.getOrNull()
         "presence" -> runCatching {

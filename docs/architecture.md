@@ -81,6 +81,10 @@ Sources live under `server/api/src/main/kotlin/com/patbaumgartner/stringtelephon
   read marks; `WsHub` fans new-message and read-receipt events out to the
   connected senders and recipients, and `WsSessions` keeps the live session
   registry that both the hub and the presence service read.
+- `Media`/`MediaApi` accept authenticated multipart uploads for a conversation
+  peer, generate server-side image thumbnails and dimensions, and stream
+  originals and thumbnails back to conversation participants only; the pluggable
+  `MediaStore` seam lives in `media/` ([ADR-0009](adr/0009-media-storage-s3.md)).
 - `Database` access is PostgreSQL 18 through a Spring Boot auto-configured
   HikariCP `DataSource` and `JdbcClient`; multi-statement writes use narrowly
   scoped transactions and Flyway applies `db/migration` at startup
