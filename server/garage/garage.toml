@@ -1,12 +1,20 @@
+# Garage configuration for the local media store.
+#
+# The RPC secret is a cluster credential and the admin token guards the
+# administration API, so neither lives in this file: the compose service
+# passes GARAGE_RPC_SECRET and GARAGE_ADMIN_TOKEN from the environment.
+# Generate the RPC secret with `openssl rand -hex 32`.
+#
+# Note the flat schema: Garage 1.0 takes `rpc_bind_addr` as a plain address
+# and the secret as a separate `rpc_secret` key (or the environment
+# variables above). The older `[rpc_bind_addr]` table does not parse.
 metadata_dir = "/var/lib/garage/meta"
 data_dir = "/var/lib/garage/data"
 db_engine = "sqlite"
 
 replication_factor = 1
 
-[rpc_bind_addr]
-addr = "[::]:3901"
-secret = "11111111111111111111111111111111"
+rpc_bind_addr = "[::]:3901"
 
 [s3_api]
 s3_region = "garage"
@@ -19,4 +27,3 @@ root_domain = ".web.garage.localhost"
 
 [admin]
 api_bind_addr = "[::]:3903"
-admin_token = "admin-token-change-me"

@@ -82,6 +82,10 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
   dependency's annotation surface.
 - The Gradle configuration cache is on; avoid reading files at configuration
   time.
+- The API runtime image (`eclipse-temurin:27-jre`) is minimal and ships no HTTP
+  client; the Compose healthcheck probes `/ready` with `curl`. The Dockerfile
+  installs curl — removing it makes every container permanently unhealthy and
+  `docker compose up --wait` fails.
 - Admin uses Spring Security sessions, Thymeleaf POST forms and CSRF.
   `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `PBX_AMI_PASSWORD` and `DB_PASSWORD` are
   mandatory. Keep Android bearer/WebSocket routes stateless and wire-compatible.
@@ -101,6 +105,11 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
   leak into UI or domain code; GPL obligations flow from this link (ADR-0002).
 - Messaging goes through the companion API with client idempotency keys and
   cursor sync; `ChatCache` is framework-free and unit-tested (ADR-0003).
+- Read receipts (ADR-0010): the server stores a read state per message and
+  announces it with the `message-read` event; the app's `SendState` is
+  `PENDING / SENT / READ / FAILED`. Only the foreground chat screen may mark
+  a conversation read — never a notification handler, a background sync or a
+  cursor catch-up. A receipt means a human looked at the message.
 - The server derives message authorship from the authenticated principal and
   ignores client-provided sender identity.
 - Server persistence is PostgreSQL 18 (ADR-0008): Spring Boot auto-configures
@@ -135,16 +144,19 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    `node --test scripts/test-deploy.mjs`. Feature oracles
    `scripts/verify-scrollbar.mjs`, `verify-plan-status.mjs`,
    `verify-postgres.mjs`, `verify-audio-route.mjs`,
-   `verify-call-ui-routes.mjs` and `verify-screenshots.mjs` run from the gate
-   ledgers; the last three are
+   `verify-call-ui-routes.mjs`, `verify-read-receipts.mjs` and
+   `verify-screenshots.mjs` run from the gate
+   ledgers; the last four are
    also appended to `scripts/run-session-verify.sh`
    (`verify-screenshots.mjs` needs the suite's `app/build/screenshots`).
 3. Live prototype: `scripts/test-prototype.sh` (Docker) proves REGISTER,
    INVITE/BYE, and the negative auth path against real Asterisk config.
-   It provisions users automatically and verifies revocation of active calls
-   and password resets. It uses a unique `st-admin-test-*` project and deletes
-   only its own volumes; stop a demo first to free SIP/RTP ports.
-   It does not verify Android audio.
+   It also proves read receipts end to end (send, author-may-not-mark,
+   recipient mark, history `readAt`, idempotence) and revocation of active
+   calls and password resets. It uses a unique `st-admin-test-*` project and
+   deletes only its own volumes; stop a demo first to free SIP/RTP ports.
+   It starts only the services it exercises (Asterisk, PostgreSQL, API) and
+   does not verify Android audio or the media store.
 4. CI runs 1 + assemble + lint + API installDist on main pushes and pull requests.
    Security CI builds app and API for CodeQL and reviews PR dependency changes.
    Dependabot patch/minor auto-merge requires repository auto-merge and branch

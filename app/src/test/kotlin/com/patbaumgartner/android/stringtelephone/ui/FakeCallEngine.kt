@@ -111,12 +111,37 @@ private val PREVIEW_CHAT = buildList {
 }
 
 object PreviewFactory {
-    fun viewModel(context: Context, callEngine: CallEngine = FakeCallEngine()): AppViewModel {
+    /**
+     * One outgoing message per delivery state (ADR-0010), so the screenshot
+     * shows every tick the chat can draw: clock, single tick, double tick and
+     * the error mark.
+     */
+    private val DELIVERY_STATE_CHAT = listOf(
+        Triple(true, "Still on its way to the server.", "2025-06-13T08:20:00Z"),
+        Triple(true, "The server has this one.", "2025-06-13T08:21:00Z"),
+        Triple(true, "You read this one.", "2025-06-13T08:22:00Z"),
+        Triple(true, "This one never made it.", "2025-06-13T08:23:00Z"),
+    )
+
+    private val DELIVERY_STATES = listOf(
+        com.patbaumgartner.android.stringtelephone.chat.SendState.PENDING,
+        com.patbaumgartner.android.stringtelephone.chat.SendState.SENT,
+        com.patbaumgartner.android.stringtelephone.chat.SendState.READ,
+        com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED,
+    )
+
+    fun viewModel(
+        context: Context,
+        callEngine: CallEngine = FakeCallEngine(),
+        deliveryStates: Boolean = false,
+    ): AppViewModel {
         val cache = ChatCache()
-        PREVIEW_CHAT.forEachIndexed { index, (fromMe, content, at) ->
-            val state = when (index) {
-                PREVIEW_CHAT.lastIndex -> com.patbaumgartner.android.stringtelephone.chat.SendState.QUEUED
-                PREVIEW_CHAT.lastIndex - 1 -> com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED
+        val conversation = if (deliveryStates) DELIVERY_STATE_CHAT else PREVIEW_CHAT
+        conversation.forEachIndexed { index, (fromMe, content, at) ->
+            val state = when {
+                deliveryStates -> DELIVERY_STATES[index]
+                index == conversation.lastIndex -> com.patbaumgartner.android.stringtelephone.chat.SendState.PENDING
+                index == conversation.lastIndex - 1 -> com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED
                 else -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
             }
             val key = "preview-" + index
@@ -124,6 +149,11 @@ object PreviewFactory {
                 "bob",
                 com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
                     key, key, fromMe, content, java.time.Instant.parse(at).toEpochMilli(), state,
+                    readAtEpochMs = if (state == com.patbaumgartner.android.stringtelephone.chat.SendState.READ) {
+                        java.time.Instant.parse("2025-06-13T08:25:00Z").toEpochMilli()
+                    } else {
+                        null
+                    },
                 ),
             )
         }

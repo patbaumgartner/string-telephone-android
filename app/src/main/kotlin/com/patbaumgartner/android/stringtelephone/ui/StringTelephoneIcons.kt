@@ -54,6 +54,10 @@ internal object StringTelephoneIcons {
     val Done: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_done)
 
+    /** Double tick: the recipient read the message (ADR-0010). */
+    val DoneAll: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_done_all)
+
     val Schedule: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_schedule)
 

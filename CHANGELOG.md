@@ -9,6 +9,13 @@ No public release has been published yet.
 
 ### Changed
 
+- Messages now carry read receipts (ADR-0010). The server stores a per-message
+  read state, exposes it as `readAt` in the conversation history and
+  announces it as a `message-read` event on the realtime stream. The app
+  marks a conversation read only while it is on screen — a notification, a
+  background sync or a cursor catch-up never marks anything read — and shows
+  a double tick in the brand colour once the peer has read a message.
+  Read receipts are always on and mutual; there is no opt-out.
 - The API's Compose HTTP port now binds to loopback by default; direct HTTP
   access from a development phone or emulator requires an explicit private-LAN
   bind. Android REST requests also have bounded write and total-call times,
@@ -88,8 +95,30 @@ No public release has been published yet.
   Testcontainers PostgreSQL locally and in CI. Fresh installations only — no
   SQLite import (ADR-0007/0008 semantics).
 
+### Fixed
+
+- The API container never turned healthy: its Compose healthcheck probes the
+  readiness endpoint with `curl`, but the slim JRE runtime image ships no HTTP
+  client, so `docker compose up --wait` failed on a perfectly fine API. The
+  image now installs curl.
+- The media object store's Garage configuration could not start Garage and
+  carried a credential in the repository. The configuration now uses the
+  Garage 1.0 schema, the RPC secret and the administration token come from the
+  environment, and the secret scan passes again.
+- The Compose file had the media store nested under `networks:` instead of
+  `services:`, so the whole stack failed validation. The prototype now starts
+  only the services it exercises.
+- The companion API could no longer start: a wiring change had dropped the
+  presence service from the bean definitions, so the Spring context failed to
+  resolve it. The realtime session registry is now a separate, dependency-free
+  type (`WsSessions`), which keeps the presence and WebSocket dependencies
+  acyclic and makes the wiring explicit again.
+
 ### Added
 
+- Screenshot coverage for every message delivery state: the committed
+  `docs/screenshots/10-chat-delivery-states.png` shows the clock, the single
+  tick, the double tick of a read message and the error mark side by side.
 - Calls can hand audio to a paired Bluetooth headset. The call screen shows
   one button per available route — earpiece, speaker, and Bluetooth only
   while a Bluetooth output exists — and the engine follows device-list

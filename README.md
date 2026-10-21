@@ -46,6 +46,9 @@ are included there too.
 - A messenger-style chat: grouped bubbles with tails, time and send status
   inside each bubble, day separators, a call button in the chat header, and
   tap-to-retry for messages that could not be delivered.
+- Read receipts, always on and mutual: a message shows a double tick once the
+  peer has read it, and a message counts as read only while the conversation
+  is open on the phone — a notification never counts as reading.
 - Contacts show full display names everywhere in the UI; usernames are used
   only for sign-in and addressing.
 - Contacts show live presence (online when a SIP registration or realtime

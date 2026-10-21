@@ -295,6 +295,17 @@ class AppViewModel(
         repository.account.value.me?.let { me -> repository.loadHistory(peer, me.username) }
     }
 
+    /**
+     * Marks the peer's messages as read (ADR-0010).
+     *
+     * Only the chat screen calls this, and only while the messages are on
+     * screen. A notification, a background sync or a cursor catch-up must
+     * never mark a message read.
+     */
+    fun markConversationRead(peer: String, upToMessageId: String?) {
+        repository.markConversationRead(peer, upToMessageId)
+    }
+
     fun backToContacts() {
         _screen.value = AppScreen.Contacts
     }

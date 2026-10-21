@@ -91,6 +91,7 @@
     <string name="chat_sending">Sending…</string>
     <string name="chat_failed_to_send">Not delivered</string>
     <string name="chat_sent">Sent</string>
+    <string name="chat_read">Read</string>
     <string name="chat_tap_to_retry">Not delivered. Tap to retry.</string>
     <string name="chat_today">Today</string>
     <string name="chat_yesterday">Yesterday</string>

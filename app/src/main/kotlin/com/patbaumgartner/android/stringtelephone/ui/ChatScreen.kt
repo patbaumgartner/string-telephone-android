@@ -95,6 +95,15 @@ internal fun ChatScreen(
         if (rows.isNotEmpty()) listState.animateScrollToItem(rows.size - 1)
     }
 
+    // Read receipts are marked only here: the chat screen is open and the
+    // messages are rendered. A notification, a background sync or a cursor
+    // catch-up must never mark a message read (ADR-0010).
+    val newestIncoming = messages.lastOrNull { !it.fromMe && it.serverId != null }
+    LaunchedEffect(peer, newestIncoming?.serverId) {
+        val id = newestIncoming?.serverId ?: return@LaunchedEffect
+        viewModel.markConversationRead(peer, id)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -260,8 +269,9 @@ private fun ChatBubble(message: ChatMessage, startsGroup: Boolean, maxWidth: Dp,
     val failed = message.state == SendState.FAILED
     val time = DateFormat.getTimeFormat(LocalContext.current).format(Date(message.sentAtEpochMs))
     val status = when (message.state) {
-        SendState.QUEUED -> stringResource(R.string.chat_sending)
+        SendState.PENDING -> stringResource(R.string.chat_sending)
         SendState.SENT -> stringResource(R.string.chat_sent)
+        SendState.READ -> stringResource(R.string.chat_read)
         SendState.FAILED -> stringResource(R.string.chat_failed_to_send)
     }
     val sender = stringResource(if (message.fromMe) R.string.chat_from_you else R.string.chat_from_them)
@@ -292,8 +302,9 @@ private fun ChatBubble(message: ChatMessage, startsGroup: Boolean, maxWidth: Dp,
                         Spacer(Modifier.width(3.dp))
                         Icon(
                             when (message.state) {
-                                SendState.QUEUED -> StringTelephoneIcons.Schedule
+                                SendState.PENDING -> StringTelephoneIcons.Schedule
                                 SendState.SENT -> StringTelephoneIcons.Done
+                                SendState.READ -> StringTelephoneIcons.DoneAll
                                 SendState.FAILED -> StringTelephoneIcons.ErrorOutline
                             },
                             contentDescription = null,

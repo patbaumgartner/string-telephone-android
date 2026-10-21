@@ -10,6 +10,8 @@
 # G4: wrong-password registration is rejected and creates no contact
 # G5: SIP over TLS registration succeeds (skipped when openssl is unavailable)
 # G6: the companion API answers HTTPS/WSS on 8443 (skipped without openssl)
+# G7: read receipts are persisted, mutual and idempotent
+# G8: revocation disconnects an established call without manual PBX edits
 #
 set -euo pipefail
 
@@ -102,7 +104,10 @@ export ST_API_HTTP_PORT ST_API_HTTPS_PORT
 echo "API host ports: http=$ST_API_HTTP_PORT https=$ST_API_HTTPS_PORT"
 
 echo "== starting prototype stack =="
-docker compose -f "$COMPOSE_FILE" -p "$PROJECT" up -d --build --wait
+# Only the services the prototype exercises: the PBX, the database and the
+# API. The media object store is not part of this gate — it needs its own
+# cluster secret and the API does not talk to it yet.
+docker compose -f "$COMPOSE_FILE" -p "$PROJECT" up -d --build --wait asterisk db api
 
 for _ in $(seq 1 60); do
     if curl -fsS "http://127.0.0.1:$ST_API_HTTP_PORT/health" >/dev/null 2>&1; then
@@ -198,7 +203,10 @@ else
     echo "== G5/G6 skipped: no openssl for throwaway certificates =="
 fi
 
-echo "== G7: revocation disconnects an established call without manual PBX edits =="
+echo "== G7: read receipts are persisted, mutual and idempotent =="
+node scripts/test-read-receipts.mjs "http://127.0.0.1:$ST_API_HTTP_PORT" "$STATE_FILE"
+
+echo "== G8: revocation disconnects an established call without manual PBX edits =="
 CALLEE_LOG="$(mktemp)"
 CALLER_LOG="$(mktemp)"
 node "$SIP_DIR/callee.cjs" 127.0.0.1 5060 bob "$SIP_PASSWORD" > "$CALLEE_LOG" 2>&1 &

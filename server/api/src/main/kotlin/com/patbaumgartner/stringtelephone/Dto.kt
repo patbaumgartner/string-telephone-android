@@ -24,6 +24,8 @@ data class MessageDto(
     val content: String,
     val createdAt: Long,
     val clientKey: String,
+    /** Epoch millisecond at which the recipient read the message; null when unread (ADR-0010). */
+    val readAt: Long? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -32,6 +34,13 @@ data class SendMessageRequest(
     @field:jakarta.validation.constraints.NotBlank val content: String,
     @field:jakarta.validation.constraints.NotBlank val clientKey: String,
 )
+
+/** Marks the peer's messages read; `upToMessageId` bounds the mark to one point in the history. */
+@kotlinx.serialization.Serializable
+data class MarkReadRequest(val upToMessageId: String? = null)
+
+@kotlinx.serialization.Serializable
+data class MarkReadResponse(val messageIds: List<String>, val readAt: Long)
 
 @kotlinx.serialization.Serializable
 data class MessagesPageDto(val messages: List<MessageDto>, val nextCursor: String?)
@@ -77,4 +86,11 @@ data class WsNewMessageEvent(
     val content: String,
     val createdAt: Long,
     val clientKey: String,
+)
+
+/** Read-receipt event pushed on /v1/ws as `{"type":"message-read"}` (ADR-0010). */
+@kotlinx.serialization.Serializable
+data class WsMessageReadEvent(
+    val messageIds: List<String>,
+    val readAt: Long,
 )

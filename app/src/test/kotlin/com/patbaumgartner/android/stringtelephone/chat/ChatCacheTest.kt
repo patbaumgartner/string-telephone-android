@@ -6,7 +6,7 @@ import kotlin.test.assertTrue
 
 class ChatCacheTest {
 
-    private fun message(clientKey: String, content: String, at: Long, state: SendState = SendState.QUEUED) =
+    private fun message(clientKey: String, content: String, at: Long, state: SendState = SendState.PENDING) =
         ChatMessage(serverId = null, clientKey = clientKey, fromMe = true, content = content, sentAtEpochMs = at, state = state)
 
     @Test
@@ -43,7 +43,7 @@ class ChatCacheTest {
         cache.markFailed("k1")
 
         assertTrue(cache.markRetrying("k1"))
-        assertEquals(SendState.QUEUED, cache.history("bob").first().state)
+        assertEquals(SendState.PENDING, cache.history("bob").first().state)
         assertTrue(!cache.markRetrying("k1"))
         assertTrue(!cache.markRetrying("k2"))
         assertTrue(!cache.markRetrying("missing"))
@@ -56,7 +56,7 @@ class ChatCacheTest {
         cache.append("bob", message("k2", "second", 2))
         cache.markFailed("k2")
         val states = cache.history("bob").associate { it.clientKey to it.state }
-        assertEquals(SendState.QUEUED, states["k1"])
+        assertEquals(SendState.PENDING, states["k1"])
         assertEquals(SendState.FAILED, states["k2"])
     }
 
@@ -91,5 +91,47 @@ class ChatCacheTest {
             myUsername = "alice",
         )
         assertTrue(!incoming.fromMe)
+    }
+
+    @Test
+    fun `a read receipt turns the sent copy into a double tick`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        assertTrue(cache.applyReadReceipt(setOf("m1"), 500))
+        val stored = cache.history("bob").single()
+        assertEquals(SendState.READ, stored.state)
+        assertEquals(500L, stored.readAtEpochMs)
+    }
+
+    @Test
+    fun `a read receipt only touches the listed server ids`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", true, "one", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "two", 2, SendState.SENT))
+        assertTrue(cache.applyReadReceipt(setOf("m2"), 500))
+        val states = cache.history("bob").associate { it.serverId to it.state }
+        assertEquals(SendState.SENT, states["m1"])
+        assertEquals(SendState.READ, states["m2"])
+    }
+
+    @Test
+    fun `a receipt for an unknown id changes nothing`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        assertTrue(!cache.applyReadReceipt(setOf("other"), 500))
+        assertTrue(!cache.applyReadReceipt(emptySet(), 500))
+        assertEquals(SendState.SENT, cache.history("bob").single().state)
+    }
+
+    @Test
+    fun `a read state is never downgraded by a later history page`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        cache.applyReadReceipt(setOf("m1"), 500)
+        // A page fetched before the receipt still says unread.
+        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        val stored = cache.history("bob").single()
+        assertEquals(SendState.READ, stored.state)
+        assertEquals(500L, stored.readAtEpochMs)
     }
 }

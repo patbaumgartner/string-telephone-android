@@ -35,6 +35,15 @@ class RealtimeEventTest {
     }
 
     @Test
+    fun `parses a message-read envelope into a receipt`() {
+        val frame = """{"type":"message-read","payload":"{\"messageIds\":[\"m1\",\"m2\"],\"readAt\":99}"}"""
+        val event = assertIs<RealtimeEvent.MessageRead>(parseRealtimeEvent(frame))
+        assertEquals(listOf("m1", "m2"), event.messageIds)
+        assertEquals(99L, event.readAtEpochMs)
+        assertNull(parseRealtimeEvent("""{"type":"message-read","payload":"{broken"}"""))
+    }
+
+    @Test
     fun `drops malformed frames and unknown fields`() {
         assertNull(parseRealtimeEvent("not json"))
         assertNull(parseRealtimeEvent("""{"type":"new-message","payload":"{broken"}"""))

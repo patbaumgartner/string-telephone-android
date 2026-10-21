@@ -46,7 +46,11 @@ data class Message(
     val status: MessageStatus,
 )
 
-enum class MessageStatus { PENDING, SENT, DELIVERED, FAILED }
+/**
+ * Delivery state of a sent message. `DELIVERED` is reserved: the first cut
+ * collapses sent and delivered and shows sent to read (ADR-0010).
+ */
+enum class MessageStatus { PENDING, SENT, DELIVERED, READ, FAILED }
 
 data class AccountIdentity(
     val username: String,

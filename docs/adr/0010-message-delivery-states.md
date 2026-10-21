@@ -2,15 +2,14 @@
 
 ## Status
 
-Accepted (planned; read receipts are an early messaging phase in
-`docs/feature-plan.md`). Read receipts are **always on and mutual** — an
-opt-out was considered and rejected because it needs a user preference,
-server-side sync, and asymmetric-visibility UI; revisiting that is a protocol
-change.
+Accepted (implemented in Phase 5, 2026-10-21). Read receipts are **always on
+and mutual** — an opt-out was considered and rejected because it needs a user
+preference, server-side sync, and asymmetric-visibility UI; revisiting that is
+a protocol change.
 
 ## Context
 
-The app shows only local send state today: `QUEUED` (optimistic), `SENT`
+The app shows only local send state today: `PENDING` (optimistic), `SENT`
 (server acknowledged) and `FAILED`. Users cannot tell whether the other side
 received or read a message. Reading a push or in-app notification must not
 count as reading the message — only displaying it in the open conversation
@@ -71,6 +70,25 @@ the existing REST and WebSocket channels.
   one tick (sent), double tick (read, brand colour), warning (failed).
 - **Grouping.** Read marks are per message; the UI lights the double tick on
   every read message, not only the last.
+
+### Implementation notes
+
+- The read state lives in the `messages` row (`read_at`, added by the
+  `V4__message_read_state.sql` migration). One atomic `UPDATE` marks the
+  unread messages of the conversation; a message that is read twice keeps the
+  timestamp of the first read, so a receipt never moves.
+- The update returns the ids it changed, ordered by creation time and id, so
+  the response lists them in conversation order (`UPDATE ... RETURNING` alone
+  gives no row order).
+- The server derives both sides of the mark from the authenticated principal:
+  the caller is the reader, `{peer}` is the author. A message outside that
+  conversation is `404`, so a third party cannot name someone else's message.
+- The client keeps a read state sticky. A history page that was fetched before
+  the receipt still says "unread", and merging it must not undo a tick the
+  user already sees.
+- The client merges on explicit rules, not on the ordinal of the state enum:
+  a read state never loses to a later page, and a failure never loses to a
+  success.
 
 ## Consequences
 

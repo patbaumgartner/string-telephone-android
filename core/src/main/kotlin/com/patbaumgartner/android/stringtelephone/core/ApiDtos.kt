@@ -24,6 +24,8 @@ data class MessageDto(
     val content: String,
     val createdAt: Long,
     val clientKey: String,
+    /** Epoch millisecond at which the recipient read the message; null when unread (ADR-0010). */
+    val readAt: Long? = null,
 )
 
 @Serializable
@@ -31,6 +33,13 @@ data class SendMessageRequest(val recipient: String, val content: String, val cl
 
 @Serializable
 data class MessagesPageDto(val messages: List<MessageDto>, val nextCursor: String?)
+
+/** Marks the peer's messages read; `upToMessageId` bounds the mark to one point in the history. */
+@Serializable
+data class MarkReadRequest(val upToMessageId: String? = null)
+
+@Serializable
+data class MarkReadResponseDto(val messageIds: List<String> = emptyList(), val readAt: Long = 0)
 
 /** Envelope wrapping every frame the companion API pushes on `/v1/ws`. */
 @Serializable
@@ -49,6 +58,9 @@ data class WsNewMessageDto(
 @Serializable
 data class WsPresenceDto(val username: String, val presence: String, val updatedAt: Long? = null)
 
+@Serializable
+data class WsMessageReadDto(val messageIds: List<String> = emptyList(), val readAt: Long = 0)
+
 /** Decoded realtime frame; unknown types are reported, malformed frames dropped. */
 sealed interface RealtimeEvent {
     data class NewMessage(
@@ -64,6 +76,12 @@ sealed interface RealtimeEvent {
         val username: String,
         val presence: String,
         val updatedAtEpochMs: Long?,
+    ) : RealtimeEvent
+
+    /** Read receipts (ADR-0010): the peer read the listed message ids. */
+    data class MessageRead(
+        val messageIds: List<String>,
+        val readAtEpochMs: Long,
     ) : RealtimeEvent
 
     data class Unknown(val type: String) : RealtimeEvent
@@ -92,6 +110,10 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
         "presence" -> runCatching {
             val event = realtimeJson.decodeFromString(WsPresenceDto.serializer(), envelope.payload)
             RealtimeEvent.Presence(event.username, event.presence, event.updatedAt)
+        }.getOrNull()
+        "message-read" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsMessageReadDto.serializer(), envelope.payload)
+            RealtimeEvent.MessageRead(event.messageIds, event.readAt)
         }.getOrNull()
         else -> RealtimeEvent.Unknown(envelope.type)
     }
