@@ -10,6 +10,7 @@ serialization = "1.11.0"
 coroutines = "1.11.0"
 junit = "4.13.2"
 testcontainers = "1.21.4"
+awsSdk = "2.29.51"
 linphone = "5.4.88"
 datastore = "1.2.0"
 securityCrypto = "1.1.0"
@@ -38,6 +39,9 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 linphone-sdk = { module = "org.linphone:linphone-sdk-android", version.ref = "linphone" }
 junit = { module = "junit:junit", version.ref = "junit" }
 testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+testcontainers-localstack = { module = "org.testcontainers:localstack", version.ref = "testcontainers" }
+aws-s3 = { module = "software.amazon.awssdk:s3", version.ref = "awsSdk" }
+aws-crt = { module = "software.amazon.awssdk.crt:aws-crt", version.ref = "awsSdk" }
 robolectric = { module = "org.robolectric:robolectric", version = "4.17" }
 androidx-test-core = { module = "androidx.test:core", version = "1.6.1" }
 androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }

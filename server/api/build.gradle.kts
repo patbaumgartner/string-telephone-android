@@ -31,12 +31,14 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.postgresql:postgresql")
     implementation("org.flywaydb:flyway-database-postgresql")
+    implementation(libs.aws.s3)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.localstack)
     testImplementation(libs.kotlinx.coroutines.test)
 }
 
