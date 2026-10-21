@@ -37,6 +37,10 @@ data class MessageResult(
     val clientKey: String,
     /** Epoch millisecond at which the recipient read the message; null while unread (ADR-0010). */
     val readAt: Long? = null,
+    val type: String = "TEXT",
+    val mediaId: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
@@ -67,6 +71,12 @@ class CompanionApiClient(
     } catch (_: SerializationException) {
         throw ApiException.Protocol("invalid response")
     }
+
+    /** Base URL of the companion API (for building media URLs). */
+    fun baseUrl(): String = baseUrl
+
+    /** Current bearer token (for authenticated media fetches). */
+    fun authToken(): String = tokenProvider()
 
     fun me(): MeResult = request {
         val response = http.newCall(
@@ -103,7 +113,8 @@ class CompanionApiClient(
         }
     }
 
-    fun sendMessage(recipient: String, content: String, clientKey: String): MessageResult = request {
+    fun sendMessage(recipient: String, content: String, clientKey: String): MessageResult = sendText(recipient, content, clientKey)
+    fun sendText(recipient: String, content: String, clientKey: String): MessageResult = request {
         val payload = json.encodeToString(
             SendMessageRequest.serializer(),
             SendMessageRequest(recipient, content, clientKey),
@@ -120,8 +131,58 @@ class CompanionApiClient(
                 401, 403 -> throw ApiException.Auth
                 404 -> throw ApiException.Protocol("peer unknown")
                 413 -> throw ApiException.Protocol("content too large")
-                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt) }
+                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height) }
                 else -> throw ApiException.Unexpected(r.code)
+            }
+        }
+    }
+
+    fun sendMedia(recipient: String, mediaId: String, clientKey: String, width: Int? = null, height: Int? = null): MessageResult = request {
+        val payload = json.encodeToString(
+            SendMessageRequest.serializer(),
+            SendMessageRequest(recipient, "", clientKey, "IMAGE", mediaId),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$recipient/messages")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when (r.code) {
+                401, 403 -> throw ApiException.Auth
+                404 -> throw ApiException.Protocol("peer unknown")
+                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height) }
+                else -> throw ApiException.Unexpected(r.code)
+            }
+        }
+    }
+
+    /**
+     * Uploads a media blob (image) to the companion API. Returns the server
+     * record, whose [MediaRecord.id] is referenced when sending the message.
+     */
+    fun uploadMedia(peer: String, bytes: ByteArray, contentType: String, fileName: String): com.patbaumgartner.android.stringtelephone.core.MediaRecordDto = request {
+        val boundary = "----StringTelephone" + System.currentTimeMillis()
+        val body = okhttp3.MultipartBody.Builder(boundary)
+            .setType(okhttp3.MultipartBody.FORM)
+            .addFormDataPart("peer", peer)
+            .addFormDataPart("file", fileName, bytes.toRequestBody(contentType.toMediaType()))
+            .build()
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/media")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(body)
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 413 -> throw ApiException.Protocol("media too large")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(com.patbaumgartner.android.stringtelephone.core.MediaRecordDto.serializer(), r.body.string())
             }
         }
     }
@@ -141,7 +202,7 @@ class CompanionApiClient(
                 else -> {
                     val page = json.decodeFromString(MessagesPageDto.serializer(), r.body.string())
                     return@request MessagesPage(
-                        messages = page.messages.map { MessageResult(it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey, it.readAt) },
+                        messages = page.messages.map { MessageResult(it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey, it.readAt, it.type, it.mediaId, it.width, it.height) },
                         nextCursor = page.nextCursor,
                     )
                 }

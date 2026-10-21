@@ -64,6 +64,12 @@ class ScreenshotTest {
         capture("10-chat-delivery-states", ScreenshotRoute.CHAT_DELIVERY_STATES)
     }
 
+    /** The image-message bubble with its placeholder and meta row (Phase 6). */
+    @Test
+    fun captureChatImage() {
+        capture("11-chat-image", ScreenshotRoute.CHAT_IMAGE)
+    }
+
     @Test
     fun captureCall() {
         capture("04-call", ScreenshotRoute.CALL)

@@ -102,7 +102,8 @@ class StringTelephoneRepository(
         }
     }
 
-    fun api(): CompanionApiClient? = apiProvider()
+    fun apiBaseUrl(): String? = apiProvider()?.baseUrl()
+    fun apiToken(): String? = apiProvider()?.authToken()
 
     /** Per-peer observable history; the cache emits a change token on every mutation. */
     fun chatFlow(peer: String): StateFlow<List<ChatMessage>> =
@@ -222,6 +223,10 @@ class StringTelephoneRepository(
                 content = event.content,
                 createdAt = event.createdAtEpochMs,
                 clientKey = event.clientKey,
+                type = event.type,
+                mediaId = event.mediaId,
+                width = event.width,
+                height = event.height,
             ),
             me,
         )
@@ -317,11 +322,24 @@ class StringTelephoneRepository(
         }
     }
 
+    fun uploadMedia(peer: String, bytes: ByteArray, contentType: String, fileName: String): com.patbaumgartner.android.stringtelephone.core.MediaRecordDto {
+        val client = apiProvider() ?: throw IllegalStateException("no api")
+        return client.uploadMedia(peer, bytes, contentType, fileName)
+    }
+
     fun send(peer: String, content: String, onResult: (Boolean) -> Unit) {
         scope.launch(sessionJob) {
             val key = newMessageClientKey()
             chatCache.append(peer, ChatMessage(null, key, fromMe = true, content, System.currentTimeMillis(), SendState.PENDING))
             onResult(deliver(peer, content, key))
+        }
+    }
+
+    fun sendImage(peer: String, mediaId: String, width: Int?, height: Int?, onResult: (Boolean) -> Unit) {
+        scope.launch(sessionJob) {
+            val key = newMessageClientKey()
+            chatCache.append(peer, ChatMessage(null, key, fromMe = true, content = "", sentAtEpochMs = System.currentTimeMillis(), state = SendState.PENDING, type = "IMAGE", mediaId = mediaId, width = width, height = height))
+            onResult(deliverImage(peer, mediaId, key))
         }
     }
 
@@ -331,13 +349,33 @@ class StringTelephoneRepository(
      */
     fun resend(peer: String, message: ChatMessage) {
         if (!message.fromMe || !chatCache.markRetrying(message.clientKey)) return
-        scope.launch(sessionJob) { deliver(peer, message.content, message.clientKey) }
+        scope.launch(sessionJob) {
+            if (message.type == "IMAGE" && message.mediaId != null) {
+                deliverImage(peer, message.mediaId, message.clientKey)
+            } else {
+                deliver(peer, message.content, message.clientKey)
+            }
+        }
     }
 
     private suspend fun deliver(peer: String, content: String, key: String): Boolean {
         val client = apiProvider() ?: run { chatCache.markFailed(key); return false }
         return try {
             val sent = withContext(Dispatchers.IO) { client.sendMessage(peer, content, key) }
+            currentCoroutineContext().ensureActive()
+            chatCache.markSent(key, sent.id)
+            true
+        } catch (_: ApiException) {
+            currentCoroutineContext().ensureActive()
+            chatCache.markFailed(key)
+            false
+        }
+    }
+
+    private suspend fun deliverImage(peer: String, mediaId: String, key: String): Boolean {
+        val client = apiProvider() ?: run { chatCache.markFailed(key); return false }
+        return try {
+            val sent = withContext(Dispatchers.IO) { client.sendMedia(peer, mediaId, key) }
             currentCoroutineContext().ensureActive()
             chatCache.markSent(key, sent.id)
             true

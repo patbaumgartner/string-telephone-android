@@ -18,6 +18,7 @@ class ApiController(
     private val healthProbe: HealthProbe,
     private val rateLimiter: RateLimiter,
     private val hub: WsHub,
+    private val media: MediaService,
 ) {
     @GetMapping("/health")
     fun health() = mapOf("status" to "ok")
@@ -83,6 +84,21 @@ class ApiController(
         if (peer == me.username) throw ApiFailure(HttpStatus.BAD_REQUEST, "cannot message yourself")
         if (users.find(peer)?.active != true) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
         if (body.recipient != peer) throw ApiFailure(HttpStatus.BAD_REQUEST, "recipient mismatch")
+        val type = body.type.uppercase()
+        if (type == "IMAGE") {
+            val mediaId = body.mediaId?.takeIf { it.isNotBlank() }
+                ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "mediaId required")
+            val mediaRecord = media.getRecord(mediaId)
+                ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such media")
+            if (mediaRecord.owner != me.username || mediaRecord.peer != peer) {
+                throw ApiFailure(HttpStatus.FORBIDDEN, "forbidden")
+            }
+            if (mediaRecord.state != "ready") {
+                throw ApiFailure(HttpStatus.BAD_REQUEST, "media not ready")
+            }
+            val stored = messages.insertMedia(me.username, peer, body.clientKey, mediaId, mediaRecord)
+            return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
+        }
         if (body.content.isEmpty() || body.content.toByteArray(Charsets.UTF_8).size > Messages.MAX_CONTENT_BYTES) {
             throw ApiFailure(HttpStatus.CONTENT_TOO_LARGE, "content size invalid")
         }
@@ -122,4 +138,4 @@ class ApiController(
 }
 
 private fun messageDto(record: MessageRecord) =
-    MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt)
+    MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt, record.type, record.mediaId, record.width, record.height)

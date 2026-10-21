@@ -213,17 +213,29 @@ tick state.
 ### Phase 6 — Image messaging
 
 **Effort:** Medium
+**Status:** Done (2026-10-21)
 
-- `POST /v1/conversations/{peer}/messages` gains a media variant: message
-  `type` (`TEXT` | `IMAGE`), `mediaId`, `thumbnailId`, dimensions.
-- App: attachment button in the Composer, Photo Picker (Android 13+ with
-  legacy fallback), client-side downscale before upload (max 1920px, JPEG 85),
-  background upload with progress, inline thumbnail in the bubble, tap to
-  open a fullscreen viewer.
-- Failed uploads behave like failed text messages: visible, tap to retry.
+Implements the image variant of the messaging contract on top of the Phase 4
+media endpoints ([ADR-0009](adr/0009-media-storage-s3.md)).
 
-**Depends on:** Phases 3+4. **Tests:** compression unit tests, image bubble
-screenshots, upload integration test.
+- Server: `POST /v1/conversations/{peer}/messages` accepts
+  `{"type":"IMAGE","mediaId":...}`; the message carries `type`, `mediaId`,
+  `width`/`height` from the upload record. Media upload itself came with
+  Phase 4; Phase 6 wires multipart through Tomcat (52 MB file / 54 MB request
+  limits, headroom over the 16 MB image cap) and opens `/v1/media/**` on the
+  Android bearer chain.
+- App: attachment button in the Composer, Photo Picker, client-side
+  downscale before upload (max 1920px long edge, JPEG 85, never enlarges —
+  `ImageDownscale`), background upload, inline thumbnail from
+  `GET /v1/media/{id}/thumbnail` in the bubble, tap to open a fullscreen
+  viewer. A quiet placeholder icon renders while no thumbnail is loaded.
+- Failed uploads behave like failed text messages: visible failure state,
+  tap to resend (resend redelivers the stored `mediaId`).
+
+**Depends on:** Phases 3+4. **Tests:** `ImageDownscaleTest` (Robolectric
+compression), `ImageMessagingIntegrationTest` (upload → IMAGE message with
+dimensions, both sides' history, stranger and cross-user media rejection,
+missing/bogus media), `11-chat-image.png` screenshot with dark variant.
 
 ---
 

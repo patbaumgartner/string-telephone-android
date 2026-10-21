@@ -22,6 +22,12 @@ data class ChatMessage(
     val state: SendState,
     /** Server-assigned read timestamp for messages the peer read; null while unread. */
     val readAtEpochMs: Long? = null,
+    /** Message kind: TEXT (default) or IMAGE. */
+    val type: String = "TEXT",
+    /** Media id referenced by an IMAGE message. */
+    val mediaId: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
 ) {
     companion object {
         fun fromServer(m: com.patbaumgartner.android.stringtelephone.network.MessageResult, myUsername: String): ChatMessage = ChatMessage(
@@ -32,6 +38,10 @@ data class ChatMessage(
             sentAtEpochMs = m.createdAt,
             state = if (m.readAt != null) SendState.READ else SendState.SENT,
             readAtEpochMs = m.readAt,
+            type = m.type,
+            mediaId = m.mediaId,
+            width = m.width,
+            height = m.height,
         )
     }
 }

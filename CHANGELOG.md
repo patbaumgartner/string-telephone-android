@@ -9,6 +9,12 @@ No public release has been published yet.
 
 ### Changed
 
+- The chat now supports image sharing (Phase 6). An attachment button in the
+  composer opens the system Photo Picker; the picked image is downscaled
+  client-side (max 1920px long edge, JPEG 85) before upload, sent as an
+  `IMAGE` message referencing the uploaded media, and rendered as an inline
+  thumbnail in the bubble — tap it to open a fullscreen viewer. Failed image
+  uploads behave exactly like failed text messages: visible, tap to resend.
 - Messages now carry read receipts (ADR-0010). The server stores a per-message
   read state, exposes it as `readAt` in the conversation history and
   announces it as a `message-read` event on the realtime stream. The app

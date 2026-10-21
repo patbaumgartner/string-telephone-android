@@ -4,6 +4,8 @@ import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,6 +29,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -76,6 +80,8 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.format.TextStyle
 import java.util.Date
+
+val LocalViewModel = androidx.compose.runtime.compositionLocalOf<AppViewModel?> { null }
 
 @Composable
 internal fun ChatScreen(
@@ -147,6 +153,7 @@ internal fun ChatScreen(
                                 startsGroup = row.startsGroup,
                                 maxWidth = bubbleMaxWidth,
                                 onRetry = { viewModel.retrySend(peer, row.message) },
+                                viewModel = viewModel,
                             )
                         }
                     }
@@ -160,11 +167,21 @@ internal fun ChatScreen(
             if (emojiPickerVisible) {
                 EmojiPickerRow(onEmoji = { viewModel.onChatInputChanged(peer, viewModel.chatInput + it) })
             }
+            val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+                uri?.let { viewModel.attachImage(peer, it) }
+            }
             Composer(
                 value = viewModel.chatInput,
                 onValueChange = { viewModel.onChatInputChanged(peer, it) },
                 emojiPickerVisible = emojiPickerVisible,
                 onToggleEmoji = { emojiPickerVisible = !emojiPickerVisible },
+                onAttach = {
+                    picker.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly,
+                        ),
+                    )
+                },
                 onSend = { viewModel.sendCurrent(peer) },
             )
         }
@@ -264,7 +281,7 @@ private fun DayChip(date: LocalDate) {
 }
 
 @Composable
-private fun ChatBubble(message: ChatMessage, startsGroup: Boolean, maxWidth: Dp, onRetry: () -> Unit) {
+private fun ChatBubble(message: ChatMessage, startsGroup: Boolean, maxWidth: Dp, onRetry: () -> Unit, viewModel: AppViewModel? = null) {
     val colors = StringTelephoneTheme.chat
     val failed = message.state == SendState.FAILED
     val time = DateFormat.getTimeFormat(LocalContext.current).format(Date(message.sentAtEpochMs))
@@ -287,30 +304,34 @@ private fun ChatBubble(message: ChatMessage, startsGroup: Boolean, maxWidth: Dp,
             .widthIn(max = maxWidth)
             .semantics(mergeDescendants = true) { contentDescription = description }
         val bubbleContent: @Composable () -> Unit = {
-            MessageWithMeta(
-                text = message.content,
-                modifier = Modifier.padding(
-                    start = if (message.fromMe) 10.dp else 10.dp + TAIL_WIDTH,
-                    end = if (message.fromMe) 10.dp + TAIL_WIDTH else 10.dp,
-                    top = 6.dp,
-                    bottom = 6.dp,
-                ),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(time, style = MaterialTheme.typography.labelSmall, color = colors.meta)
-                    if (message.fromMe) {
-                        Spacer(Modifier.width(3.dp))
-                        Icon(
-                            when (message.state) {
-                                SendState.PENDING -> StringTelephoneIcons.Schedule
-                                SendState.SENT -> StringTelephoneIcons.Done
-                                SendState.READ -> StringTelephoneIcons.DoneAll
-                                SendState.FAILED -> StringTelephoneIcons.ErrorOutline
-                            },
-                            contentDescription = null,
-                            tint = if (failed) MaterialTheme.colorScheme.error else StringTelephoneTheme.accents.brand,
-                            modifier = Modifier.size(15.dp),
-                        )
+            if (message.type == "IMAGE" && message.mediaId != null) {
+                ImageBubbleContent(message, colors, time, failed, status, viewModel)
+            } else {
+                MessageWithMeta(
+                    text = message.content,
+                    modifier = Modifier.padding(
+                        start = if (message.fromMe) 10.dp else 10.dp + TAIL_WIDTH,
+                        end = if (message.fromMe) 10.dp + TAIL_WIDTH else 10.dp,
+                        top = 6.dp,
+                        bottom = 6.dp,
+                    ),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(time, style = MaterialTheme.typography.labelSmall, color = colors.meta)
+                        if (message.fromMe) {
+                            Spacer(Modifier.width(3.dp))
+                            Icon(
+                                when (message.state) {
+                                    SendState.PENDING -> StringTelephoneIcons.Schedule
+                                    SendState.SENT -> StringTelephoneIcons.Done
+                                    SendState.READ -> StringTelephoneIcons.DoneAll
+                                    SendState.FAILED -> StringTelephoneIcons.ErrorOutline
+                                },
+                                contentDescription = null,
+                                tint = if (failed) MaterialTheme.colorScheme.error else StringTelephoneTheme.accents.brand,
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -377,11 +398,66 @@ private fun MessageWithMeta(text: String, modifier: Modifier = Modifier, meta: @
 }
 
 @Composable
+private fun ImageBubbleContent(message: ChatMessage, colors: com.patbaumgartner.android.stringtelephone.ui.theme.ChatColors, time: String, failed: Boolean, status: String, viewModel: AppViewModel?) {
+    val baseUrl = viewModel?.mediaBaseUrl()
+    val token = viewModel?.mediaToken()
+    val thumbUrl = if (baseUrl != null && message.mediaId != null) "$baseUrl/v1/media/${message.mediaId}/thumbnail" else ""
+    val fullUrl = if (baseUrl != null && message.mediaId != null) "$baseUrl/v1/media/${message.mediaId}" else ""
+    var viewerOpen by remember { mutableStateOf(false) }
+    Column(modifier = Modifier.padding(6.dp)) {
+        Box(
+            modifier = Modifier
+                .size(width = 180.dp, height = 180.dp)
+                .clickable { if (fullUrl.isNotBlank()) viewerOpen = true },
+        ) {
+            if (thumbUrl.isNotBlank()) {
+                RemoteImage(url = thumbUrl, token = token, modifier = Modifier.fillMaxSize())
+            }
+            if (failed) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(StringTelephoneIcons.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                }
+            } else if (thumbUrl.isBlank()) {
+                // No URL resolved yet (no session): a quiet placeholder instead of an empty tile.
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(StringTelephoneIcons.Image, contentDescription = null, tint = colors.meta)
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+            Text(time, style = MaterialTheme.typography.labelSmall, color = colors.meta)
+            if (message.fromMe) {
+                Spacer(Modifier.width(3.dp))
+                Icon(
+                    when (message.state) {
+                        SendState.PENDING -> StringTelephoneIcons.Schedule
+                        SendState.SENT -> StringTelephoneIcons.Done
+                        SendState.READ -> StringTelephoneIcons.DoneAll
+                        SendState.FAILED -> StringTelephoneIcons.ErrorOutline
+                    },
+                    contentDescription = null,
+                    tint = if (failed) MaterialTheme.colorScheme.error else StringTelephoneTheme.accents.brand,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
+    }
+    if (viewerOpen) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { viewerOpen = false }) {
+            Surface(color = Color.Black) {
+                RemoteImage(url = fullUrl, token = token, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            }
+        }
+    }
+}
+
+@Composable
 private fun Composer(
     value: String,
     onValueChange: (String) -> Unit,
     emojiPickerVisible: Boolean,
     onToggleEmoji: () -> Unit,
+    onAttach: () -> Unit,
     onSend: () -> Unit,
 ) {
     val hint = stringResource(R.string.chat_hint)
@@ -407,6 +483,9 @@ private fun Composer(
                             StringTelephoneTheme.chat.meta
                         },
                     )
+                }
+                IconButton(onClick = onAttach) {
+                    Text("📎", style = MaterialTheme.typography.titleMedium)
                 }
                 BasicTextField(
                     value = value,
