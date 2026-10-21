@@ -10,7 +10,7 @@ data class PresenceSnapshot(val presence: String, val observedAtEpochMs: Long?)
  */
 class Presence(
     private val pbx: PbxGateway,
-    private val hub: WsHub,
+    private val sessions: WsSessions,
     private val users: Users,
     private val clock: () -> Long = System::currentTimeMillis,
     private val cacheMs: Long = 5_000,
@@ -26,12 +26,12 @@ class Presence(
      */
     @org.springframework.scheduling.annotation.Scheduled(initialDelay = 5000, fixedDelay = 10000)
     fun publishChanges() {
-        if (!hub.hasSessions()) return
+        if (!sessions.hasSessions()) return
         invalidate()
         val active = users.list().filter { it.active }.map { it.username }
         published.keys.retainAll(active.toSet())
         for ((username, snapshot) in all(active)) {
-            if (published.put(username, snapshot.presence) != snapshot.presence) hub.presenceChanged(username)
+            if (published.put(username, snapshot.presence) != snapshot.presence) publish(username)
         }
     }
 
@@ -42,6 +42,12 @@ class Presence(
         return usernames.associateWith { snapshot(it, view) }
     }
 
+    /** Tells every other connected client about [username]'s current presence. */
+    fun publish(username: String) {
+        val snapshot = of(username)
+        sessions.broadcast(except = username, payload = WsFrames.presence(username, snapshot))
+    }
+
     /** Drops cached PBX state so the next lookup observes a fresh registration. */
     fun invalidate() {
         cached = null
@@ -49,7 +55,7 @@ class Presence(
 
     private fun snapshot(username: String, view: PbxView): PresenceSnapshot {
         val now = clock()
-        if (hub.isConnected(username)) return PresenceSnapshot(ONLINE, now)
+        if (sessions.isConnected(username)) return PresenceSnapshot(ONLINE, now)
         val states = view.states ?: return PresenceSnapshot(UNKNOWN, null)
         val reachable = states[username]?.let(::sipReachable) == true
         return PresenceSnapshot(if (reachable) ONLINE else OFFLINE, view.observedAt)

@@ -2,6 +2,8 @@ package com.patbaumgartner.android.stringtelephone.network
 
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
 import com.patbaumgartner.android.stringtelephone.core.ContactsDto
+import com.patbaumgartner.android.stringtelephone.core.MarkReadRequest
+import com.patbaumgartner.android.stringtelephone.core.MarkReadResponseDto
 import com.patbaumgartner.android.stringtelephone.core.MeDto
 import com.patbaumgartner.android.stringtelephone.core.MessageDto
 import com.patbaumgartner.android.stringtelephone.core.MessagesPageDto
@@ -33,6 +35,8 @@ data class MessageResult(
     val content: String,
     val createdAt: Long,
     val clientKey: String,
+    /** Epoch millisecond at which the recipient read the message; null while unread (ADR-0010). */
+    val readAt: Long? = null,
 )
 
 data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
@@ -116,7 +120,7 @@ class CompanionApiClient(
                 401, 403 -> throw ApiException.Auth
                 404 -> throw ApiException.Protocol("peer unknown")
                 413 -> throw ApiException.Protocol("content too large")
-                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey) }
+                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt) }
                 else -> throw ApiException.Unexpected(r.code)
             }
         }
@@ -137,10 +141,38 @@ class CompanionApiClient(
                 else -> {
                     val page = json.decodeFromString(MessagesPageDto.serializer(), r.body.string())
                     return@request MessagesPage(
-                        messages = page.messages.map { MessageResult(it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey) },
+                        messages = page.messages.map { MessageResult(it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey, it.readAt) },
                         nextCursor = page.nextCursor,
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Marks the peer's messages as read (ADR-0010). The caller must be the
+     * foreground chat screen: a notification, a background sync or a cursor
+     * catch-up must never send this.
+     */
+    fun markRead(peer: String, upToMessageId: String? = null): MarkReadResponseDto = request {
+        val payload = json.encodeToString(
+            MarkReadRequest.serializer(),
+            MarkReadRequest(upToMessageId),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$peer/read")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("unknown peer")
+                r.code == 400 -> throw ApiException.Protocol("invalid read mark")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(MarkReadResponseDto.serializer(), r.body.string())
             }
         }
     }

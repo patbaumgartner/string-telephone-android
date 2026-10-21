@@ -79,7 +79,7 @@ class StringTelephoneRepositoryRealtimeTest {
                 fromMe = true,
                 content = "hi",
                 sentAtEpochMs = 1_000,
-                state = SendState.QUEUED,
+                state = SendState.PENDING,
             ),
         )
 

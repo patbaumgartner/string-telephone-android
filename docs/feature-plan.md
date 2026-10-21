@@ -1,7 +1,7 @@
 # String Telephone — Feature Roadmap
 
 Date: 2026-10-20
-Status: In progress (phases 1 to 3 done; see the table below)
+Status: In progress (phases 1 to 3 and 5 done; see the table below)
 
 This document captures feature requests, the decisions behind them, and the
 planned phases. It is a working document; status updates live in GitHub issues
@@ -34,7 +34,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 2 | Bluetooth audio routing | Small | Done | — |
 | 3 | PostgreSQL migration | Large | Done | — |
 | 4 | Garage media storage (server only) | Medium | Planned | Phase 3 |
-| 5 | Read receipts | Medium | Planned | Phase 3 |
+| 5 | Read receipts | Medium | Done | Phase 3 |
 | 6 | Image sharing | Medium | Planned | Phases 3+4 |
 | 7 | Typing indicators | Small | Planned | Phase 3 |
 | 8 | Emoji reactions | Medium | Planned | Phase 5 |
@@ -175,9 +175,10 @@ download endpoints; it does not change the chat UI (that is Phase 6).
 
 ### Phase 5 — Read receipts
 
-Implements [ADR-0010](adr/0010-message-delivery-states.md).
-
 **Effort:** Medium
+**Status:** Done (2026-10-21)
+
+Implements [ADR-0010](adr/0010-message-delivery-states.md).
 
 - Server: `read_at` per message; `POST /v1/conversations/{peer}/read` with
   optional `upToMessageId`; `readAt` field in history responses;
@@ -190,8 +191,22 @@ Implements [ADR-0010](adr/0010-message-delivery-states.md).
 - Client: `SendState` becomes `PENDING / SENT / READ / FAILED` (DELIVERED
   reserved); double tick in brand colour when read.
 
-**Tests:** cursor sync while chat is closed must not mark read; offline reads
-must reach the sender after reconnect; screenshot for every tick state.
+The server stores the read state in its own column (`read_at`, added by the
+`V4__message_read_state.sql` migration) and marks it with a single atomic
+`UPDATE`, so a message that is read twice keeps the timestamp of the first
+read. The mark derives both sides from the authenticated principal: the
+caller is the reader, `{peer}` is the author, and a message outside that
+conversation is `404`. The author learns about the receipt through the
+`message-read` frame on the realtime stream; the reader already knows from
+the response to its own mark. The app keeps a read state sticky, because a
+history page fetched before the receipt still says unread.
+
+**Tests:** `ApiIntegrationTest` covers the mutual mark, the idempotence and
+the authorization; `ChatCacheTest` and `StringTelephoneRepositoryReadReceiptTest`
+cover the receipt semantics, the cursor sync that must not mark read and the
+realtime frame; `verify-read-receipts.mjs` checks the contract end to end;
+the screenshot `docs/screenshots/10-chat-delivery-states.png` shows every
+tick state.
 
 ---
 

@@ -20,16 +20,20 @@ socket, shell access or privileged container is required.
 | --- | --- | --- |
 | API | 127.0.0.1:8080 HTTP by default; 8443 HTTPS when enabled | none — application state lives in `db` |
 | PostgreSQL (`db`) | none; 5432 is internal to the compose network | `db-data`: users, messages, desired PBX identities and settings |
+| Asterisk | 5060/UDP SIP; 5061/TCP SIP/TLS; 10000-10100/UDP RTP | `pbx-config`: generated configuration |
+| Garage (media store) | 127.0.0.1:3900 S3; 127.0.0.1:3902 static website | `garage-meta`, `garage-data`: object metadata and blocks |
 
 The API's Compose healthcheck probes `/ready`, which checks PostgreSQL rather
 than just the process; `/health` stays a plain liveness alias, and
 `/actuator/health` exposes the database probe for external monitoring.
-| Asterisk | 5060/UDP SIP; 5061/TCP SIP/TLS; 10000-10100/UDP RTP | `pbx-config`: generated configuration |
 
-Planned addition (not yet implemented): a Garage object store for media
-(ADR-0009) — see the [feature roadmap](feature-plan.md). For interactive
-database inspection a loopback-only pgweb container ships in the developer
-overlay `server/compose.dev.yaml`, never in the production stack.
+The media object store (ADR-0009) is still work in progress: the `garage`
+service is in the Compose stack but the API does not talk to it yet — see the
+[feature roadmap](feature-plan.md). Garage refuses to start without its RPC
+secret, so set `GARAGE_RPC_SECRET` (`openssl rand -hex 32`) before starting
+that service; `GARAGE_ADMIN_TOKEN` guards its administration API. For
+interactive database inspection a loopback-only pgweb container ships in the
+developer overlay `server/compose.dev.yaml`, never in the production stack.
 
 AMI port 5038 is **not published**. The API and Asterisk share the same
 private AMI username/password. Never expose AMI through the host or public
@@ -68,6 +72,8 @@ default admin passwords.
 | `ST_API_HTTPS_PORT` | `8443` | Compose host HTTPS port |
 | `ST_CERTS_DIR` | `./certs` | Mounted PBX PEM certificates and optional API keystore |
 | `PJSIP_TLS_ENABLE` | `auto` | `auto`, `true` or `false`; true requires mounted certificates |
+| `GARAGE_RPC_SECRET` | unset | Cluster credential of the media object store; Garage refuses to start without it (`openssl rand -hex 32`) |
+| `GARAGE_ADMIN_TOKEN` | unset | Guards the media store's administration API; the API is disabled without it |
 
 The old `API_ADMIN_TOKEN` is removed. Admin login uses Spring Security's
 session authentication with PBKDF2 password hashing, CSRF protection on every

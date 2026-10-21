@@ -58,6 +58,12 @@ class ScreenshotTest {
         capture("09-chat-scrollbar", ScreenshotRoute.CHAT_SCROLLBAR)
     }
 
+    /** Every delivery state the chat can draw, one bubble each (ADR-0010). */
+    @Test
+    fun captureChatDeliveryStates() {
+        capture("10-chat-delivery-states", ScreenshotRoute.CHAT_DELIVERY_STATES)
+    }
+
     @Test
     fun captureCall() {
         capture("04-call", ScreenshotRoute.CALL)

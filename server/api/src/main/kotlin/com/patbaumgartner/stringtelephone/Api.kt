@@ -17,6 +17,7 @@ class ApiController(
     private val presence: Presence,
     private val healthProbe: HealthProbe,
     private val rateLimiter: RateLimiter,
+    private val hub: WsHub,
 ) {
     @GetMapping("/health")
     fun health() = mapOf("status" to "ok")
@@ -88,7 +89,37 @@ class ApiController(
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(messageDto(messages.insert(me.username, peer, body.content, body.clientKey)))
     }
+
+    /**
+     * Marks the peer's messages as read by the caller (ADR-0010). Only the
+     * recipient may mark a message read; the server derives both sides from
+     * the authenticated principal, never from the request body.
+     *
+     * The client calls this only from the foreground chat screen while the
+     * messages are rendered — never from a notification handler, a
+     * background sync or a cursor catch-up.
+     */
+    @PostMapping("/v1/conversations/{peer}/read")
+    fun markRead(
+        request: HttpServletRequest,
+        @PathVariable peer: String,
+        @RequestBody(required = false) body: MarkReadRequest?,
+    ): MarkReadResponse {
+        val me = principal(request)
+        if (peer == me.username) throw ApiFailure(HttpStatus.BAD_REQUEST, "cannot read your own messages")
+        if (users.find(peer) == null) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
+        val upTo = body?.upToMessageId?.takeIf { it.isNotBlank() }?.let { id ->
+            val record = messages.findById(id) ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+            if (record.sender != peer || record.recipient != me.username) {
+                throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+            }
+            record.createdAt to record.id
+        }
+        val mark = messages.markRead(me.username, peer, upTo)
+        if (mark.messageIds.isNotEmpty()) hub.broadcastMessageRead(peer, mark)
+        return MarkReadResponse(mark.messageIds, mark.readAt)
+    }
 }
 
 private fun messageDto(record: MessageRecord) =
-    MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey)
+    MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt)

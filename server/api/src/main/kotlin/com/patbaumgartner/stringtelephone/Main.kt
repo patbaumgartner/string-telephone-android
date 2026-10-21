@@ -39,7 +39,13 @@ class StringTelephoneServer {
         RateLimiter(jdbcClient, maxAttempts = auth.rateLimitAttempts)
 
     @Bean
-    fun wsHub(users: Users, presence: Presence) = WsHub(users, presence)
+    fun wsSessions() = WsSessions()
+
+    @Bean
+    fun wsHub(users: Users, presence: Presence, sessions: WsSessions) = WsHub(users, presence, sessions)
+
+    @Bean
+    fun presence(pbx: PbxGateway, sessions: WsSessions, users: Users) = Presence(pbx, sessions, users)
 
     @Bean
     fun messages(jdbcClient: JdbcClient, hub: WsHub) = Messages(jdbcClient, hub::broadcastNewMessage)

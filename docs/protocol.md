@@ -108,6 +108,10 @@ Response `201`:
 }
 ```
 
+`readAt` is the epoch millisecond at which the recipient read the message. It
+is omitted while the message is unread, so a message the caller just sent
+never carries it.
+
 ### `GET /v1/conversations/{peer}/messages`
 
 Returns conversation history in both directions, newest first.
@@ -122,7 +126,8 @@ previous response's opaque `nextCursor`; invalid cursors return `400`.
     "recipient":"bob",
     "content":"hello",
     "createdAt":1760000000000,
-    "clientKey":"random-per-logical-message"
+    "clientKey":"random-per-logical-message",
+    "readAt":1760000005000
   }],
   "nextCursor":"MTc2MDAwMDAwMDAwMDp1dWlk"
 }
@@ -132,6 +137,43 @@ The cursor is URL-safe Base64 of `"<createdAtEpochMs>:<messageId>"`.
 Pagination uses both timestamp and message ID so records sharing a timestamp
 are not skipped. `nextCursor` is null for an empty page; otherwise it identifies
 the last record. Clients deduplicate by message ID.
+
+`readAt` is omitted while the message is unread and is otherwise the epoch
+millisecond at which the recipient read it. It is set for both directions of
+the conversation: a message you received carries the moment you read it, a
+message you sent carries the moment the peer read it.
+
+### `POST /v1/conversations/{peer}/read`
+
+Marks the messages `{peer}` sent to the caller as read.
+
+```json
+{"upToMessageId":"uuid"}
+```
+
+- `upToMessageId` is optional. Without it the whole conversation is marked;
+  with it the mark covers that message and every earlier one in the
+  conversation.
+- The peer must exist (`404`); marking your own messages returns `400`.
+- A message that is not part of the caller's conversation with `{peer}` is
+  `404`, whether it names another user's message or the caller's own.
+- The body carries no identity: the reader is the authenticated principal and
+  the author is `{peer}`.
+- Marking is idempotent. A message that is already read keeps its original
+  timestamp; only unread messages change.
+
+Response `200`:
+
+```json
+{"messageIds":["uuid"],"readAt":1760000005000}
+```
+
+`messageIds` lists the messages this call actually changed, in conversation
+order. An empty list means nothing changed. `readAt` is the time of the mark.
+
+Clients call this only while the conversation is on screen. A notification, a
+background sync or a cursor catch-up must not mark anything read — a receipt
+means a human looked at the message.
 
 ## Realtime stream (`/v1/ws`)
 
@@ -153,6 +195,11 @@ Invalid credentials close with `1008` immediately after upgrade.
   check (about every 10 seconds). The payload is
   `{"username":"bob","presence":"online","updatedAt":1760000000000}`.
   Clients ignore event types they do not know.
+- `{"type":"message-read","payload":"<JSON string>"}` goes to the author of the
+  messages that were read. The payload is
+  `{"messageIds":["uuid"],"readAt":1760000005000}` and lists the messages the
+  reader has just read, in conversation order. The author shows them as read;
+  the reader already knows from the response to its own mark.
 - Client frames do not create messages. Use the HTTP send endpoint.
 - Disable/reset closes all user streams with `1008`.
 

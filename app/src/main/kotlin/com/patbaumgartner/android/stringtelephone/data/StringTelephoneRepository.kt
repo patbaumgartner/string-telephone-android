@@ -184,8 +184,17 @@ class StringTelephoneRepository(
         when (event) {
             is RealtimeEvent.NewMessage -> onNewMessage(event)
             is RealtimeEvent.Presence -> onPresence(event)
+            is RealtimeEvent.MessageRead -> onMessageRead(event)
             is RealtimeEvent.Unknown -> Unit
         }
+    }
+
+    /**
+     * Applies a read receipt to the local cache (ADR-0010). The peer read the
+     * listed messages, so the sent copies turn into double ticks.
+     */
+    private fun onMessageRead(event: RealtimeEvent.MessageRead) {
+        chatCache.applyReadReceipt(event.messageIds.toSet(), event.readAtEpochMs)
     }
 
     private fun onPresence(event: RealtimeEvent.Presence) {
@@ -227,12 +236,16 @@ class StringTelephoneRepository(
     /** Marks [peer] as the visible conversation (or none) and clears its unread count. */
     fun setActiveConversation(peer: String?) {
         activeConversation = peer
-        if (peer != null) markRead(peer)
+        if (peer != null) clearUnreadBadge(peer)
     }
 
     fun isActiveConversation(peer: String): Boolean = activeConversation == peer
 
-    fun markRead(peer: String) {
+    /**
+     * Clears the local unread badge of [peer]. This is a local counter only:
+     * the server learns about the read state through [markConversationRead].
+     */
+    fun clearUnreadBadge(peer: String) {
         _unread.update { it - peer }
     }
 
@@ -255,6 +268,13 @@ class StringTelephoneRepository(
         }
     }
 
+    /**
+     * Loads the conversation history from the server.
+     *
+     * This never marks anything read: a cursor catch-up runs while the chat
+     * may be closed, and only the foreground chat screen may mark read
+     * (ADR-0010).
+     */
     fun loadHistory(peer: String, myUsername: String) {
         scope.launch(sessionJob) {
             val client = apiProvider() ?: return@launch
@@ -273,10 +293,34 @@ class StringTelephoneRepository(
         }
     }
 
+    /**
+     * Marks the peer's messages as read on the server (ADR-0010).
+     *
+     * Only the foreground chat screen calls this, and only while the messages
+     * are rendered. Notification handlers, background sync and cursor
+     * catch-up must not, so a message is only "read" when a human could
+     * actually see it.
+     */
+    fun markConversationRead(peer: String, upToMessageId: String?) {
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: return@launch
+            try {
+                val mark = withContext(Dispatchers.IO) { client.markRead(peer, upToMessageId) }
+                ensureActive()
+                if (mark.messageIds.isNotEmpty()) {
+                    chatCache.applyReadReceipt(mark.messageIds.toSet(), mark.readAt)
+                }
+            } catch (_: ApiException) {
+                // A failed receipt is not worth surfacing: the next render retries.
+                ensureActive()
+            }
+        }
+    }
+
     fun send(peer: String, content: String, onResult: (Boolean) -> Unit) {
         scope.launch(sessionJob) {
             val key = newMessageClientKey()
-            chatCache.append(peer, ChatMessage(null, key, fromMe = true, content, System.currentTimeMillis(), SendState.QUEUED))
+            chatCache.append(peer, ChatMessage(null, key, fromMe = true, content, System.currentTimeMillis(), SendState.PENDING))
             onResult(deliver(peer, content, key))
         }
     }

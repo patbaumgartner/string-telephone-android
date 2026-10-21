@@ -100,18 +100,15 @@ services:
     networks:
       - pbx
 
-volumes:
-  db-data:
-  pbx-config:
-  garage-meta:
-  garage-data:
-
-networks:
-  pbx:
-
   garage:
     image: dxflrs/garage:v1.0.1
     restart: unless-stopped
+    environment:
+      # Cluster credentials never live in the repository. The RPC secret is
+      # required for Garage to start (`openssl rand -hex 32`); the admin
+      # token guards the administration API and is optional.
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-}
     volumes:
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
@@ -121,3 +118,12 @@ networks:
       - "127.0.0.1:3902:3902"
     networks:
       - pbx
+
+volumes:
+  db-data:
+  pbx-config:
+  garage-meta:
+  garage-data:
+
+networks:
+  pbx:

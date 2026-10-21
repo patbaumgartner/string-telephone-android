@@ -77,8 +77,10 @@ Sources live under `server/api/src/main/kotlin/com/patbaumgartner/stringtelephon
 - `AsteriskGateway` atomically writes managed configuration, reloads and
   verifies endpoints over private AMI, reads status and hangs up channels.
 - `Users` manages provisioned identities and token lookup.
-- `Messages` handles persistence, idempotent sends, and cursor-based sync.
-- `WsHub` fans new-message events out to connected senders and recipients.
+- `Messages` handles persistence, idempotent sends, cursor-based sync and the
+  read marks; `WsHub` fans new-message and read-receipt events out to the
+  connected senders and recipients, and `WsSessions` keeps the live session
+  registry that both the hub and the presence service read.
 - `Database` access is PostgreSQL 18 through a Spring Boot auto-configured
   HikariCP `DataSource` and `JdbcClient`; multi-statement writes use narrowly
   scoped transactions and Flyway applies `db/migration` at startup
@@ -115,6 +117,15 @@ Compose -> AppViewModel -> CallEngine -> liblinphone -> Asterisk -> peer
 The API derives authorship from the authenticated principal, not a sender field
 provided by the client. WebSocket events accelerate updates; persisted messages
 and cursor sync provide catch-up. Messages are not end-to-end encrypted.
+
+A message becomes read only while the conversation is on screen: the chat
+screen asks the repository to mark the rendered messages read, and the
+repository posts them to `POST /v1/conversations/{peer}/read`. Notifications,
+background sync and cursor catch-up never mark anything read, because a receipt
+means a human looked at the message. The server keeps the read state in the
+message row, so both participants see it in the history, and the author learns
+about it through the `message-read` event
+([ADR-0010](adr/0010-message-delivery-states.md)).
 
 Incoming calls require a live app process. While signed in, the keep-alive
 service holds it; after reboot or force-stop, nothing rings until the app is

@@ -205,6 +205,86 @@ class ApiIntegrationTest {
     }
 
     @Test
+    fun `read receipts are mutual and only the recipient can mark a message read`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        val carol = server.create("carol", "Carol").getValue("apiToken").jsonPrimitive.content
+        val aliceEvents = SocketListener()
+        val aliceSocket = connect(alice, aliceEvents)
+
+        val sent = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"hello bob","clientKey":"r1"}""", alice)
+        assertEquals(201, sent.statusCode(), sent.body())
+        val id = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
+
+        // Unread until the recipient opens the conversation.
+        val before = messageOf(server.get("/v1/conversations/bob/messages", alice), id)
+        assertNull(before["readAt"])
+
+        // The author cannot mark the message read on the recipient's behalf.
+        assertEquals(404, server.post("/v1/conversations/bob/read", """{"upToMessageId":"$id"}""", alice).statusCode())
+
+        // A third party may not name a message of someone else's conversation...
+        assertEquals(404, server.post("/v1/conversations/bob/read", """{"upToMessageId":"$id"}""", carol).statusCode())
+        // ...and a blind mark touches no message of this conversation.
+        val stranger = server.post("/v1/conversations/bob/read", "{}", carol)
+        assertEquals(200, stranger.statusCode(), stranger.body())
+        assertEquals(0, Json.parseToJsonElement(stranger.body()).jsonObject.getValue("messageIds").jsonArray.size)
+        assertNull(messageOf(server.get("/v1/conversations/bob/messages", alice), id)["readAt"])
+
+        // The recipient marks it read; the author learns about it over the websocket.
+        // The peer is the other party, so the recipient addresses the author.
+        val mark = server.post("/v1/conversations/alice/read", """{"upToMessageId":"$id"}""", bob)
+        assertEquals(200, mark.statusCode(), mark.body())
+        val marked = Json.parseToJsonElement(mark.body()).jsonObject
+        assertEquals(listOf(id), marked.getValue("messageIds").jsonArray.map { it.jsonPrimitive.content })
+        val readAt = marked.getValue("readAt").jsonPrimitive.long
+        assertTrue(readAt > 0)
+
+        val event = aliceEvents.next("message-read")
+        val payload = Json.parseToJsonElement(event.getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals(listOf(id), payload.getValue("messageIds").jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(readAt, payload.getValue("readAt").jsonPrimitive.long)
+
+        // The author sees the receipt in the conversation history.
+        assertEquals(readAt, messageOf(server.get("/v1/conversations/bob/messages", alice), id).getValue("readAt").jsonPrimitive.long)
+
+        // Marking again is idempotent and never moves the receipt.
+        val again = server.post("/v1/conversations/alice/read", """{"upToMessageId":"$id"}""", bob)
+        assertEquals(200, again.statusCode())
+        assertEquals(0, Json.parseToJsonElement(again.body()).jsonObject.getValue("messageIds").jsonArray.size)
+        assertEquals(readAt, messageOf(server.get("/v1/conversations/bob/messages", alice), id).getValue("readAt").jsonPrimitive.long)
+        aliceSocket.abort()
+    }
+
+    @Test
+    fun `a read mark without a message id reads the whole conversation and the server owns the identity`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        val ids = (1..3).map { index ->
+            val response = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"m$index","clientKey":"bulk-$index"}""", alice)
+            assertEquals(201, response.statusCode())
+            Json.parseToJsonElement(response.body()).jsonObject.getValue("id").jsonPrimitive.content
+        }
+        val mark = server.post("/v1/conversations/alice/read", "{}", bob)
+        assertEquals(200, mark.statusCode(), mark.body())
+        assertEquals(ids, Json.parseToJsonElement(mark.body()).jsonObject.getValue("messageIds").jsonArray.map { it.jsonPrimitive.content })
+        for (id in ids) {
+            assertNotNull(messageOf(server.get("/v1/conversations/bob/messages", alice), id)["readAt"])
+        }
+        // The recipient's own messages stay unread: the receipt is about what the reader read.
+        val reply = server.post("/v1/conversations/alice/messages", """{"recipient":"alice","content":"hi alice","clientKey":"bulk-reply"}""", bob)
+        assertEquals(201, reply.statusCode())
+        val replyId = Json.parseToJsonElement(reply.body()).jsonObject.getValue("id").jsonPrimitive.content
+        assertNull(messageOf(server.get("/v1/conversations/alice/messages", bob), replyId)["readAt"])
+    }
+
+    private fun messageOf(response: java.net.http.HttpResponse<String>, id: String): JsonObject =
+        Json.parseToJsonElement(response.body()).jsonObject.getValue("messages").jsonArray
+            .map { it.jsonObject }.single { it.getValue("id").jsonPrimitive.content == id }
+
+    @Test
     fun `PBX outage is explicit pending creation retains one time credentials and retry reconciles desired state`() {
         server.login()
         server.pbx.available = false
