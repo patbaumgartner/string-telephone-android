@@ -103,6 +103,21 @@ services:
 volumes:
   db-data:
   pbx-config:
+  garage-meta:
+  garage-data:
 
 networks:
   pbx:
+
+  garage:
+    image: dxflrs/garage:v1.0.1
+    restart: unless-stopped
+    volumes:
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+      - ./garage/garage.toml:/etc/garage.toml:ro
+    ports:
+      - "127.0.0.1:3900:3900"
+      - "127.0.0.1:3902:3902"
+    networks:
+      - pbx

@@ -1,18 +1,22 @@
 package com.patbaumgartner.stringtelephone
 
+import com.patbaumgartner.stringtelephone.media.MediaStore
+import com.patbaumgartner.stringtelephone.media.MediaStoreProperties
+import com.patbaumgartner.stringtelephone.media.S3MediaStore
+import com.patbaumgartner.stringtelephone.media.InMemoryMediaStore
 import org.springframework.boot.autoconfigure.SpringBootApplication
-import org.springframework.boot.builder.SpringApplicationBuilder
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
+import org.springframework.context.annotation.Bean
 import org.springframework.boot.context.properties.EnableConfigurationProperties
+import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.boot.web.server.Compression
 import org.springframework.boot.web.server.WebServerFactoryCustomizer
 import org.springframework.boot.tomcat.servlet.TomcatServletWebServerFactory
-import org.springframework.context.annotation.Bean
 import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.scheduling.annotation.EnableAsync
 import org.springframework.scheduling.annotation.EnableScheduling
 import org.springframework.transaction.support.TransactionTemplate
 import java.nio.file.Path
-import java.time.Duration
 
 // Pooling, the JdbcClient bean and Flyway migrations all come from Spring Boot
 // auto-configuration: spring.datasource.* provides the HikariCP DataSource and
@@ -22,7 +26,7 @@ import java.time.Duration
 @SpringBootApplication(proxyBeanMethods = false)
 @EnableScheduling
 @EnableAsync
-@EnableConfigurationProperties(PbxProperties::class, TlsProperties::class, AuthProperties::class)
+@EnableConfigurationProperties(PbxProperties::class, TlsProperties::class, AuthProperties::class, MediaStoreProperties::class)
 class StringTelephoneServer {
     @Bean
     fun users(jdbcClient: JdbcClient) = Users(jdbcClient)
@@ -39,6 +43,17 @@ class StringTelephoneServer {
 
     @Bean
     fun messages(jdbcClient: JdbcClient, hub: WsHub) = Messages(jdbcClient, hub::broadcastNewMessage)
+
+    @Bean
+    fun media(jdbcClient: JdbcClient, store: MediaStore) = MediaService(jdbcClient, store)
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "st.media", name = ["enabled"], havingValue = "true")
+    fun mediaStoreS3(properties: MediaStoreProperties): MediaStore = S3MediaStore.create(properties)
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "st.media", name = ["enabled"], havingValue = "false", matchIfMissing = true)
+    fun mediaStoreInMemory(): MediaStore = InMemoryMediaStore()
 
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(PbxGateway::class)
@@ -61,7 +76,7 @@ class StringTelephoneServer {
     ) = AccountService(jdbcClient, tx, users, pbx, hub)
 
     @Bean
-    fun presence(pbx: PbxGateway, hub: WsHub, users: Users) = Presence(pbx, hub, users)
+    fun mediaApi(users: Users, media: MediaService) = MediaApi(users, media)
 
     /**
      * Boundary for background scheduling: the PBX reconciler and the presence
