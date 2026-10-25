@@ -9,6 +9,14 @@ No public release has been published yet.
 
 ### Changed
 
+- The chat now supports emoji reactions (Phase 8, ADR-0011). Long-press a
+  bubble to open a quick-emoji picker; reaction chips with counts appear
+  under the bubble and tapping a chip toggles the user's own reaction. The
+  server stores one reaction per author per message (reacting again
+  replaces it), fans changes out as `message-reaction` frames, and embeds
+  reactions in history pages. Chip updates are optimistic and roll back if
+  the request fails; messages not yet stored on the server cannot be
+  reacted to.
 - The chat now supports image sharing (Phase 6). An attachment button in the
   composer opens the system Photo Picker; the picked image is downscaled
   client-side (max 1920px long edge, JPEG 85) before upload, sent as an

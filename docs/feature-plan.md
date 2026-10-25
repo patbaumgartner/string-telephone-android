@@ -264,6 +264,7 @@ chat header presence area.
 ### Phase 8 — Emoji reactions
 
 **Effort:** Medium
+**Status:** Done (2026-10-25)
 Implements the reaction part of [ADR-0011](adr/0011-message-extras.md).
 
 - Any emoji from the keyboard/picker (no curated set).
@@ -271,6 +272,15 @@ Implements the reaction part of [ADR-0011](adr/0011-message-extras.md).
   fan-out to participants over the existing stream.
 - UI: long-press bubble → reaction; count chips under the bubble;
   tap-to-toggle own reaction.
+
+**Done 2026-10-25.** Reactions table (V6) keyed by (message, author) with
+upsert semantics; `PUT`/`DELETE` reaction endpoints return the post-change
+list; `message-reaction` frames fan out to both participants; history pages
+embed each message's reactions. The app shows count chips under the bubble,
+long-press opens a quick-emoji picker, and tapping a chip toggles the user's
+own reaction optimistically (rolled back if the request fails). Failed
+messages (no server id) cannot be reacted to. Oracle:
+`scripts/verify-reactions.mjs`.
 
 ---
 

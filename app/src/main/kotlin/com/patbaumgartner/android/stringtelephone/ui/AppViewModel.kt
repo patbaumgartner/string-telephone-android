@@ -23,6 +23,7 @@ import com.patbaumgartner.android.stringtelephone.data.AccountState
 import com.patbaumgartner.android.stringtelephone.data.ContactsState
 import com.patbaumgartner.android.stringtelephone.data.SignInState
 import com.patbaumgartner.android.stringtelephone.data.SignInError
+import com.patbaumgartner.android.stringtelephone.data.StringTelephoneRepository
 import com.patbaumgartner.android.stringtelephone.di.AppContainer
 import com.patbaumgartner.android.stringtelephone.notify.IncomingCallAccess
 import kotlinx.coroutines.Dispatchers
@@ -258,6 +259,14 @@ class AppViewModel(
     fun signedInUsername(): String? = container.credentialStore.username()
 
     fun signedInDisplayName(): String? = repository.account.value.me?.displayName
+
+    /** The signed-in username; reaction toggles need it to spot "my" chips. */
+    fun meUsername(): String? = repository.account.value.me?.username
+
+    /** Toggles the signed-in user's reaction on a message (ADR-0011, Phase 8). */
+    fun toggleReaction(peer: String, message: ChatMessage, emoji: String) {
+        repository.toggleReaction(peer, message, emoji)
+    }
 
     fun unreadState(): StateFlow<Map<String, Int>> = repository.unread
 

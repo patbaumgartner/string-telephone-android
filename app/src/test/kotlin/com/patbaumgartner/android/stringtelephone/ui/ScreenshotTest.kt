@@ -70,6 +70,12 @@ class ScreenshotTest {
         capture("11-chat-image", ScreenshotRoute.CHAT_IMAGE)
     }
 
+    /** Reaction chips under text bubbles (Phase 8, ADR-0011). */
+    @Test
+    fun captureChatReactions() {
+        capture("12-chat-reactions", ScreenshotRoute.CHAT_REACTIONS)
+    }
+
     @Test
     fun captureCall() {
         capture("04-call", ScreenshotRoute.CALL)

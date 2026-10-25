@@ -31,4 +31,20 @@ object WsFrames {
         Json.encodeToString(WsMessageDto("typing", Json.encodeToString(
             WsTypingEvent(peer, typing),
         )))
+
+    /**
+     * Reaction change (ADR-0011, Phase 8). Both conversation participants
+     * learn about the change; [author] is who reacted, so the other side can
+     * tell its own reactions apart.
+     */
+    fun reaction(message: MessageRecord, author: String, emoji: String, added: Boolean): String =
+        Json.encodeToString(WsMessageDto("message-reaction", Json.encodeToString(
+            WsReactionEvent(
+                messageId = message.id,
+                peer = if (message.sender == author) message.recipient else message.sender,
+                authorUsername = author,
+                emoji = emoji,
+                action = if (added) "added" else "removed",
+            ),
+        )))
 }

@@ -52,6 +52,10 @@ class StringTelephoneServer {
     fun messages(jdbcClient: JdbcClient, hub: WsHub) = Messages(jdbcClient, hub::broadcastNewMessage)
 
     @Bean
+    fun reactions(jdbcClient: JdbcClient, messages: Messages, hub: WsHub) =
+        Reactions(jdbcClient, messages, hub)
+
+    @Bean
     fun media(jdbcClient: JdbcClient, store: MediaStore) = MediaService(jdbcClient, store)
 
     @Bean

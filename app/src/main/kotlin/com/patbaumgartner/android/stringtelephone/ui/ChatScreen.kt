@@ -2,6 +2,8 @@ package com.patbaumgartner.android.stringtelephone.ui
 
 import android.text.format.DateFormat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
@@ -151,6 +153,7 @@ internal fun ChatScreen(
                         when (row) {
                             is ChatRow.Day -> DayChip(row.date)
                             is ChatRow.Bubble -> ChatBubble(
+                                peer = peer,
                                 message = row.message,
                                 startsGroup = row.startsGroup,
                                 maxWidth = bubbleMaxWidth,
@@ -294,8 +297,9 @@ private fun DayChip(date: LocalDate) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatBubble(message: ChatMessage, startsGroup: Boolean, maxWidth: Dp, onRetry: () -> Unit, viewModel: AppViewModel? = null) {
+private fun ChatBubble(peer: String, message: ChatMessage, startsGroup: Boolean, maxWidth: Dp, onRetry: () -> Unit, viewModel: AppViewModel? = null) {
     val colors = StringTelephoneTheme.chat
     val failed = message.state == SendState.FAILED
     val time = DateFormat.getTimeFormat(LocalContext.current).format(Date(message.sentAtEpochMs))
@@ -309,13 +313,45 @@ private fun ChatBubble(message: ChatMessage, startsGroup: Boolean, maxWidth: Dp,
     val description = listOf(sender, message.content, time, status.takeIf { message.fromMe })
         .filterNotNull()
         .joinToString(", ")
+    var reactionPickerOpen by remember { mutableStateOf(false) }
+    // Reactions need a server id (ADR-0011): a pending/failed message is not
+    // on the server yet, so its bubble keeps only the retry gesture.
+    val canReact = viewModel != null && message.serverId != null
+
+    if (reactionPickerOpen && viewModel != null) {
+        ReactionPickerDialog(
+            myUsername = viewModel.meUsername() ?: "",
+            reactions = message.reactions,
+            onReact = { emoji ->
+                viewModel.toggleReaction(peer, message, emoji)
+                reactionPickerOpen = false
+            },
+            onDismiss = { reactionPickerOpen = false },
+        )
+    }
+
     Column(
         horizontalAlignment = if (message.fromMe) Alignment.End else Alignment.Start,
         modifier = Modifier.fillMaxWidth().padding(top = if (startsGroup) 6.dp else 2.dp),
     ) {
         val shape = BubbleShape(tailOnEnd = message.fromMe, withTail = startsGroup)
+        // Long-press opens the reaction picker (ADR-0011). A failed bubble
+        // keeps tap-to-retry instead: it has no server id to react to yet.
+        val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+        val pressModifier = if (canReact) {
+            Modifier.combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = {},
+                onLongClick = { reactionPickerOpen = true },
+                onLongClickLabel = stringResource(R.string.chat_react),
+            )
+        } else {
+            Modifier
+        }
         val bubbleModifier = Modifier
             .widthIn(max = maxWidth)
+            .then(pressModifier)
             .semantics(mergeDescendants = true) { contentDescription = description }
         val bubbleContent: @Composable () -> Unit = {
             if (message.type == "IMAGE" && message.mediaId != null) {
@@ -357,6 +393,14 @@ private fun ChatBubble(message: ChatMessage, startsGroup: Boolean, maxWidth: Dp,
         } else {
             Surface(shape = shape, color = color, contentColor = colors.onBubble,
                 shadowElevation = 1.dp, modifier = bubbleModifier, content = bubbleContent)
+        }
+        if (canReact && message.reactions.isNotEmpty()) {
+            ReactionChips(
+                reactions = message.reactions,
+                myUsername = viewModel.meUsername() ?: "",
+                fromMe = message.fromMe,
+                onChipClick = { emoji -> viewModel.toggleReaction(peer, message, emoji) },
+            )
         }
         if (failed) {
             Text(
@@ -581,6 +625,85 @@ private fun EmojiPickerRow(onEmoji: (String) -> Unit) {
                         style = MaterialTheme.typography.headlineSmall,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One chip per emoji under a bubble: `👍 2` when two people reacted. The
+ * signed-in user's chip is highlighted; tapping any chip toggles the user's
+ * own reaction to that emoji (ADR-0011).
+ */
+@Composable
+private fun ReactionChips(
+    reactions: Map<String, String>,
+    myUsername: String,
+    fromMe: Boolean,
+    onChipClick: (String) -> Unit,
+) {
+    // One chip per distinct emoji; the count shows how many authors picked it.
+    val grouped = reactions.entries.groupBy({ it.value }, { it.key })
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.padding(top = 3.dp, start = if (fromMe) 0.dp else TAIL_WIDTH, end = if (fromMe) TAIL_WIDTH else 0.dp),
+    ) {
+        grouped.forEach { (emoji, authors) ->
+            val mine = myUsername in reactions && reactions[myUsername] == emoji
+            val mineLabel = stringResource(R.string.chat_reaction_mine)
+            Surface(
+                onClick = { onChipClick(emoji) },
+                shape = RoundedCornerShape(12.dp),
+                color = if (mine) StringTelephoneTheme.accents.brand.copy(alpha = 0.18f) else StringTelephoneTheme.chat.incoming,
+                shadowElevation = 1.dp,
+                modifier = Modifier.semantics { contentDescription = if (mine) "$emoji ($mineLabel)" else emoji },
+            ) {
+                Text(
+                    if (authors.size > 1) "$emoji ${authors.size}" else emoji,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Long-press reaction sheet: any emoji from the quick set or the keyboard. */
+@Composable
+private fun ReactionPickerDialog(
+    myUsername: String,
+    reactions: Map<String, String>,
+    onReact: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 4.dp,
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    stringResource(R.string.chat_react),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(QUICK_EMOJIS) { emoji ->
+                        val mine = reactions[myUsername] == emoji
+                        Surface(
+                            onClick = { onReact(emoji) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (mine) StringTelephoneTheme.accents.brand.copy(alpha = 0.2f) else Color.Transparent,
+                        ) {
+                            Text(
+                                emoji,
+                                style = MaterialTheme.typography.headlineSmall,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
                 }
             }
         }

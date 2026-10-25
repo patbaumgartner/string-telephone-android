@@ -34,6 +34,8 @@ data class MessageDto(
     val width: Int? = null,
     /** Decoded image height in pixels for IMAGE messages. */
     val height: Int? = null,
+    /** Reactions on this message (ADR-0011, Phase 8). */
+    val reactions: List<ReactionDto>? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -117,3 +119,17 @@ data class WsClientTypingPayload(val typing: Boolean)
 /** Outgoing typing signal to the peer: {"type":"typing","payload":{"peer":"alice","typing":true}}. */
 @kotlinx.serialization.Serializable
 data class WsTypingEvent(val peer: String, val typing: Boolean)
+
+/** Incoming add/replace reaction: POST /v1/conversations/{peer}/messages/{id}/reactions */
+@kotlinx.serialization.Serializable
+data class AddReactionRequest(val emoji: String)
+
+/** Outgoing reaction event: {"type":"message-reaction","payload":{...}} */
+@kotlinx.serialization.Serializable
+data class WsReactionEvent(
+    val messageId: String,
+    val peer: String,   // the conversation peer of the message (other than the author)
+    val authorUsername: String,
+    val emoji: String,
+    val action: String, // "added" or "removed"
+)
