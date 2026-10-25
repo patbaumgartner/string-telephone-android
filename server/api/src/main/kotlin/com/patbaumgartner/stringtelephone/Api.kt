@@ -90,6 +90,17 @@ class ApiController(
         if (peer == me.username) throw ApiFailure(HttpStatus.BAD_REQUEST, "cannot message yourself")
         if (users.find(peer)?.active != true) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
         if (body.recipient != peer) throw ApiFailure(HttpStatus.BAD_REQUEST, "recipient mismatch")
+
+        // Validate reply target when supplied (ADR-0011, Phase 9).
+        val replyToId = body.replyToId?.takeIf { it.isNotBlank() }
+        if (replyToId != null) {
+            val replyMsg = messages.findById(replyToId)
+                ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "reply target not found")
+            val sameConversation = (replyMsg.sender == me.username && replyMsg.recipient == peer) ||
+                                   (replyMsg.sender == peer && replyMsg.recipient == me.username)
+            if (!sameConversation) throw ApiFailure(HttpStatus.BAD_REQUEST, "reply target not in this conversation")
+        }
+
         val type = body.type.uppercase()
         if (type == "IMAGE") {
             val mediaId = body.mediaId?.takeIf { it.isNotBlank() }
@@ -102,14 +113,14 @@ class ApiController(
             if (mediaRecord.state != "ready") {
                 throw ApiFailure(HttpStatus.BAD_REQUEST, "media not ready")
             }
-            val stored = messages.insertMedia(me.username, peer, body.clientKey, mediaId, mediaRecord)
+            val stored = messages.insertMedia(me.username, peer, body.clientKey, mediaId, mediaRecord, replyToId)
             return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
         }
         if (body.content.isEmpty() || body.content.toByteArray(Charsets.UTF_8).size > Messages.MAX_CONTENT_BYTES) {
             throw ApiFailure(HttpStatus.CONTENT_TOO_LARGE, "content size invalid")
         }
         return ResponseEntity.status(HttpStatus.CREATED)
-            .body(messageDto(messages.insert(me.username, peer, body.content, body.clientKey)))
+            .body(messageDto(messages.insert(me.username, peer, body.content, body.clientKey, replyToId)))
     }
 
     /**
@@ -169,4 +180,4 @@ class ApiController(
 
 private fun messageDto(record: MessageRecord, reactions: List<ReactionDto> = emptyList()) =
     MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt, record.type, record.mediaId, record.width, record.height,
-        if (reactions.isEmpty()) null else reactions)
+        if (reactions.isEmpty()) null else reactions, record.replyTo)

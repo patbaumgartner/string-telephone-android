@@ -43,6 +43,8 @@ data class MessageResult(
     val height: Int? = null,
     /** Reactions on this message (ADR-0011, Phase 8). */
     val reactions: List<com.patbaumgartner.android.stringtelephone.core.ReactionDto> = emptyList(),
+    /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
+    val replyToId: String? = null,
 )
 
 data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
@@ -115,11 +117,11 @@ class CompanionApiClient(
         }
     }
 
-    fun sendMessage(recipient: String, content: String, clientKey: String): MessageResult = sendText(recipient, content, clientKey)
-    fun sendText(recipient: String, content: String, clientKey: String): MessageResult = request {
+    fun sendMessage(recipient: String, content: String, clientKey: String, replyToId: String? = null): MessageResult = sendText(recipient, content, clientKey, replyToId)
+    fun sendText(recipient: String, content: String, clientKey: String, replyToId: String? = null): MessageResult = request {
         val payload = json.encodeToString(
             SendMessageRequest.serializer(),
-            SendMessageRequest(recipient, content, clientKey),
+            SendMessageRequest(recipient, content, clientKey, replyToId = replyToId),
         )
         val response = http.newCall(
             Request.Builder()
@@ -133,16 +135,16 @@ class CompanionApiClient(
                 401, 403 -> throw ApiException.Auth
                 404 -> throw ApiException.Protocol("peer unknown")
                 413 -> throw ApiException.Protocol("content too large")
-                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height) }
+                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height, m.reactions ?: emptyList(), m.replyToId) }
                 else -> throw ApiException.Unexpected(r.code)
             }
         }
     }
 
-    fun sendMedia(recipient: String, mediaId: String, clientKey: String, width: Int? = null, height: Int? = null): MessageResult = request {
+    fun sendMedia(recipient: String, mediaId: String, clientKey: String, width: Int? = null, height: Int? = null, replyToId: String? = null): MessageResult = request {
         val payload = json.encodeToString(
             SendMessageRequest.serializer(),
-            SendMessageRequest(recipient, "", clientKey, "IMAGE", mediaId),
+            SendMessageRequest(recipient, "", clientKey, "IMAGE", mediaId, replyToId),
         )
         val response = http.newCall(
             Request.Builder()
@@ -155,7 +157,7 @@ class CompanionApiClient(
             when (r.code) {
                 401, 403 -> throw ApiException.Auth
                 404 -> throw ApiException.Protocol("peer unknown")
-                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height) }
+                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height, m.reactions ?: emptyList(), m.replyToId) }
                 else -> throw ApiException.Unexpected(r.code)
             }
         }
@@ -208,7 +210,7 @@ class CompanionApiClient(
                             MessageResult(
                                 it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey,
                                 it.readAt, it.type, it.mediaId, it.width, it.height,
-                                it.reactions.orEmpty(),
+                                it.reactions.orEmpty(), it.replyToId,
                             )
                         },
                         nextCursor = page.nextCursor,

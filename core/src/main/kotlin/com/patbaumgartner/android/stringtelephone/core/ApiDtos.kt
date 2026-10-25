@@ -36,6 +36,8 @@ data class MessageDto(
     val height: Int? = null,
     /** Reactions on this message (ADR-0011, Phase 8). */
     val reactions: List<ReactionDto>? = null,
+    /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
+    val replyToId: String? = null,
 )
 
 /** One emoji reaction: who reacted and when (ADR-0011, Phase 8). */
@@ -53,6 +55,8 @@ data class SendMessageRequest(
     val clientKey: String,
     val type: String = "TEXT",
     val mediaId: String? = null,
+    /** Message this one replies to; must be in the same conversation (ADR-0011, Phase 9). */
+    val replyToId: String? = null,
 )
 
 @Serializable
@@ -98,6 +102,8 @@ data class WsNewMessageDto(
     val mediaId: String? = null,
     val width: Int? = null,
     val height: Int? = null,
+    /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
+    val replyToId: String? = null,
 )
 
 @Serializable
@@ -133,6 +139,8 @@ sealed interface RealtimeEvent {
         val mediaId: String? = null,
         val width: Int? = null,
         val height: Int? = null,
+        /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
+        val replyToId: String? = null,
     ) : RealtimeEvent
 
     data class Presence(
@@ -191,6 +199,7 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 mediaId = event.mediaId,
                 width = event.width,
                 height = event.height,
+                replyToId = event.replyToId,
             )
         }.getOrNull()
         "presence" -> runCatching {

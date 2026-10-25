@@ -1,8 +1,8 @@
 package com.patbaumgartner.android.stringtelephone.ui
 
 import android.text.format.DateFormat
-import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -33,12 +34,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -96,9 +100,12 @@ internal fun ChatScreen(
     val historyFailed by viewModel.historyErrorFor(peer).collectAsState()
     val contactsState by viewModel.contactsState().collectAsState()
     val typingPeer by viewModel.typingPeerState().collectAsState()
+    val replyingTo by viewModel.replyingTo.collectAsState()
     val rows = remember(messages) { chatTimeline(messages, ZoneId.systemDefault()) }
     val listState = rememberLazyListState()
     var emojiPickerVisible by remember { mutableStateOf(false) }
+    var replySheetMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var pendingReactionMessage by remember { mutableStateOf<ChatMessage?>(null) }
 
     LaunchedEffect(rows.size) {
         if (rows.isNotEmpty()) listState.animateScrollToItem(rows.size - 1)
@@ -157,7 +164,10 @@ internal fun ChatScreen(
                                 message = row.message,
                                 startsGroup = row.startsGroup,
                                 maxWidth = bubbleMaxWidth,
+                                messages = messages,
+                                peerDisplayName = viewModel.displayNameOf(peer, contactsState.contacts),
                                 onRetry = { viewModel.retrySend(peer, row.message) },
+                                onLongPress = { replySheetMessage = row.message },
                                 viewModel = viewModel,
                             )
                         }
@@ -175,6 +185,18 @@ internal fun ChatScreen(
             val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
                 uri?.let { viewModel.attachImage(peer, it) }
             }
+            // Quoted reply target above the composer (ADR-0011, Phase 9).
+            replyingTo?.let { quoted ->
+                QuotedMessageBanner(
+                    quoted = quoted,
+                    authorLabel = if (quoted.fromMe) {
+                        stringResource(R.string.chat_from_you)
+                    } else {
+                        viewModel.displayNameOf(peer, contactsState.contacts)
+                    },
+                    onDismiss = { viewModel.clearReplyTo() },
+                )
+            }
             Composer(
                 value = viewModel.chatInput,
                 onValueChange = { viewModel.onChatInputChanged(peer, it) },
@@ -190,6 +212,32 @@ internal fun ChatScreen(
                 onSend = { viewModel.sendCurrent(peer) },
             )
         }
+    }
+    // Show the reaction picker when the long-press sheet chose "React".
+    pendingReactionMessage?.let { msg ->
+        ReactionPickerDialog(
+            myUsername = viewModel.meUsername() ?: "",
+            reactions = msg.reactions,
+            onReact = { emoji ->
+                viewModel.toggleReaction(peer, msg, emoji)
+                pendingReactionMessage = null
+            },
+            onDismiss = { pendingReactionMessage = null },
+        )
+    }
+    replySheetMessage?.let { message ->
+        ReplyOptionsSheet(
+            message = message,
+            onReply = {
+                viewModel.setReplyingTo(message)
+                replySheetMessage = null
+            },
+            onReact = {
+                replySheetMessage = null
+                pendingReactionMessage = message
+            },
+            onDismiss = { replySheetMessage = null },
+        )
     }
 }
 
@@ -299,7 +347,17 @@ private fun DayChip(date: LocalDate) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatBubble(peer: String, message: ChatMessage, startsGroup: Boolean, maxWidth: Dp, onRetry: () -> Unit, viewModel: AppViewModel? = null) {
+private fun ChatBubble(
+    peer: String,
+    message: ChatMessage,
+    startsGroup: Boolean,
+    maxWidth: Dp,
+    messages: List<ChatMessage>,
+    peerDisplayName: String,
+    onRetry: () -> Unit,
+    onLongPress: () -> Unit,
+    viewModel: AppViewModel? = null,
+) {
     val colors = StringTelephoneTheme.chat
     val failed = message.state == SendState.FAILED
     val time = DateFormat.getTimeFormat(LocalContext.current).format(Date(message.sentAtEpochMs))
@@ -313,38 +371,38 @@ private fun ChatBubble(peer: String, message: ChatMessage, startsGroup: Boolean,
     val description = listOf(sender, message.content, time, status.takeIf { message.fromMe })
         .filterNotNull()
         .joinToString(", ")
-    var reactionPickerOpen by remember { mutableStateOf(false) }
     // Reactions need a server id (ADR-0011): a pending/failed message is not
     // on the server yet, so its bubble keeps only the retry gesture.
     val canReact = viewModel != null && message.serverId != null
-
-    if (reactionPickerOpen && viewModel != null) {
-        ReactionPickerDialog(
-            myUsername = viewModel.meUsername() ?: "",
-            reactions = message.reactions,
-            onReact = { emoji ->
-                viewModel.toggleReaction(peer, message, emoji)
-                reactionPickerOpen = false
-            },
-            onDismiss = { reactionPickerOpen = false },
-        )
-    }
 
     Column(
         horizontalAlignment = if (message.fromMe) Alignment.End else Alignment.Start,
         modifier = Modifier.fillMaxWidth().padding(top = if (startsGroup) 6.dp else 2.dp),
     ) {
+        // Quoted reply bubble (ADR-0011, Phase 9): rendered above the main
+        // bubble inside the message column. The quoted message must be in the
+        // loaded history; no scroll-to-original in this phase.
+        if (message.replyToId != null) {
+            val quotedMessage = messages.firstOrNull { it.serverId == message.replyToId }
+            if (quotedMessage != null) {
+                QuotedBubble(
+                    quotedMessage = quotedMessage,
+                    peerDisplayName = peerDisplayName,
+                    fromMe = message.fromMe,
+                    maxWidth = maxWidth,
+                )
+            }
+        }
         val shape = BubbleShape(tailOnEnd = message.fromMe, withTail = startsGroup)
-        // Long-press opens the reaction picker (ADR-0011). A failed bubble
-        // keeps tap-to-retry instead: it has no server id to react to yet.
-        val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+        // Long-press opens the reply/reaction sheet (ADR-0011, Phase 9). A failed
+        // bubble keeps tap-to-retry: it has no server id to react to yet.
         val pressModifier = if (canReact) {
             Modifier.combinedClickable(
-                interactionSource = interactionSource,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null,
                 onClick = {},
-                onLongClick = { reactionPickerOpen = true },
-                onLongClickLabel = stringResource(R.string.chat_react),
+                onLongClick = onLongPress,
+                onLongClickLabel = stringResource(R.string.chat_reply),
             )
         } else {
             Modifier
@@ -703,6 +761,197 @@ private fun ReactionPickerDialog(
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The reply target shown above the composer when [quoted] is set
+ * (ADR-0011, Phase 9). A small surface with author name, content preview
+ * and a dismiss button.
+ */
+@Composable
+private fun QuotedMessageBanner(
+    quoted: ChatMessage,
+    authorLabel: String,
+    onDismiss: () -> Unit,
+) {
+    val preview = if (quoted.type == "IMAGE") {
+        stringResource(R.string.photo)
+    } else {
+        if (quoted.content.length > 60) quoted.content.take(57) + "…" else quoted.content
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(40.dp)
+                .background(StringTelephoneTheme.accents.brand, RoundedCornerShape(2.dp)),
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                authorLabel,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = StringTelephoneTheme.accents.brand,
+            )
+            Text(
+                preview,
+                style = MaterialTheme.typography.bodySmall,
+                color = StringTelephoneTheme.chat.meta,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+            Icon(
+                StringTelephoneIcons.Close,
+                contentDescription = stringResource(R.string.cd_close),
+                tint = StringTelephoneTheme.chat.meta,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+/**
+ * A quoted reply shown inside a chat bubble (ADR-0011, Phase 9): a small
+ * left-bordered surface with the quoted author's name and a text or media
+ * preview, rendered above the main bubble content.
+ */
+@Composable
+private fun QuotedBubble(
+    quotedMessage: ChatMessage,
+    peerDisplayName: String,
+    fromMe: Boolean,
+    maxWidth: Dp,
+) {
+    val colors = StringTelephoneTheme.chat
+    val authorName = if (quotedMessage.fromMe) {
+        stringResource(R.string.chat_from_you)
+    } else {
+        peerDisplayName
+    }
+    val contentPreview = if (quotedMessage.type == "IMAGE") {
+        stringResource(R.string.photo)
+    } else {
+        if (quotedMessage.content.length > 40) quotedMessage.content.take(37) + "…" else quotedMessage.content
+    }
+    val barColor = if (fromMe) colors.outgoing else colors.incoming
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = barColor.copy(alpha = 0.6f),
+        modifier = Modifier
+            .widthIn(max = maxWidth)
+            .padding(bottom = 3.dp),
+    ) {
+        Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(36.dp)
+                    .background(StringTelephoneTheme.accents.brand, RoundedCornerShape(2.dp)),
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+            Column {
+                Text(
+                    authorName,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = StringTelephoneTheme.accents.brand,
+                )
+                Text(
+                    contentPreview,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.meta,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Long-press options sheet: Reply or React (ADR-0011, Phase 9).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReplyOptionsSheet(
+    message: ChatMessage,
+    onReply: () -> Unit,
+    onReact: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            Text(
+                stringResource(R.string.reply_to),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(start = 20.dp, bottom = 12.dp),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                Surface(
+                    onClick = onReply,
+                    shape = RoundedCornerShape(12.dp),
+                    color = StringTelephoneTheme.chat.incoming.copy(alpha = 0.7f),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 16.dp),
+                    ) {
+                        Icon(
+                            StringTelephoneIcons.Reply,
+                            contentDescription = null,
+                            tint = StringTelephoneTheme.accents.brand,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+                        Text(
+                            stringResource(R.string.reply),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
+                Surface(
+                    onClick = onReact,
+                    shape = RoundedCornerShape(12.dp),
+                    color = StringTelephoneTheme.chat.incoming.copy(alpha = 0.7f),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 16.dp),
+                    ) {
+                        Text(
+                            "😀",
+                            style = MaterialTheme.typography.headlineMedium,
+                        )
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+                        Text(
+                            stringResource(R.string.react),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
                     }
                 }
             }

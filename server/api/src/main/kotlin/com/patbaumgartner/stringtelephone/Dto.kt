@@ -36,6 +36,8 @@ data class MessageDto(
     val height: Int? = null,
     /** Reactions on this message (ADR-0011, Phase 8). */
     val reactions: List<ReactionDto>? = null,
+    /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
+    val replyToId: String? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -46,6 +48,8 @@ data class SendMessageRequest(
     /** TEXT (default) or IMAGE. An IMAGE message references [mediaId]. */
     val type: String = "TEXT",
     val mediaId: String? = null,
+    /** Message this one replies to; must be in the same conversation (ADR-0011, Phase 9). */
+    val replyToId: String? = null,
 )
 
 /** Marks the peer's messages read; `upToMessageId` bounds the mark to one point in the history. */
@@ -103,6 +107,8 @@ data class WsNewMessageEvent(
     val mediaId: String? = null,
     val width: Int? = null,
     val height: Int? = null,
+    /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
+    val replyToId: String? = null,
 )
 
 /** Read-receipt event pushed on /v1/ws as `{"type":"message-read"}` (ADR-0010). */

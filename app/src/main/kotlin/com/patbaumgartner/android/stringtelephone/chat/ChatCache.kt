@@ -30,6 +30,8 @@ data class ChatMessage(
     val height: Int? = null,
     /** Reactions on this message (ADR-0011, Phase 8): one per author, keyed by username. */
     val reactions: Map<String, String> = emptyMap(),
+    /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
+    val replyToId: String? = null,
 ) {
     companion object {
         fun fromServer(m: com.patbaumgartner.android.stringtelephone.network.MessageResult, myUsername: String): ChatMessage = ChatMessage(
@@ -45,6 +47,7 @@ data class ChatMessage(
             width = m.width,
             height = m.height,
             reactions = m.reactions.associate { it.authorUsername to it.emoji },
+            replyToId = m.replyToId,
         )
     }
 }
@@ -179,6 +182,16 @@ class ChatCache {
         }
         return null
     }
+
+    /**
+     * The cached message a reply quotes (ADR-0011, Phase 9). The client
+     * renders the quoted snapshot from the referenced message when it is in
+     * the cache and renders nothing when it is not — no scroll-to-original
+     * in this phase.
+     */
+    @Synchronized
+    fun findQuotedMessage(peer: String, replyToId: String): ChatMessage? =
+        byPeer[peer]?.firstOrNull { it.serverId == replyToId }
 
     private fun updateState(clientKey: String, state: SendState) {
         for (entry in byPeer) {

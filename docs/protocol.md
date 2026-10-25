@@ -115,6 +115,18 @@ Response `201`:
 is omitted while the message is unread, so a message the caller just sent
 never carries it.
 
+#### Reply to a message
+
+Send `{"type":"TEXT","recipient":"bob","content":"...","replyToId":"<id>",
+"clientKey":"..."}` to quote an existing message (ADR-0011, Phase 9). The
+`replyToId` is nullable and optional; when present it must reference a
+message that belongs to the caller's conversation with `{peer}` — a
+self-reference, a cross-conversation reference or an unknown id is `400`. The
+quoted snapshot is rendered by the client from the referenced message when it
+is in the local cache and from nothing otherwise. `replyToId` appears in
+history responses and in the `new-message` event payload; it is omitted (null)
+for non-replies.
+
 #### Image messages
 
 Send `{"type":"IMAGE","recipient":"bob","mediaId":"<id>","clientKey":"..."}`.
@@ -299,7 +311,8 @@ Invalid credentials close with `1008` immediately after upgrade.
 - Server text frames retain the Android envelope:
   `{"type":"new-message","payload":"<JSON string>"}`. Decode `payload` as
   a message record containing `id`, `sender`, `recipient`, `content`,
-  `createdAt`, `clientKey`, `type`, `mediaId`, `width`, `height`.
+  `createdAt`, `clientKey`, `type`, `mediaId`, `width`, `height`,
+  `replyToId`.
 - Events go to sender and recipient. They accelerate updates but do not
   replace durable cursor synchronization after reconnection.
 - `{"type":"presence","payload":"<JSON string>"}` goes to every other

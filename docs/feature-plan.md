@@ -1,7 +1,7 @@
 # String Telephone — Feature Roadmap
 
 Date: 2026-10-25
-Status: In progress (phases 1 to 7 done; see the table below)
+Status: In progress (phases 1 to 3, 5 to 9 done; see the table below)
 
 This document captures feature requests, the decisions behind them, and the
 planned phases. It is a working document; status updates live in GitHub issues
@@ -37,8 +37,8 @@ Phases land in this order. Each is small enough for one focused review.
 | 5 | Read receipts | Medium | Done | Phase 3 |
 | 6 | Image sharing | Medium | Planned | Phases 3+4 |
 | 7 | Typing indicators | Small | Done | Phase 3 |
-| 8 | Emoji reactions | Medium | Planned | Phase 5 |
-| 9 | Reply/quote | Medium | Planned | Phase 5 |
+| 8 | Emoji reactions | Medium | Done | Phase 5 |
+| 9 | Reply/quote | Medium | Done | Phase 5 |
 | 10 | Message deletion | Medium | Planned | Phase 5 |
 | 11 | Voice messages | Large | Planned | Phase 4 |
 | 12 | Video calls | Large | Planned | — |
@@ -287,12 +287,22 @@ messages (no server id) cannot be reacted to. Oracle:
 ### Phase 9 — Reply/quote
 
 **Effort:** Medium
+**Status:** Done (2026-10-25)
 Implements the reply part of [ADR-0011](adr/0011-message-extras.md).
 
 - `replyToId` on the message model; server validates the referenced message
   belongs to the same conversation.
 - UI: long-press → reply; quoted snapshot (author + text/thumb) rendered above
   the reply; tap scrolls to the original.
+
+**Done 2026-10-25.** A nullable `reply_to` column (V7) references the quoted
+message; the send endpoint validates that the target exists and belongs to the
+same conversation (`400` otherwise). History responses and the `new-message`
+frame carry `replyToId`. Long-press opens a reply/reaction sheet; choosing
+Reply shows a quoted banner above the composer, and the reply bubble renders a
+snapshot (author + text or photo preview) resolved from the loaded history.
+Scroll-to-original is deferred; the quoted snapshot renders only when the
+original is in the cache. Oracle: `scripts/verify-reply.mjs`.
 
 ---
 

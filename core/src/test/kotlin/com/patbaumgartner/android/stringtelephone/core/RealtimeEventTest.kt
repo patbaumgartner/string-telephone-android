@@ -19,6 +19,16 @@ class RealtimeEventTest {
         assertEquals("hi", event.content)
         assertEquals(42, event.createdAtEpochMs)
         assertEquals("k1", event.clientKey)
+        assertEquals(null, event.replyToId)
+    }
+
+    @Test
+    fun `a new-message frame carries the reply target when present`() {
+        val frame = """
+            {"type":"new-message","payload":"{\"id\":\"m2\",\"sender\":\"bob\",\"recipient\":\"alice\",\"content\":\"yes\",\"createdAt\":43,\"clientKey\":\"k2\",\"replyToId\":\"m1\"}"}
+        """.trimIndent()
+        val event = assertIs<RealtimeEvent.NewMessage>(parseRealtimeEvent(frame))
+        assertEquals("m1", event.replyToId)
     }
 
     @Test

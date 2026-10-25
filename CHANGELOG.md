@@ -9,6 +9,13 @@ No public release has been published yet.
 
 ### Changed
 
+- The chat now supports reply/quote (Phase 9, ADR-0011). Long-press a bubble
+  to choose Reply or React; replying shows a quoted banner above the composer
+  and the sent message renders a snapshot of the quoted message (author and
+  text or photo preview) above its content. The server stores a nullable
+  `reply_to` on the message, validates that the target belongs to the same
+  conversation, and carries `replyToId` in history pages and
+  `new-message` frames.
 - The chat now supports emoji reactions (Phase 8, ADR-0011). Long-press a
   bubble to open a quick-emoji picker; reaction chips with counts appear
   under the bubble and tapping a chip toggles the user's own reaction. The

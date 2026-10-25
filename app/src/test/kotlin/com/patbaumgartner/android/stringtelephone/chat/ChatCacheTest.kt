@@ -172,4 +172,26 @@ class ChatCacheTest {
         assertEquals(SendState.READ, stored.state)
         assertEquals(500L, stored.readAtEpochMs)
     }
+
+    @Test
+    fun `reply carries its target id through the cache`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", false, "can you make saturday", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "yes 2pm works", 2, SendState.SENT, replyToId = "m1"))
+        val reply = cache.history("bob").single { it.serverId == "m2" }
+        assertEquals("m1", reply.replyToId)
+    }
+
+    @Test
+    fun `findQuotedMessage resolves the referenced message in the same conversation`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", false, "can you make saturday", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "yes 2pm works", 2, SendState.SENT, replyToId = "m1"))
+
+        val quoted = cache.findQuotedMessage("bob", "m1")
+        assertEquals("can you make saturday", quoted?.content)
+        // Unknown ids and other conversations resolve to nothing.
+        assertEquals(null, cache.findQuotedMessage("bob", "missing"))
+        assertEquals(null, cache.findQuotedMessage("carol", "m1"))
+    }
 }
