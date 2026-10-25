@@ -104,6 +104,8 @@
     <string name="chat_attach_image">Attach image</string>
     <string name="chat_image">Image</string>
     <string name="chat_typing">typing…</string>
+    <string name="chat_react">React</string>
+    <string name="chat_reaction_mine">your reaction</string>
     <string name="notification_call_channel">Calls</string>
     <string name="notification_message_channel">Messages</string>
     <string name="notification_missed_call_title">Missed call</string>

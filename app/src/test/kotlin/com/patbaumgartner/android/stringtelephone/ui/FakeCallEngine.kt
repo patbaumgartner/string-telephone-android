@@ -161,14 +161,31 @@ object PreviewFactory {
         Triple(true, "Looks great — thanks!", "2025-06-13T09:41:00Z"),
     )
 
+    /**
+     * The reaction preview (Phase 8): single and multi-author chips, the
+     * signed-in user's own chip highlighted, one chip on an incoming bubble.
+     */
+    private val REACTIONS_CHAT = listOf(
+        Triple(false, "Saturday morning works. Coffee after?", "2025-06-13T08:26:00Z"),
+        Triple(true, "Perfect. See you at the usual place.", "2025-06-13T08:22:00Z"),
+    )
+
+    /** Who reacted to which preview message: index to (author → emoji). */
+    private val REACTIONS = listOf(
+        mapOf("bob" to "👍", "alice" to "👍", "carol" to "🔥"),
+        mapOf("bob" to "❤️"),
+    )
+
     fun viewModel(
         context: Context,
         callEngine: CallEngine = FakeCallEngine(),
         deliveryStates: Boolean = false,
         chatImage: Boolean = false,
+        chatReactions: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
         val conversation: List<Triple<Boolean, String, String>> = when {
+            chatReactions -> REACTIONS_CHAT
             chatImage -> IMAGE_CHAT
             deliveryStates -> DELIVERY_STATE_CHAT
             else -> PREVIEW_CHAT
@@ -191,6 +208,7 @@ object PreviewFactory {
                     } else {
                         null
                     },
+                    reactions = if (chatReactions) REACTIONS.getOrElse(index) { emptyMap() } else emptyMap(),
                 ),
             )
         }

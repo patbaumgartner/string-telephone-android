@@ -202,6 +202,24 @@ class StringTelephoneRepositoryRealtimeTest {
         repo.stopRealtime()
     }
 
+    @Test
+    fun `a reaction frame updates the cached message`() = runBlocking {
+        val cache = ChatCache()
+        val fake = FakeRealtimeStream()
+        val repo = repository(cache, fake)
+        repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
+        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+
+        repo.startRealtime()
+        fake.emit(RealtimeEvent.MessageReaction("m1", "bob", "bob", "👍", added = true))
+        awaitUntil { cache.history("bob").single().reactions.containsKey("bob") }
+        assertEquals(mapOf("bob" to "👍"), cache.history("bob").single().reactions)
+
+        fake.emit(RealtimeEvent.MessageReaction("m1", "bob", "bob", "👍", added = false))
+        awaitUntil { cache.history("bob").single().reactions.isEmpty() }
+        repo.stopRealtime()
+    }
+
     private suspend fun awaitUntil(condition: () -> Boolean) = withTimeout(5_000) {
         while (!condition()) delay(10)
     }

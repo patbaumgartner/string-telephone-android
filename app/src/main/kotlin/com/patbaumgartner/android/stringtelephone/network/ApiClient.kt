@@ -41,6 +41,8 @@ data class MessageResult(
     val mediaId: String? = null,
     val width: Int? = null,
     val height: Int? = null,
+    /** Reactions on this message (ADR-0011, Phase 8). */
+    val reactions: List<com.patbaumgartner.android.stringtelephone.core.ReactionDto> = emptyList(),
 )
 
 data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
@@ -202,13 +204,71 @@ class CompanionApiClient(
                 else -> {
                     val page = json.decodeFromString(MessagesPageDto.serializer(), r.body.string())
                     return@request MessagesPage(
-                        messages = page.messages.map { MessageResult(it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey, it.readAt, it.type, it.mediaId, it.width, it.height) },
+                        messages = page.messages.map {
+                            MessageResult(
+                                it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey,
+                                it.readAt, it.type, it.mediaId, it.width, it.height,
+                                it.reactions.orEmpty(),
+                            )
+                        },
                         nextCursor = page.nextCursor,
                     )
                 }
             }
         }
     }
+
+    /**
+     * Adds or replaces the caller's reaction on a message (ADR-0011, Phase 8).
+     * The response carries the full reaction list for the message after the
+     * change, so the caller can update the chips without a history refresh.
+     */
+    fun setReaction(peer: String, messageId: String, emoji: String): List<com.patbaumgartner.android.stringtelephone.core.ReactionDto> = request {
+        val payload = json.encodeToString(
+            com.patbaumgartner.android.stringtelephone.core.SetReactionRequest.serializer(),
+            com.patbaumgartner.android.stringtelephone.core.SetReactionRequest(emoji),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$peer/messages/$messageId/reactions")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .put(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such message")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> decodeReactions(r.body.string())
+            }
+        }
+    }
+
+    /** Removes the caller's reaction; idempotent (ADR-0011, Phase 8). */
+    fun removeReaction(peer: String, messageId: String): List<com.patbaumgartner.android.stringtelephone.core.ReactionDto> = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$peer/messages/$messageId/reactions")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .delete()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such message")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> decodeReactions(r.body.string())
+            }
+        }
+    }
+
+    private fun decodeReactions(body: String): List<com.patbaumgartner.android.stringtelephone.core.ReactionDto> =
+        json.decodeFromString(
+            kotlinx.serialization.builtins.ListSerializer(com.patbaumgartner.android.stringtelephone.core.ReactionDto.serializer()),
+            body,
+        )
 
     /**
      * Marks the peer's messages as read (ADR-0010). The caller must be the

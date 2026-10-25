@@ -28,6 +28,8 @@ data class ChatMessage(
     val mediaId: String? = null,
     val width: Int? = null,
     val height: Int? = null,
+    /** Reactions on this message (ADR-0011, Phase 8): one per author, keyed by username. */
+    val reactions: Map<String, String> = emptyMap(),
 ) {
     companion object {
         fun fromServer(m: com.patbaumgartner.android.stringtelephone.network.MessageResult, myUsername: String): ChatMessage = ChatMessage(
@@ -42,6 +44,7 @@ data class ChatMessage(
             mediaId = m.mediaId,
             width = m.width,
             height = m.height,
+            reactions = m.reactions.associate { it.authorUsername to it.emoji },
         )
     }
 }
@@ -146,6 +149,35 @@ class ChatCache {
             }
         }
         return anyChanged
+    }
+
+    /**
+     * Applies a reaction change (ADR-0011, Phase 8) to the message with the
+     * given [serverId]. Returns the peer to re-emit the changes flow on, or
+     * null if the message is not cached.
+     *
+     * When [added] is true, the emoji is set or replaced for [author].
+     * When false, the entry for [author] is removed.
+     */
+    @Synchronized
+    fun applyReaction(serverId: String, author: String, emoji: String, added: Boolean): String? {
+        for (entry in byPeer) {
+            val index = entry.value.indexOfFirst { it.serverId == serverId }
+            if (index >= 0) {
+                val current = entry.value[index]
+                val updated = if (added) {
+                    current.copy(reactions = current.reactions + (author to emoji))
+                } else {
+                    current.copy(reactions = current.reactions - author)
+                }
+                if (updated != current) {
+                    entry.value[index] = updated
+                    emit(entry.key)
+                }
+                return entry.key
+            }
+        }
+        return null
     }
 
     private fun updateState(clientKey: String, state: SendState) {

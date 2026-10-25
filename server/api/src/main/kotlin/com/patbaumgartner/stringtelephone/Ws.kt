@@ -88,6 +88,13 @@ class WsHub(
         sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.newMessage(message))
 
     /**
+     * Fan-out for a reaction change (ADR-0011, Phase 8): both participants
+     * receive the frame, so each device can update its chips immediately.
+     */
+    fun broadcastReaction(message: MessageRecord, author: String, emoji: String, added: Boolean) =
+        sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.reaction(message, author, emoji, added))
+
+    /**
      * Tells the author which messages the reader has read (ADR-0010). The
      * author turns them into double ticks; the reader learns the receipt from
      * the response to its own mark.

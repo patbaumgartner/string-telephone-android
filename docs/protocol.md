@@ -195,6 +195,44 @@ Clients call this only while the conversation is on screen. A notification, a
 background sync or a cursor catch-up must not mark anything read — a receipt
 means a human looked at the message.
 
+### `PUT /v1/conversations/{peer}/messages/{messageId}/reactions`
+
+Adds or replaces the caller's reaction on a message (Phase 8, ADR-0011).
+One reaction per author per message: reacting again replaces the emoji.
+
+```json
+{"emoji":"👍"}
+```
+
+- Any emoji codepoint is accepted (no curated set); the server stores the
+  string as received.
+- The message must belong to the caller's conversation with `{peer}`
+  (`404` otherwise); a non-participant cannot react.
+- Reacting when a reaction exists is an upsert: the row is replaced, never
+  duplicated.
+
+Response `200` — the full reaction list for the message after the change:
+
+```json
+[{"authorUsername":"bob","emoji":"👍","createdAt":1760000006000}]
+```
+
+Both participants also receive a `message-reaction` event on the realtime
+stream.
+
+### `DELETE /v1/conversations/{peer}/messages/{messageId}/reactions`
+
+Removes the caller's reaction. Idempotent: removing when no reaction exists
+is a success with no effect.
+
+Response `200`: the reaction list for the message after the change
+(normally empty).
+
+Reactions are never sent on behalf of someone else: the author is the
+authenticated principal, never a body field.
+
+### `POST /v1/conversations/{peer}/read`
+
 ## Media (`/v1/media`)
 
 Media endpoints share the Android bearer authentication and are exempt from
@@ -280,6 +318,13 @@ Invalid credentials close with `1008` immediately after upgrade.
   the socket; the server relays it to the sender's conversation partners as
   `{"peer":"bob","typing":true}`. Nothing is persisted. A peer with no
   recent message in either direction is not reachable via this signal.
+- `{"type":"message-reaction","payload":"<JSON string>"}` (Phase 8) is a
+  durable fan-out of a reaction change. Both conversation participants
+  receive it; the client applies the add or remove to the cached message so
+  chips update immediately without a poll. The payload is
+  `{"messageId":"uuid","peer":"bob","authorUsername":"alice","emoji":"👍","action":"added|removed"}`;
+  `peer` is the other participant (not the author), so each device can tell
+  its own reaction apart from the peer's.
 - Client frames do not create messages. Use the HTTP send endpoint.
 - Disable/reset closes all user streams with `1008`.
 

@@ -51,6 +51,29 @@ class RealtimeEventTest {
         assertNull(parseRealtimeEvent("""{"type":"typing","payload":"{broken"}"""))
     }
 
+        @Test
+    fun `parses a message-reaction envelope into an event`() {
+        val added = parseRealtimeEvent("""{"type":"message-reaction","payload":"{\"messageId\":\"m1\",\"peer\":\"alice\",\"authorUsername\":\"bob\",\"emoji\":\"👍\",\"action\":\"added\"}"}""")
+        val addedEvent = assertIs<RealtimeEvent.MessageReaction>(added)
+        assertEquals("m1", addedEvent.messageId)
+        assertEquals("alice", addedEvent.peer)
+        assertEquals("bob", addedEvent.authorUsername)
+        assertEquals("👍", addedEvent.emoji)
+        assertEquals(true, addedEvent.added)
+
+        val removed = parseRealtimeEvent("""{"type":"message-reaction","payload":"{\"messageId\":\"m2\",\"peer\":\"bob\",\"authorUsername\":\"alice\",\"emoji\":\"😂\",\"action\":\"removed\"}"}""")
+        val removedEvent = assertIs<RealtimeEvent.MessageReaction>(removed)
+        assertEquals("m2", removedEvent.messageId)
+        assertEquals("bob", removedEvent.peer)
+        assertEquals("alice", removedEvent.authorUsername)
+        assertEquals("😂", removedEvent.emoji)
+        assertEquals(false, removedEvent.added)
+
+        // Malformed payloads are dropped.
+        assertNull(parseRealtimeEvent("""{"type":"message-reaction","payload":"{broken"}"""))
+        assertNull(parseRealtimeEvent("""{"type":"message-reaction","payload":"{}"}"""))
+    }
+
     @Test
     fun `parses a message-read envelope into a receipt`() {
         val frame = """{"type":"message-read","payload":"{\"messageIds\":[\"m1\",\"m2\"],\"readAt\":99}"}"""

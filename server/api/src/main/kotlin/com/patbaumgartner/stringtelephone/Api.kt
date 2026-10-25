@@ -19,6 +19,7 @@ class ApiController(
     private val rateLimiter: RateLimiter,
     private val hub: WsHub,
     private val media: MediaService,
+    private val reactions: Reactions,
 ) {
     @GetMapping("/health")
     fun health() = mapOf("status" to "ok")
@@ -75,7 +76,12 @@ class ApiController(
             decodeMessageCursor(it) ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "invalid cursor")
         }
         val rows = messages.page(me.username, peer, before, limit)
-        return MessagesPageDto(rows.map(::messageDto), rows.lastOrNull()?.let { encodeMessageCursor(it.createdAt, it.id) })
+        val messageIds = rows.map { it.id }
+        val reactionsMap = if (messageIds.isNotEmpty()) reactions.listForMessages(messageIds) else emptyMap()
+        return MessagesPageDto(
+            rows.map { messageDto(it, reactionsMap[it.id].orEmpty()) },
+            rows.lastOrNull()?.let { encodeMessageCursor(it.createdAt, it.id) },
+        )
     }
 
     @PostMapping("/v1/conversations/{peer}/messages")
@@ -135,7 +141,32 @@ class ApiController(
         if (mark.messageIds.isNotEmpty()) hub.broadcastMessageRead(peer, mark)
         return MarkReadResponse(mark.messageIds, mark.readAt)
     }
+
+    // ── Reactions (ADR-0011, Phase 8) ───────────────────────────────────────
+
+    @PutMapping("/v1/conversations/{peer}/messages/{messageId}/reactions")
+    fun addReaction(
+        request: HttpServletRequest,
+        @PathVariable peer: String,
+        @PathVariable messageId: String,
+        @RequestBody body: AddReactionRequest,
+    ): List<ReactionDto> {
+        val me = principal(request)
+        val result = reactions.addReaction(messageId, me.username, body.emoji)
+        return result
+    }
+
+    @DeleteMapping("/v1/conversations/{peer}/messages/{messageId}/reactions")
+    fun removeReaction(
+        request: HttpServletRequest,
+        @PathVariable peer: String,
+        @PathVariable messageId: String,
+    ): List<ReactionDto> {
+        val me = principal(request)
+        return reactions.removeReaction(messageId, me.username)
+    }
 }
 
-private fun messageDto(record: MessageRecord) =
-    MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt, record.type, record.mediaId, record.width, record.height)
+private fun messageDto(record: MessageRecord, reactions: List<ReactionDto> = emptyList()) =
+    MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt, record.type, record.mediaId, record.width, record.height,
+        if (reactions.isEmpty()) null else reactions)

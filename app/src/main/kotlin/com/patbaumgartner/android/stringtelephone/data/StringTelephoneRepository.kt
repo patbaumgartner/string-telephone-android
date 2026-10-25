@@ -194,8 +194,13 @@ class StringTelephoneRepository(
             is RealtimeEvent.Presence -> onPresence(event)
             is RealtimeEvent.MessageRead -> onMessageRead(event)
             is RealtimeEvent.Typing -> onTyping(event)
+            is RealtimeEvent.MessageReaction -> onMessageReaction(event)
             is RealtimeEvent.Unknown -> Unit
         }
+    }
+
+    private fun onMessageReaction(event: RealtimeEvent.MessageReaction) {
+        chatCache.applyReaction(event.messageId, event.authorUsername, event.emoji, event.added)
     }
 
     /** Resets the 5-second UI expiry whenever a new typing signal arrives. */
@@ -402,6 +407,36 @@ class StringTelephoneRepository(
             currentCoroutineContext().ensureActive()
             chatCache.markFailed(key)
             false
+        }
+    }
+
+    /**
+     * Toggles the signed-in user's reaction on a message (ADR-0011, Phase 8).
+     * Tapping a chip the user already reacted to removes the reaction; any
+     * other chip adds or replaces it with that emoji (one per author, the
+     * server upserts).
+     *
+     * The chip updates optimistically; the REST response and the realtime
+     * fan-out confirm it. A failed request rolls the optimistic chip back.
+     */
+    fun toggleReaction(peer: String, message: ChatMessage, emoji: String) {
+        val me = _account.value.me?.username ?: return
+        val serverId = message.serverId ?: return
+        val hadMine = message.reactions.containsKey(me)
+        val adding = !hadMine || message.reactions[me] != emoji
+        chatCache.applyReaction(serverId, me, emoji, added = adding)
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: return@launch
+            try {
+                withContext(Dispatchers.IO) {
+                    if (adding) client.setReaction(peer, serverId, emoji) else client.removeReaction(peer, serverId)
+                }
+                ensureActive()
+            } catch (_: ApiException) {
+                ensureActive()
+                // Roll the optimistic chip back; a later history load reconciles.
+                chatCache.applyReaction(serverId, me, emoji, added = !adding)
+            }
         }
     }
 

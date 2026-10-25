@@ -115,6 +115,44 @@ class ChatCacheTest {
     }
 
     @Test
+    fun `applyReaction adds one emoji per author and replaces on react again`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        assertTrue(cache.applyReaction("m1", "alice", "👍", added = true).let { it != null })
+
+        // Reacting again replaces the emoji (one row per author).
+        cache.applyReaction("m1", "alice", "😂", added = true)
+        assertEquals(mapOf("alice" to "😂"), cache.history("bob").single().reactions)
+    }
+
+    @Test
+    fun `applyReaction removes only the named author's reaction`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        cache.applyReaction("m1", "alice", "👍", added = true)
+        cache.applyReaction("m1", "bob", "❤️", added = true)
+
+        cache.applyReaction("m1", "alice", "👍", added = false)
+        assertEquals(mapOf("bob" to "❤️"), cache.history("bob").single().reactions)
+
+        // Removing again is a no-op.
+        cache.applyReaction("m1", "alice", "👍", added = false)
+        assertEquals(mapOf("bob" to "❤️"), cache.history("bob").single().reactions)
+    }
+
+    @Test
+    fun `applyReaction touches only the named server id and reports unknown ids`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", true, "one", 1, SendState.SENT))
+        cache.append("carol", ChatMessage("m2", "k2", false, "two", 2, SendState.SENT))
+
+        assertEquals("carol", cache.applyReaction("m2", "bob", "🔥", added = true))
+        assertEquals(emptyMap(), cache.history("bob").single().reactions)
+        assertEquals(mapOf("bob" to "🔥"), cache.history("carol").single().reactions)
+        assertEquals(null, cache.applyReaction("missing", "alice", "👍", added = true))
+    }
+
+    @Test
     fun `a receipt for an unknown id changes nothing`() {
         val cache = ChatCache()
         cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))

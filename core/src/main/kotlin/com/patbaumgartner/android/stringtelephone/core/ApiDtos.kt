@@ -34,6 +34,16 @@ data class MessageDto(
     val width: Int? = null,
     /** Decoded image height in pixels for IMAGE messages. */
     val height: Int? = null,
+    /** Reactions on this message (ADR-0011, Phase 8). */
+    val reactions: List<ReactionDto>? = null,
+)
+
+/** One emoji reaction: who reacted and when (ADR-0011, Phase 8). */
+@Serializable
+data class ReactionDto(
+    val authorUsername: String,
+    val emoji: String,
+    val createdAt: Long,
 )
 
 @Serializable
@@ -68,6 +78,10 @@ data class MarkReadRequest(val upToMessageId: String? = null)
 @Serializable
 data class MarkReadResponseDto(val messageIds: List<String> = emptyList(), val readAt: Long = 0)
 
+/** Adds or replaces the caller's reaction on a message (ADR-0011, Phase 8). */
+@Serializable
+data class SetReactionRequest(val emoji: String)
+
 /** Envelope wrapping every frame the companion API pushes on `/v1/ws`. */
 @Serializable
 data class WsEnvelopeDto(val type: String, val payload: String)
@@ -95,6 +109,16 @@ data class WsMessageReadDto(val messageIds: List<String> = emptyList(), val read
 /** Typing indicator event payload: peer started or stopped composing (Phase 7). */
 @Serializable
 data class WsTypingDto(val peer: String, val typing: Boolean)
+
+/** Reaction event payload (ADR-0011, Phase 8). */
+@Serializable
+data class WsReactionDto(
+    val messageId: String,
+    val peer: String,
+    val authorUsername: String,
+    val emoji: String,
+    val action: String, // "added" or "removed"
+)
 
 /** Decoded realtime frame; unknown types are reported, malformed frames dropped. */
 sealed interface RealtimeEvent {
@@ -127,6 +151,19 @@ sealed interface RealtimeEvent {
     data class Typing(
         val peer: String,
         val typing: Boolean,
+    ) : RealtimeEvent
+
+    /**
+     * Reaction change (ADR-0011, Phase 8): the peer reacted to a message or
+     * removed their reaction. The [authorUsername] is who changed it, so the
+     * local device can tell its own reactions apart from the peer's.
+     */
+    data class MessageReaction(
+        val messageId: String,
+        val peer: String,         // the other participant (not the author)
+        val authorUsername: String,
+        val emoji: String,
+        val added: Boolean,
     ) : RealtimeEvent
 
     data class Unknown(val type: String) : RealtimeEvent
@@ -167,6 +204,16 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
         "typing" -> runCatching {
             val event = realtimeJson.decodeFromString(WsTypingDto.serializer(), envelope.payload)
             RealtimeEvent.Typing(event.peer, event.typing)
+        }.getOrNull()
+        "message-reaction" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsReactionDto.serializer(), envelope.payload)
+            RealtimeEvent.MessageReaction(
+                messageId = event.messageId,
+                peer = event.peer,
+                authorUsername = event.authorUsername,
+                emoji = event.emoji,
+                added = event.action == "added",
+            )
         }.getOrNull()
         else -> RealtimeEvent.Unknown(envelope.type)
     }
