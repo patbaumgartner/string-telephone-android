@@ -93,6 +93,7 @@ internal fun ChatScreen(
     val messages by viewModel.messagesFor(peer).collectAsState()
     val historyFailed by viewModel.historyErrorFor(peer).collectAsState()
     val contactsState by viewModel.contactsState().collectAsState()
+    val typingPeer by viewModel.typingPeerState().collectAsState()
     val rows = remember(messages) { chatTimeline(messages, ZoneId.systemDefault()) }
     val listState = rememberLazyListState()
     var emojiPickerVisible by remember { mutableStateOf(false) }
@@ -120,6 +121,7 @@ internal fun ChatScreen(
             peer = peer,
             contact = contactsState.contacts.firstOrNull { it.username == peer },
             displayName = viewModel.displayNameOf(peer, contactsState.contacts),
+            isTyping = typingPeer == peer,
             onBack = viewModel::backToContacts,
             onCall = { onCall(peer) },
         )
@@ -193,6 +195,7 @@ private fun ChatHeader(
     peer: String,
     contact: ContactDto?,
     displayName: String,
+    isTyping: Boolean = false,
     onBack: () -> Unit,
     onCall: () -> Unit,
 ) {
@@ -213,16 +216,27 @@ private fun ChatHeader(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val presence = presenceStatusOf(contact?.presence)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    PresenceDot(presence)
-                    Spacer(Modifier.width(6.dp))
+                if (isTyping) {
+                    // Typing replaces the presence row: the indicator is the
+                    // fresher, more specific signal while it is visible.
                     Text(
-                        presenceLabel(presence),
+                        stringResource(R.string.chat_typing),
                         style = MaterialTheme.typography.bodySmall,
-                        color = StringTelephoneTheme.accents.textMuted,
+                        color = StringTelephoneTheme.accents.brand,
                         maxLines = 1,
                     )
+                } else {
+                    val presence = presenceStatusOf(contact?.presence)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        PresenceDot(presence)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            presenceLabel(presence),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = StringTelephoneTheme.accents.textMuted,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
             IconButton(onClick = onCall) {

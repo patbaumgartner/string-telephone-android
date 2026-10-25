@@ -92,6 +92,10 @@ data class WsPresenceDto(val username: String, val presence: String, val updated
 @Serializable
 data class WsMessageReadDto(val messageIds: List<String> = emptyList(), val readAt: Long = 0)
 
+/** Typing indicator event payload: peer started or stopped composing (Phase 7). */
+@Serializable
+data class WsTypingDto(val peer: String, val typing: Boolean)
+
 /** Decoded realtime frame; unknown types are reported, malformed frames dropped. */
 sealed interface RealtimeEvent {
     data class NewMessage(
@@ -117,6 +121,12 @@ sealed interface RealtimeEvent {
     data class MessageRead(
         val messageIds: List<String>,
         val readAtEpochMs: Long,
+    ) : RealtimeEvent
+
+    /** Typing indicator (Phase 7): the peer started or stopped composing. */
+    data class Typing(
+        val peer: String,
+        val typing: Boolean,
     ) : RealtimeEvent
 
     data class Unknown(val type: String) : RealtimeEvent
@@ -153,6 +163,10 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
         "message-read" -> runCatching {
             val event = realtimeJson.decodeFromString(WsMessageReadDto.serializer(), envelope.payload)
             RealtimeEvent.MessageRead(event.messageIds, event.readAt)
+        }.getOrNull()
+        "typing" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsTypingDto.serializer(), envelope.payload)
+            RealtimeEvent.Typing(event.peer, event.typing)
         }.getOrNull()
         else -> RealtimeEvent.Unknown(envelope.type)
     }

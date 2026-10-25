@@ -30,8 +30,25 @@ class RealtimeEventTest {
 
     @Test
     fun `reports unknown event types instead of dropping them silently`() {
-        val event = assertIs<RealtimeEvent.Unknown>(parseRealtimeEvent("""{"type":"typing","payload":"{}"}"""))
-        assertEquals("typing", event.type)
+        val event = assertIs<RealtimeEvent.Unknown>(parseRealtimeEvent("""{"type":"unknown-future","payload":"{}"}"""))
+        assertEquals("unknown-future", event.type)
+    }
+
+    @Test
+    fun `parses a typing envelope into an indicator`() {
+        val start = parseRealtimeEvent("""{"type":"typing","payload":"{\"peer\":\"alice\",\"typing\":true}"}""")
+        val startEvent = assertIs<RealtimeEvent.Typing>(start)
+        assertEquals("alice", startEvent.peer)
+        assertEquals(true, startEvent.typing)
+
+        val stop = parseRealtimeEvent("""{"type":"typing","payload":"{\"peer\":\"alice\",\"typing\":false}"}""")
+        val stopEvent = assertIs<RealtimeEvent.Typing>(stop)
+        assertEquals("alice", stopEvent.peer)
+        assertEquals(false, stopEvent.typing)
+
+        // Missing fields or broken payloads are dropped, not reported.
+        assertNull(parseRealtimeEvent("""{"type":"typing","payload":"{}"}"""))
+        assertNull(parseRealtimeEvent("""{"type":"typing","payload":"{broken"}"""))
     }
 
     @Test

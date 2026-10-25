@@ -103,6 +103,7 @@
     <string name="cd_emoji_picker">Show emoji picker</string>
     <string name="chat_attach_image">Attach image</string>
     <string name="chat_image">Image</string>
+    <string name="chat_typing">typing…</string>
     <string name="notification_call_channel">Calls</string>
     <string name="notification_message_channel">Messages</string>
     <string name="notification_missed_call_title">Missed call</string>

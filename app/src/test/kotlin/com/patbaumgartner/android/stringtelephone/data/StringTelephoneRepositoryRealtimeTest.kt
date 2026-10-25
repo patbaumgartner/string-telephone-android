@@ -150,6 +150,58 @@ class StringTelephoneRepositoryRealtimeTest {
         repo.stopRealtime()
     }
 
+    @Test
+    fun `typing indicator shows peer, expires after 5 seconds`() = runBlocking {
+        val fake = FakeRealtimeStream()
+        val repo = repository(ChatCache(), fake)
+        repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
+        repo.startRealtime()
+
+        assertEquals(null, repo.typingPeer.value)
+        fake.emit(RealtimeEvent.Typing("bob", true))
+        awaitUntil { repo.typingPeer.value == "bob" }
+
+        // A refresh resets the expiry clock.
+        fake.emit(RealtimeEvent.Typing("bob", true))
+        assertEquals("bob", repo.typingPeer.value)
+
+        // After the expiry window, the indicator clears.
+        delay(StringTelephoneRepository.TYPING_EXPIRY_MS + 100)
+        assertEquals(null, repo.typingPeer.value)
+        repo.stopRealtime()
+    }
+
+    @Test
+    fun `stop-typing signal clears indicator immediately`() = runBlocking {
+        val fake = FakeRealtimeStream()
+        val repo = repository(ChatCache(), fake)
+        repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
+        repo.startRealtime()
+
+        fake.emit(RealtimeEvent.Typing("bob", true))
+        awaitUntil { repo.typingPeer.value == "bob" }
+        fake.emit(RealtimeEvent.Typing("bob", false))
+        awaitUntil { repo.typingPeer.value == null }
+        repo.stopRealtime()
+    }
+
+    @Test
+    fun `sendTyping(false) clears the indicator and cancels the expiry`() = runBlocking {
+        val fake = FakeRealtimeStream()
+        val repo = repository(ChatCache(), fake)
+        repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
+        repo.startRealtime()
+
+        fake.emit(RealtimeEvent.Typing("bob", true))
+        awaitUntil { repo.typingPeer.value == "bob" }
+        repo.sendTyping(false)
+        assertEquals(null, repo.typingPeer.value)
+        // Even after the expiry window nothing reappears.
+        delay(StringTelephoneRepository.TYPING_EXPIRY_MS + 100)
+        assertEquals(null, repo.typingPeer.value)
+        repo.stopRealtime()
+    }
+
     private suspend fun awaitUntil(condition: () -> Boolean) = withTimeout(5_000) {
         while (!condition()) delay(10)
     }

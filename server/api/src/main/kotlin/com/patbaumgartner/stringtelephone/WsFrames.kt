@@ -25,4 +25,10 @@ object WsFrames {
         Json.encodeToString(WsMessageDto("message-read", Json.encodeToString(
             WsMessageReadEvent(mark.messageIds, mark.readAt),
         )))
+
+    /** Typing indicator (Phase 7): the sender started or stopped composing. */
+    fun typing(peer: String, typing: Boolean): String =
+        Json.encodeToString(WsMessageDto("typing", Json.encodeToString(
+            WsTypingEvent(peer, typing),
+        )))
 }

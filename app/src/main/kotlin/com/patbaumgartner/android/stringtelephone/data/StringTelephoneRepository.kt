@@ -18,6 +18,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -86,6 +87,12 @@ class StringTelephoneRepository(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val incomingMessages: SharedFlow<IncomingMessage> = _incoming.asSharedFlow()
+
+    /** The peer who is currently composing; cleared by a 5-second expiry. */
+    private val _typingPeer = MutableStateFlow<String?>(null)
+    val typingPeer: StateFlow<String?> = _typingPeer.asStateFlow()
+
+    private var typingExpiryJob: Job? = null
 
     /** Peer whose chat the user is looking at; its messages are read on arrival. */
     @Volatile private var activeConversation: String? = null
@@ -186,14 +193,26 @@ class StringTelephoneRepository(
             is RealtimeEvent.NewMessage -> onNewMessage(event)
             is RealtimeEvent.Presence -> onPresence(event)
             is RealtimeEvent.MessageRead -> onMessageRead(event)
+            is RealtimeEvent.Typing -> onTyping(event)
             is RealtimeEvent.Unknown -> Unit
         }
     }
 
-    /**
-     * Applies a read receipt to the local cache (ADR-0010). The peer read the
-     * listed messages, so the sent copies turn into double ticks.
-     */
+    /** Resets the 5-second UI expiry whenever a new typing signal arrives. */
+    private fun onTyping(event: RealtimeEvent.Typing) {
+        typingExpiryJob?.cancel()
+        typingExpiryJob = null
+        if (event.typing) {
+            _typingPeer.value = event.peer
+            typingExpiryJob = scope.launch {
+                delay(TYPING_EXPIRY_MS)
+                if (_typingPeer.value == event.peer) _typingPeer.value = null
+            }
+        } else if (_typingPeer.value == event.peer) {
+            _typingPeer.value = null
+        }
+    }
+
     private fun onMessageRead(event: RealtimeEvent.MessageRead) {
         chatCache.applyReadReceipt(event.messageIds.toSet(), event.readAtEpochMs)
     }
@@ -388,6 +407,23 @@ class StringTelephoneRepository(
 
     fun history(peer: String): List<ChatMessage> = chatCache.history(peer)
 
+    /**
+     * Sends the ephemeral typing signal (Phase 7). Best effort over the live
+     * stream: no retry, no persistence, and a dropped frame is invisible.
+     */
+    fun sendTyping(typing: Boolean) {
+        if (typing) return
+        // A "stop" also clears the local expiry so a stale indicator cannot linger.
+        typingExpiryJob?.cancel()
+        typingExpiryJob = null
+        _typingPeer.value = null
+        realtime?.sendTyping(false)
+    }
+
+    fun notifyTyping() {
+        realtime?.sendTyping(true)
+    }
+
     fun clearSession() {
         sessionJob.cancel()
         sessionJob = SupervisorJob(scope.coroutineContext[Job])
@@ -396,10 +432,18 @@ class StringTelephoneRepository(
         _contacts.value = ContactsState()
         _signIn.value = SignInState()
         _unread.value = emptyMap()
+        _typingPeer.value = null
+        typingExpiryJob?.cancel()
+        typingExpiryJob = null
         activeConversation = null
         drafts.clear()
         historyErrors.values.forEach { it.value = false }
         chatCache.clear()
         chatFlows.values.forEach { it.value = emptyList() }
+    }
+
+    companion object {
+        /** Typing indicators expire when no refresh arrives within this window. */
+        const val TYPING_EXPIRY_MS = 5_000L
     }
 }

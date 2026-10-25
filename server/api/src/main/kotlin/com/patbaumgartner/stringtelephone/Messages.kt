@@ -103,6 +103,20 @@ class Messages(
         ).param(id).query { rs, _ -> fromRow(rs) }.optional().orElse(null)
 
     /**
+     * Distinct conversation partners of [user] in both directions, most
+     * recently active first. The typing fan-out (Phase 7) uses this to reach
+     * the peers who actually share a conversation with the sender.
+     */
+    fun recentPeers(user: String, limit: Int = 50): List<String> =
+        db.sql(
+            "SELECT peer FROM (" +
+                "SELECT recipient AS peer, MAX(created_at) AS latest FROM messages WHERE sender = :user GROUP BY recipient " +
+                "UNION ALL " +
+                "SELECT sender AS peer, MAX(created_at) AS latest FROM messages WHERE recipient = :user GROUP BY sender" +
+                ") recent WHERE peer <> :user GROUP BY peer ORDER BY MAX(latest) DESC LIMIT :limit",
+        ).param("user", user).param("limit", limit).query(String::class.java).list().filterNotNull()
+
+    /**
      * Marks the peer's messages as read by [reader] (ADR-0010). Only the
      * recipient may mark a message read, and only the peer's messages are
      * affected. When [upTo] is given, only messages up to and including it

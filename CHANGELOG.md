@@ -15,6 +15,10 @@ No public release has been published yet.
   `IMAGE` message referencing the uploaded media, and rendered as an inline
   thumbnail in the bubble — tap it to open a fullscreen viewer. Failed image
   uploads behave exactly like failed text messages: visible, tap to resend.
+- The chat now shows a "typing…" indicator in the contact header (Phase 7).
+  Ephemeral WebSocket signals only; no REST, no persistence. The app debounces
+  at 500 ms on send and expires the indicator after 5 s without a refresh.
+  Sending a message clears the peer's indicator immediately.
 - Messages now carry read receipts (ADR-0010). The server stores a per-message
   read state, exposes it as `readAt` in the conversation history and
   announces it as a `message-read` event on the realtime stream. The app
