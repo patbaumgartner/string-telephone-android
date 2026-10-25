@@ -83,18 +83,40 @@ class FakeCredentialStore : CredentialStore {
 private val PREVIEW_CHAT = buildList {
     add(Triple(false, "Hello Alice! Are you free for a call later?", "2025-06-12T18:02:00Z"))
     add(Triple(true, "Hi Bob, yes. After dinner works for me.", "2025-06-12T18:05:00Z"))
-    repeat(12) { round ->
-        add(
-            Triple(
-                false,
-                "Round ${round + 1}: anything new on your side?",
-                "2025-06-13T08:${(10 + round).toString().padStart(2, '0')}:00Z",
-            ),
-        )
+    val bobAsks = listOf(
+        "Anything new on your side?",
+        "How was your day?",
+        "Did you see the match yesterday?",
+        "That is a lot of birds on the terrace. Do you feed them?",
+        "Which camera did you use for those shots?",
+        "We should finally meet in person. When are you free?",
+        "I am sending over the invitations today.",
+        "The house was quiet when I came home.",
+        "Books or a walk after lunch? I choose walk.",
+        "Do you still have the original photo?",
+        "The trail agent said the condition improved.",
+        "Last one: are you in for a run on Saturday?",
+    )
+    val aliceAnswers = listOf(
+        "Nothing new besides the coffee, honestly.",
+        "Good, busy. Sending you the photos tonight.",
+        "Only the highlights, but yes!",
+        "No, they just come for the seeds. I refill weekly.",
+        "All of them with a compact mirrorless, manual glass.",
+        "Saturday morning works. Coffee after?",
+        "Perfect. The address has not changed.",
+        "The same here. I watered the balcony plants.",
+        "Walk it is. Bring the good shoes.",
+        "I do — the folder is on my desk.",
+        "Then Sunday it is.",
+        "Count me in. I will bring the water bottles.",
+    )
+    bobAsks.forEachIndexed { round, ask ->
+        add(Triple(false, ask, "2025-06-13T08:${(10 + round).toString().padStart(2, '0')}:00Z"))
         add(
             Triple(
                 true,
-                "Round ${round + 1}: nothing new here. Still on for the weekend?" +
+                aliceAnswers[round] +
                     if (round == 6) {
                         " This one runs long enough to wrap over several lines, keeping row heights varied."
                     } else {
