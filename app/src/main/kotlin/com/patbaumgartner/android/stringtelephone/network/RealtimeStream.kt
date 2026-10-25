@@ -16,4 +16,7 @@ interface RealtimeStream {
 
     /** Stops reconnecting and closes the connection; idempotent. */
     fun disconnect()
+
+    /** Sends the ephemeral typing signal (Phase 7); best effort, no delivery guarantee. */
+    fun sendTyping(typing: Boolean) {}
 }

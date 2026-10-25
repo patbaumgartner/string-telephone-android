@@ -275,6 +275,11 @@ Invalid credentials close with `1008` immediately after upgrade.
   `{"messageIds":["uuid"],"readAt":1760000005000}` and lists the messages the
   reader has just read, in conversation order. The author shows them as read;
   the reader already knows from the response to its own mark.
+- `{"type":"typing","payload":"<JSON string>"}` is an ephemeral fan-out
+  (Phase 7): the client sends `{"typing":true}` or `{"typing":false}` over
+  the socket; the server relays it to the sender's conversation partners as
+  `{"peer":"bob","typing":true}`. Nothing is persisted. A peer with no
+  recent message in either direction is not reachable via this signal.
 - Client frames do not create messages. Use the HTTP send endpoint.
 - Disable/reset closes all user streams with `1008`.
 

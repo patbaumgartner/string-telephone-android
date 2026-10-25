@@ -114,6 +114,11 @@ class RealtimeClient(
         }
     }
 
+    /** Sends the ephemeral typing signal; best effort, no delivery guarantee. */
+    override fun sendTyping(typing: Boolean) {
+        socket?.send("""{"type":"typing","payload":{"typing":$typing}}""")
+    }
+
     private companion object {
         const val CLOSE_NORMAL = 1000
         const val BASE_BACKOFF_MS = 1_000L

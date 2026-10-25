@@ -1,7 +1,7 @@
 # String Telephone — Feature Roadmap
 
-Date: 2026-10-20
-Status: In progress (phases 1 to 3 and 5 done; see the table below)
+Date: 2026-10-25
+Status: In progress (phases 1 to 7 done; see the table below)
 
 This document captures feature requests, the decisions behind them, and the
 planned phases. It is a working document; status updates live in GitHub issues
@@ -36,7 +36,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 4 | Garage media storage (server only) | Medium | Planned | Phase 3 |
 | 5 | Read receipts | Medium | Done | Phase 3 |
 | 6 | Image sharing | Medium | Planned | Phases 3+4 |
-| 7 | Typing indicators | Small | Planned | Phase 3 |
+| 7 | Typing indicators | Small | Done | Phase 3 |
 | 8 | Emoji reactions | Medium | Planned | Phase 5 |
 | 9 | Reply/quote | Medium | Planned | Phase 5 |
 | 10 | Message deletion | Medium | Planned | Phase 5 |
@@ -242,6 +242,7 @@ missing/bogus media), `11-chat-image.png` screenshot with dark variant.
 ### Phase 7 — Typing indicators
 
 **Effort:** Small
+**Status:** Done (2026-10-25)
 
 Ephemeral WebSocket-only signals, no persistence, no REST:
 

@@ -109,3 +109,11 @@ data class WsMessageReadEvent(
     val messageIds: List<String>,
     val readAt: Long,
 )
+
+/** Incoming typing signal from a client: {"type":"typing","payload":{"typing":true}}. */
+@kotlinx.serialization.Serializable
+data class WsClientTypingPayload(val typing: Boolean)
+
+/** Outgoing typing signal to the peer: {"type":"typing","payload":{"peer":"alice","typing":true}}. */
+@kotlinx.serialization.Serializable
+data class WsTypingEvent(val peer: String, val typing: Boolean)

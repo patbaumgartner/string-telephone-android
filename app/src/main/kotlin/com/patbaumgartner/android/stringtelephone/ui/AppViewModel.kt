@@ -27,8 +27,8 @@ import com.patbaumgartner.android.stringtelephone.di.AppContainer
 import com.patbaumgartner.android.stringtelephone.notify.IncomingCallAccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -84,6 +84,7 @@ class AppViewModel(
     var callFailure by mutableStateOf<CallFailure?>(null)
         private set
     private var failureDismissJob: Job? = null
+    private var typingDebounceJob: Job? = null
 
     private val _screen = MutableStateFlow(currentStartScreen())
     val screen: StateFlow<AppScreen> = _screen.asStateFlow()
@@ -260,6 +261,9 @@ class AppViewModel(
 
     fun unreadState(): StateFlow<Map<String, Int>> = repository.unread
 
+    /** The username of the peer currently composing, or null when the indicator is hidden. */
+    fun typingPeerState(): StateFlow<String?> = repository.typingPeer
+
     fun buildInfo(): com.patbaumgartner.android.stringtelephone.di.BuildInfo = container.buildInfo
 
     fun displayNameOf(username: String, contacts: List<ContactDto>): String =
@@ -277,6 +281,13 @@ class AppViewModel(
     fun onChatInputChanged(peer: String, value: String) {
         chatInput = value
         repository.saveChatDraft(peer, value)
+        // Debounce: fire only after 500 ms of no typing.
+        typingDebounceJob?.cancel()
+        typingDebounceJob = viewModelScope.launch {
+            delay(TYPING_DEBOUNCE_MS)
+            typingDebounceJob = null
+            repository.notifyTyping()
+        }
     }
 
     fun attachImage(peer: String, uri: android.net.Uri) {
@@ -299,7 +310,10 @@ class AppViewModel(
         val content = chatInput.trim()
         if (content.isEmpty()) return
         chatInput = ""
+        typingDebounceJob?.cancel()
+        typingDebounceJob = null
         repository.saveChatDraft(peer, "")
+        repository.sendTyping(false)
         repository.send(peer, content) { }
     }
 
@@ -427,6 +441,7 @@ class AppViewModel(
     companion object {
         private val ONGOING_CALL_STATES = setOf(CallState.RINGING, CallState.OUTGOING, CallState.ACTIVE)
         internal const val CALL_FAILURE_VISIBLE_MS = 4_000L
+        internal const val TYPING_DEBOUNCE_MS = 500L
 
         fun factory(context: android.content.Context) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")

@@ -42,7 +42,8 @@ class StringTelephoneServer {
     fun wsSessions() = WsSessions()
 
     @Bean
-    fun wsHub(users: Users, presence: Presence, sessions: WsSessions) = WsHub(users, presence, sessions)
+    fun wsHub(users: Users, presence: Presence, sessions: WsSessions, jdbcClient: JdbcClient) =
+        WsHub(users, presence, sessions, jdbcClient)
 
     @Bean
     fun presence(pbx: PbxGateway, sessions: WsSessions, users: Users) = Presence(pbx, sessions, users)
