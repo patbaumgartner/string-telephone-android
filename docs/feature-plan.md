@@ -48,11 +48,11 @@ Phases land in this order. Each is small enough for one focused review.
 | 16 | Message search | Medium | Planned | Phase 3 |
 | 17 | Message editing | Medium | Planned | Phases 5+10 |
 | 18 | Chat list management (pin/mute/archive) | Medium | Planned | — |
+| 19 | Group chats | Large | Planned | Phase 3 |
 
-Deferred indefinitely: end-to-end encryption, push notifications. A group-chat
-scope ADR keeps today's one-to-one designs group-compatible; groups themselves
-are a future bet beyond this roadmap's horizon. See
-[Deferred indefinitely](#deferred-indefinitely).
+Deferred indefinitely: end-to-end encryption, push notifications. The group-chat
+scope is captured in [ADR-0012](adr/0012-group-chat-scope.md); this roadmap now
+includes a Phase 19 implementation. See [Phase 19](#phase-19--group-chats).
 
 ---
 
@@ -449,13 +449,105 @@ pinned/muted/archived states.
 
 ---
 
+### Phase 19 — Group chats
+
+**Effort:** Large
+**Status:** Planned
+**Depends on:** Phase 3 (PostgreSQL — membership and group message schema)
+
+Implements the group-chat feature as scoped by
+[ADR-0012](adr/0012-group-chat-scope.md). The schema, protocol and UI extend
+the one-to-one model rather than redesigning it.
+
+#### Schema (Flyway migrations)
+
+- **`groups`** table: `id` (UUID PK), `name`, `creator` (username FK),
+  `created_at`, `updated_at`. Each group has exactly one admin who creates it.
+- **`group_members`** table: `group_id` (FK → `groups.id`), `username` (FK →
+  `users.username`), `role` (`ADMIN | MEMBER`), `joined_at`. Composite PK
+  `(group_id, username)`.
+- **`messages`** gains a nullable `group_id` column (FK → `groups.id`);
+  when set, `peer`/`recipient` are null and the message is visible to all
+  group members. A `CHECK` ensures a message is either pairwise (`peer` set)
+  or group-level (`group_id` set), never both.
+- **Per-member read state:** a new `group_message_reads` table keyed by
+  `(message_id, username)` with `read_at TIMESTAMPTZ`. The existing
+  `messages.read_at` column is retired; Phase 5's read-receipt logic is
+  updated to query this new table for group messages.
+
+#### Server API
+
+- **Group management:**
+  - `POST /v1/groups` — create a group (name, initial members). Creator is
+    automatically added as ADMIN. Returns the group object with its members.
+  - `GET /v1/groups` — list groups the authenticated user belongs to.
+  - `GET /v1/groups/{id}` — group details + members (ADMIN or MEMBER only).
+  - `PUT /v1/groups/{id}` — update name (ADMIN only).
+  - `POST /v1/groups/{id}/members` — add a member (ADMIN only).
+  - `DELETE /v1/groups/{id}/members/{username}` — remove a member (ADMIN
+    removes others; MEMBER removes themselves = leave).
+  - `DELETE /v1/groups/{id}` — disband the group (ADMIN only); cascades to
+    messages and membership; existing calls are left running until the PBX
+    retry loop catches the `403`.
+
+- **Group messaging:**
+  - `POST /v1/groups/{id}/messages` — send a group message. Authorship is
+    derived from the principal; `403` if the caller is not a member.
+    Fan-out is stored (one row per message, N recipients read it).
+  - `GET /v1/groups/{id}/messages` — paginated history for the group
+    (cursor-based, like pairwise history). Includes reactions and reply
+    metadata per message, scoped to the caller's group membership.
+  - `POST /v1/groups/{id}/read` — mark messages read up to a given ID
+    (one row per message in `group_message_reads`).
+
+- **WebSocket events:**
+  - `group-message` — fan-out to all members when a group message is stored.
+  - `group-message-read` — per-member read fan-out (each member sees only
+    their own reads; no all-read-in-group event in the first cut).
+  - `group-reaction`, `group-reply`, `group-deleted` — mirror the pairwise
+    `message-reaction` / `message-deleted` envelope with a `groupId` field.
+  - `typing` gains a `groupId` variant: `{"type":"typing","payload":
+    {"groupId":"...","typing":true}}`.
+
+#### PBX (Asterisk)
+
+- Group calls use Asterisk **confbridge**. The API manages conference rooms
+  dynamically: when the first member initiates a call, a conference bridge is
+  created and the PBX dialplan is extended; when the last member leaves, the
+  bridge is torn down.
+- SIP REGISTER and INVITE flows remain unchanged; only the call target
+  changes from a pairwise SIP URI to a conference bridge.
+- Existing pairwise calls are unaffected.
+
+#### App UI
+
+- **New screen:** Group list (analogous to the contacts/conversation list).
+  FAB to create a group; each row shows group name, member count, last
+  message preview.
+- **Group detail screen:** member list, add/remove members (ADMIN only),
+  leave/disband actions.
+- **Group chat screen:** identical layout to pairwise chat; the header shows
+  the group name and member avatars. Typing indicators fan out within the
+  group.
+- **Read receipts in groups:** rendered as a counter badge ("3 read") on
+  sent messages, not per-member avatars — the first cut shows only "who read"
+  in the group detail, not in the chat bubble.
+- **Notifications:** grouped by group name; the notification body shows
+  the sender name and message snippet.
+
+**Tests:** Group creation/membership/leave integration tests; fan-out
+verification; read-receipt per-member correctness; confbridge lifecycle in
+the live prototype (`scripts/test-protocol.sh`); screenshot of group list
+and group chat screens.
+
+---
+
 ## Deferred indefinitely
 
 | Feature | Reason |
 |---------|--------|
 | **End-to-end encryption** | Signal Protocol changes client, server and protocol fundamentally. Would need its own ADR before any work; revisit only when there is demand. |
 | **Push notifications (FCM)** | Requires Google Play Services, conflicting with the self-hosted rule; would need its own ADR. Background delivery remains documented as a limitation. |
-| **Group chats** | The single largest structural gap versus WhatsApp/Signal, touching schema (membership), protocol (fan-out, per-member delivery), PBX (conference bridge) and UI. Kept out of this roadmap's horizon — but [ADR-0012](adr/0012-group-chat-scope.md) records compatibility constraints today's one-to-one designs must keep so a later group phase does not force rework of read receipts, reactions or deletion. |
 
 ---
 
@@ -467,7 +559,7 @@ pinned/muted/archived states.
 | [ADR-0009](adr/0009-media-storage-s3.md) | Media storage — Garage default, S3-compatible interface | Accepted |
 | [ADR-0010](adr/0010-message-delivery-states.md) | Read receipts (always-on) | Accepted |
 | [ADR-0011](adr/0011-message-extras.md) | Reactions, replies, deletion semantics | Accepted (planned) |
-| [ADR-0012](adr/0012-group-chat-scope.md) | Group chats — scope and one-to-one compatibility constraints | Accepted (scope only; implementation deferred) |
+| [ADR-0012](adr/0012-group-chat-scope.md) | Group chats — scope and one-to-one compatibility constraints | Accepted; implementation as Phase 19 |
 
 ---
 
