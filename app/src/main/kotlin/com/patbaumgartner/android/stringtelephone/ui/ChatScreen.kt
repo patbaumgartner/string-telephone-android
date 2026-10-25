@@ -424,7 +424,14 @@ private fun ImageBubbleContent(message: ChatMessage, colors: com.patbaumgartner.
                 }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+        // Same edge as text bubbles: the time row hugs the end that points
+        // away from the sender. Text rows place their meta at the bubble end
+        // (MessageWithMeta), so image rows do the same regardless of the image.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
+            modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 2.dp, top = 4.dp),
+        ) {
             Text(time, style = MaterialTheme.typography.labelSmall, color = colors.meta)
             if (message.fromMe) {
                 Spacer(Modifier.width(3.dp))
