@@ -176,15 +176,30 @@ object PreviewFactory {
         mapOf("bob" to "❤️"),
     )
 
+    /**
+     * The reply preview (Phase 9): a received question and the outgoing
+     * reply quoting it, so the quoted snapshot and the reply bubble are
+     * visible together.
+     */
+    private val REPLY_CHAT = listOf(
+        Triple(false, "Can you make it on Saturday afternoon?", "2025-06-13T09:40:00Z"),
+        Triple(true, "Yes, 2pm works — see you at the usual place.", "2025-06-13T09:41:00Z"),
+    )
+
+    /** Which preview message index replies to which earlier server id. */
+    private val REPLIES = mapOf(1 to "preview-0")
+
     fun viewModel(
         context: Context,
         callEngine: CallEngine = FakeCallEngine(),
         deliveryStates: Boolean = false,
         chatImage: Boolean = false,
         chatReactions: Boolean = false,
+        chatReply: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
         val conversation: List<Triple<Boolean, String, String>> = when {
+            chatReply -> REPLY_CHAT
             chatReactions -> REACTIONS_CHAT
             chatImage -> IMAGE_CHAT
             deliveryStates -> DELIVERY_STATE_CHAT
@@ -192,7 +207,7 @@ object PreviewFactory {
         }
         conversation.forEachIndexed { index, (fromMe, content, at) ->
             val state = when {
-                chatImage -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
+                chatImage || chatReactions || chatReply -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
                 deliveryStates -> DELIVERY_STATES[index]
                 index == conversation.lastIndex -> com.patbaumgartner.android.stringtelephone.chat.SendState.PENDING
                 index == conversation.lastIndex - 1 -> com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED
@@ -209,6 +224,7 @@ object PreviewFactory {
                         null
                     },
                     reactions = if (chatReactions) REACTIONS.getOrElse(index) { emptyMap() } else emptyMap(),
+                    replyToId = if (chatReply) REPLIES[index] else null,
                 ),
             )
         }

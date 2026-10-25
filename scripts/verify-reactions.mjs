@@ -10,7 +10,8 @@
  *    history embedding, message-reaction fan-out to both participants.
  *  - Core: RealtimeEvent.MessageReaction parses the server-to-client envelope.
  *  - App: optimistic chip toggle with rollback, cache applyReaction.
- *  - UI:  long-press picker, count chips under the bubble, tap-to-toggle.
+ *  - UI:  long-press options sheet arming the picker, count chips under the
+ *         bubble, tap-to-toggle.
  *  - Tests: typed event parsing, cache merge, repository fan-in.
  *  - Docs: protocol.md contract, feature-plan status, changelog entry.
  *
@@ -146,7 +147,8 @@ check('ChatMessage — fromServer maps reactions',   chatCache.includes('m.react
 // ── App ViewModel / UI ───────────────────────────────────────────────────────
 
 check('AppViewModel — toggleReaction pass-through', vm.includes('fun toggleReaction(peer: String'));
-check('ChatScreen — long-press opens picker',      chatScreen.includes('reactionPickerOpen = true'));
+check('ChatScreen — long-press opens options sheet', chatScreen.includes('ReplyOptionsSheet('));
+check('ChatScreen — React option arms the picker', chatScreen.includes('pendingReactionMessage = message'));
 check('ChatScreen — combinedClickable long-press', chatScreen.includes('combinedClickable'));
 check('ChatScreen — ReactionChips under bubble',   chatScreen.includes('ReactionChips('));
 check('ChatScreen — chips only with server id',    chatBubble.includes('message.serverId != null'));

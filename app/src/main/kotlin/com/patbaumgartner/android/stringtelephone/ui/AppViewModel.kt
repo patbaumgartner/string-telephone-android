@@ -81,6 +81,13 @@ class AppViewModel(
     var pendingAnswer by mutableStateOf(false)
         private set
 
+    /**
+     * The message the user is replying to (ADR-0011, Phase 9); shown as a
+     * banner above the composer and cleared when the reply is sent or dismissed.
+     */
+    private val _replyingTo = MutableStateFlow<ChatMessage?>(null)
+    val replyingTo: StateFlow<ChatMessage?> = _replyingTo.asStateFlow()
+
     /** Why the last outgoing call failed; the call screen explains it before returning. */
     var callFailure by mutableStateOf<CallFailure?>(null)
         private set
@@ -268,6 +275,16 @@ class AppViewModel(
         repository.toggleReaction(peer, message, emoji)
     }
 
+    /** Sets the message being replied to; shown as a quoted banner (ADR-0011, Phase 9). */
+    fun setReplyingTo(message: ChatMessage?) {
+        _replyingTo.value = message
+    }
+
+    /** Clears the current reply target (ADR-0011, Phase 9). */
+    fun clearReplyTo() {
+        _replyingTo.value = null
+    }
+
     fun unreadState(): StateFlow<Map<String, Int>> = repository.unread
 
     /** The username of the peer currently composing, or null when the indicator is hidden. */
@@ -319,11 +336,13 @@ class AppViewModel(
         val content = chatInput.trim()
         if (content.isEmpty()) return
         chatInput = ""
+        val replyToId = _replyingTo.value?.serverId
+        _replyingTo.value = null
         typingDebounceJob?.cancel()
         typingDebounceJob = null
         repository.saveChatDraft(peer, "")
         repository.sendTyping(false)
-        repository.send(peer, content) { }
+        repository.send(peer, content, replyToId) { }
     }
 
     fun sendImage(peer: String, bytes: ByteArray, contentType: String, fileName: String) {
@@ -344,6 +363,7 @@ class AppViewModel(
 
     fun openChat(peer: String) {
         chatInput = repository.chatDraftFlow(peer).value
+        _replyingTo.value = null
         _screen.value = AppScreen.Chat(peer)
         repository.account.value.me?.let { me -> repository.loadHistory(peer, me.username) }
     }
@@ -427,6 +447,7 @@ class AppViewModel(
         passwordInput = ""
         sipSecretInput = ""
         chatInput = ""
+        _replyingTo.value = null
         callRegistrationFailed = false
         pendingAnswer = false
         _screen.value = AppScreen.Onboarding

@@ -76,6 +76,12 @@ class ScreenshotTest {
         capture("12-chat-reactions", ScreenshotRoute.CHAT_REACTIONS)
     }
 
+    /** A reply quoting a received message (Phase 9, ADR-0011). */
+    @Test
+    fun captureChatReply() {
+        capture("13-chat-reply", ScreenshotRoute.CHAT_REPLY)
+    }
+
     @Test
     fun captureCall() {
         capture("04-call", ScreenshotRoute.CALL)

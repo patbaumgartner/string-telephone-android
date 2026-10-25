@@ -14,6 +14,8 @@ data class MessageRecord(
     val mediaId: String? = null,
     val width: Int? = null,
     val height: Int? = null,
+    /** Message this one replies to; null when the message is not a reply (ADR-0011, Phase 9). */
+    val replyTo: String? = null,
 )
 
 /** Result of marking a conversation read: the affected ids and the read timestamp. */
@@ -41,32 +43,51 @@ class Messages(
         rs.getString("media_id"),
         rs.getObject("width", Integer::class.java)?.toInt()?.takeIf { it > 0 },
         rs.getObject("height", Integer::class.java)?.toInt()?.takeIf { it > 0 },
+        rs.getString("reply_to"),
     )
 
     // A single INSERT ... ON CONFLICT DO NOTHING is atomic by itself; the
     // read-your-writes lookup below runs after it commits, exactly as before.
     // Values are bound with params(), never concatenated into the SQL text.
-    fun insert(sender: String, recipient: String, content: String, clientKey: String): MessageRecord {
+    fun insert(
+        sender: String,
+        recipient: String,
+        content: String,
+        clientKey: String,
+        replyTo: String? = null,
+    ): MessageRecord {
         val bytes = content.toByteArray(Charsets.UTF_8)
         require(content.isNotEmpty()) { "content must not be empty" }
         require(bytes.size <= MAX_CONTENT_BYTES) { "content too large" }
         val id = newId()
         val now = System.currentTimeMillis()
         val inserted = db.sql(
-            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-        ).params(id, sender, recipient, content, now, clientKey, "TEXT").update()
+            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, reply_to) VALUES(:id, :sender, :recipient, :content, :createdAt, :clientKey, :type, :replyTo) ON CONFLICT DO NOTHING",
+        ).param("id", id).param("sender", sender).param("recipient", recipient).param("content", content)
+            .param("createdAt", now).param("clientKey", clientKey).param("type", "TEXT").param("replyTo", replyTo)
+            .update()
         val stored = find(sender, recipient, clientKey)
             ?: error("stored message disappeared after insert")
         if (inserted > 0) onNewMessage(stored)
         return stored
     }
 
-    fun insertMedia(sender: String, recipient: String, clientKey: String, mediaId: String, media: MediaRecord): MessageRecord {
+    fun insertMedia(
+        sender: String,
+        recipient: String,
+        clientKey: String,
+        mediaId: String,
+        media: MediaRecord,
+        replyTo: String? = null,
+    ): MessageRecord {
         val id = newId()
         val now = System.currentTimeMillis()
         val inserted = db.sql(
-            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, media_id, width, height) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
-        ).params(id, sender, recipient, "", now, clientKey, "IMAGE", mediaId, media.width ?: 0, media.height ?: 0).update()
+            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, media_id, width, height, reply_to) VALUES(:id, :sender, :recipient, '', :createdAt, :clientKey, :type, :mediaId, :width, :height, :replyTo) ON CONFLICT DO NOTHING",
+        ).param("id", id).param("sender", sender).param("recipient", recipient)
+            .param("createdAt", now).param("clientKey", clientKey).param("type", "IMAGE")
+            .param("mediaId", mediaId).param("width", media.width ?: 0).param("height", media.height ?: 0)
+            .param("replyTo", replyTo).update()
         val stored = find(sender, recipient, clientKey)
             ?: error("stored message disappeared after insert")
         if (inserted > 0) onNewMessage(stored)
@@ -75,7 +96,7 @@ class Messages(
 
     fun page(sender: String, recipient: String, before: Pair<Long, String>?, limit: Int): List<MessageRecord> {
         val effectiveLimit = limit.coerceIn(1, MAX_PAGE)
-        val columns = "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height"
+        val columns = "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to"
         val sql = if (before == null) {
             "SELECT $columns FROM messages " +
                 "WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) " +
@@ -93,13 +114,13 @@ class Messages(
 
     fun find(sender: String, recipient: String, clientKey: String): MessageRecord? =
         db.sql(
-            "SELECT id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height FROM messages " +
+            "SELECT id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to FROM messages " +
                 "WHERE sender = ? AND recipient = ? AND client_key = ?",
         ).params(sender, recipient, clientKey).query { rs, _ -> fromRow(rs) }.optional().orElse(null)
 
     fun findById(id: String): MessageRecord? =
         db.sql(
-            "SELECT id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height FROM messages WHERE id = ?",
+            "SELECT id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to FROM messages WHERE id = ?",
         ).param(id).query { rs, _ -> fromRow(rs) }.optional().orElse(null)
 
     /**

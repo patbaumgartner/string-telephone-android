@@ -251,6 +251,7 @@ class StringTelephoneRepository(
                 mediaId = event.mediaId,
                 width = event.width,
                 height = event.height,
+                replyToId = event.replyToId,
             ),
             me,
         )
@@ -351,19 +352,19 @@ class StringTelephoneRepository(
         return client.uploadMedia(peer, bytes, contentType, fileName)
     }
 
-    fun send(peer: String, content: String, onResult: (Boolean) -> Unit) {
+    fun send(peer: String, content: String, replyToId: String? = null, onResult: (Boolean) -> Unit) {
         scope.launch(sessionJob) {
             val key = newMessageClientKey()
-            chatCache.append(peer, ChatMessage(null, key, fromMe = true, content, System.currentTimeMillis(), SendState.PENDING))
-            onResult(deliver(peer, content, key))
+            chatCache.append(peer, ChatMessage(null, key, fromMe = true, content, System.currentTimeMillis(), SendState.PENDING, replyToId = replyToId))
+            onResult(deliver(peer, content, key, replyToId))
         }
     }
 
-    fun sendImage(peer: String, mediaId: String, width: Int?, height: Int?, onResult: (Boolean) -> Unit) {
+    fun sendImage(peer: String, mediaId: String, width: Int?, height: Int?, replyToId: String? = null, onResult: (Boolean) -> Unit) {
         scope.launch(sessionJob) {
             val key = newMessageClientKey()
-            chatCache.append(peer, ChatMessage(null, key, fromMe = true, content = "", sentAtEpochMs = System.currentTimeMillis(), state = SendState.PENDING, type = "IMAGE", mediaId = mediaId, width = width, height = height))
-            onResult(deliverImage(peer, mediaId, key))
+            chatCache.append(peer, ChatMessage(null, key, fromMe = true, content = "", sentAtEpochMs = System.currentTimeMillis(), state = SendState.PENDING, type = "IMAGE", mediaId = mediaId, width = width, height = height, replyToId = replyToId))
+            onResult(deliverImage(peer, mediaId, key, replyToId))
         }
     }
 
@@ -375,17 +376,17 @@ class StringTelephoneRepository(
         if (!message.fromMe || !chatCache.markRetrying(message.clientKey)) return
         scope.launch(sessionJob) {
             if (message.type == "IMAGE" && message.mediaId != null) {
-                deliverImage(peer, message.mediaId, message.clientKey)
+                deliverImage(peer, message.mediaId, message.clientKey, message.replyToId)
             } else {
-                deliver(peer, message.content, message.clientKey)
+                deliver(peer, message.content, message.clientKey, message.replyToId)
             }
         }
     }
 
-    private suspend fun deliver(peer: String, content: String, key: String): Boolean {
+    private suspend fun deliver(peer: String, content: String, key: String, replyToId: String? = null): Boolean {
         val client = apiProvider() ?: run { chatCache.markFailed(key); return false }
         return try {
-            val sent = withContext(Dispatchers.IO) { client.sendMessage(peer, content, key) }
+            val sent = withContext(Dispatchers.IO) { client.sendMessage(peer, content, key, replyToId) }
             currentCoroutineContext().ensureActive()
             chatCache.markSent(key, sent.id)
             true
@@ -396,10 +397,10 @@ class StringTelephoneRepository(
         }
     }
 
-    private suspend fun deliverImage(peer: String, mediaId: String, key: String): Boolean {
+    private suspend fun deliverImage(peer: String, mediaId: String, key: String, replyToId: String? = null): Boolean {
         val client = apiProvider() ?: run { chatCache.markFailed(key); return false }
         return try {
-            val sent = withContext(Dispatchers.IO) { client.sendMedia(peer, mediaId, key) }
+            val sent = withContext(Dispatchers.IO) { client.sendMedia(peer, mediaId, key, replyToId = replyToId) }
             currentCoroutineContext().ensureActive()
             chatCache.markSent(key, sent.id)
             true
