@@ -144,8 +144,8 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    `node --test scripts/test-deploy.mjs`. Feature oracles
    `scripts/verify-scrollbar.mjs`, `verify-plan-status.mjs`,
    `verify-postgres.mjs`, `verify-audio-route.mjs`,
-   `verify-call-ui-routes.mjs`, `verify-read-receipts.mjs` and
-   `verify-screenshots.mjs` run from the gate
+   `verify-call-ui-routes.mjs`, `verify-read-receipts.mjs`,
+   `verify-typing.mjs` and `verify-screenshots.mjs` run from the gate
    ledgers; the last four are
    also appended to `scripts/run-session-verify.sh`
    (`verify-screenshots.mjs` needs the suite's `app/build/screenshots`).
