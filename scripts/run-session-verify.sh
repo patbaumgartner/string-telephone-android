@@ -21,6 +21,7 @@ node --test scripts/test-provisioning.mjs
 node scripts/verify-audio-route.mjs
 node scripts/verify-call-ui-routes.mjs
 node scripts/verify-read-receipts.mjs
+node scripts/verify-typing.mjs
 node scripts/verify-screenshots.mjs
 
 echo "SESSION-VERIFY-OK"
