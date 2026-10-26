@@ -1,7 +1,7 @@
 # String Telephone — Feature Roadmap
 
 Date: 2026-10-25
-Status: In progress (phases 1 to 3, 5 to 9 done; see the table below)
+Status: In progress (phases 1 to 3, 5 to 10 done; see the table below)
 
 This document captures feature requests, the decisions behind them, and the
 planned phases. It is a working document; status updates live in GitHub issues
@@ -39,7 +39,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 7 | Typing indicators | Small | Done | Phase 3 |
 | 8 | Emoji reactions | Medium | Done | Phase 5 |
 | 9 | Reply/quote | Medium | Done | Phase 5 |
-| 10 | Message deletion | Medium | Planned | Phase 5 |
+| 10 | Message deletion | Medium | Done | Phase 5 |
 | 11 | Voice messages | Large | Planned | Phase 4 |
 | 12 | Video calls | Large | Planned | — |
 | 13 | Last-seen & multi-device polish | Medium | Planned | — |
@@ -309,12 +309,25 @@ original is in the cache. Oracle: `scripts/verify-reply.mjs`.
 ### Phase 10 — Message deletion
 
 **Effort:** Medium
+**Status:** Done (2026-10-25)
 Implements the deletion part of [ADR-0011](adr/0011-message-extras.md).
 
 - **Delete for me:** local hide, no server change.
 - **Delete for both sides:** soft-delete tombstone synced over the stream;
   bubble renders as a placeholder ("message deleted") on both phones.
 - No time window in the first cut (decided; revisit if abuse appears).
+
+**Done 2026-10-25.** V8 migration adds nullable `deleted_at`/`deleted_by` to
+`messages`; `DELETE /v1/conversations/{peer}/messages/{messageId}` clears the
+content, stamps the tombstone (row retained, so ids and reply references stay
+stable) and fans a `message-deleted` frame to both participants. The response
+and history pages carry the tombstone shape; the call is idempotent. The
+long-press sheet gains Delete with two scopes: "for me" (client-local hide,
+no server change) and "for both" (only when the message has a server id);
+deleted bubbles render an italic "Message deleted" placeholder on both sides,
+content stays in the local record so reply quotes still render. Optimistic
+tombstone with rollback and history re-fetch on failure. Oracle:
+`scripts/verify-deletion.mjs`.
 
 ---
 

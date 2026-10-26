@@ -82,6 +82,12 @@ class ScreenshotTest {
         capture("13-chat-reply", ScreenshotRoute.CHAT_REPLY)
     }
 
+    /** Tombstone placeholder among live messages (Phase 10, ADR-0011). */
+    @Test
+    fun captureChatDeletion() {
+        capture("14-chat-deletion", ScreenshotRoute.CHAT_DELETION)
+    }
+
     @Test
     fun captureCall() {
         capture("04-call", ScreenshotRoute.CALL)

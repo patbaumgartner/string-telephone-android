@@ -38,6 +38,10 @@ data class MessageDto(
     val reactions: List<ReactionDto>? = null,
     /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
     val replyToId: String? = null,
+    /** Tombstone (ADR-0011, Phase 10): non-null once deleted for both sides. */
+    val deletedAt: Long? = null,
+    /** Who deleted the message; null while it exists. */
+    val deletedBy: String? = null,
 )
 
 /** One emoji reaction: who reacted and when (ADR-0011, Phase 8). */
@@ -104,6 +108,10 @@ data class WsNewMessageDto(
     val height: Int? = null,
     /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
     val replyToId: String? = null,
+    /** Tombstone (ADR-0011, Phase 10): non-null once deleted for both sides. */
+    val deletedAt: Long? = null,
+    /** Who deleted the message; null while it exists. */
+    val deletedBy: String? = null,
 )
 
 @Serializable
@@ -124,6 +132,15 @@ data class WsReactionDto(
     val authorUsername: String,
     val emoji: String,
     val action: String, // "added" or "removed"
+)
+
+/** Deletion tombstone event payload (ADR-0011, Phase 10). */
+@Serializable
+data class WsMessageDeletedDto(
+    val messageId: String,
+    val peer: String,
+    val deletedBy: String,
+    val deletedAt: Long,
 )
 
 /** Decoded realtime frame; unknown types are reported, malformed frames dropped. */
@@ -174,6 +191,18 @@ sealed interface RealtimeEvent {
         val added: Boolean,
     ) : RealtimeEvent
 
+    /**
+     * Deletion tombstone (ADR-0011, Phase 10): a message was deleted for
+     * both sides. [deletedBy] is who deleted it, so the local device can
+     * tell its own action apart from the peer's.
+     */
+    data class MessageDeleted(
+        val messageId: String,
+        val peer: String,
+        val deletedBy: String,
+        val deletedAtEpochMs: Long,
+    ) : RealtimeEvent
+
     data class Unknown(val type: String) : RealtimeEvent
 }
 
@@ -222,6 +251,15 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 authorUsername = event.authorUsername,
                 emoji = event.emoji,
                 added = event.action == "added",
+            )
+        }.getOrNull()
+        "message-deleted" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsMessageDeletedDto.serializer(), envelope.payload)
+            RealtimeEvent.MessageDeleted(
+                messageId = event.messageId,
+                peer = event.peer,
+                deletedBy = event.deletedBy,
+                deletedAtEpochMs = event.deletedAt,
             )
         }.getOrNull()
         else -> RealtimeEvent.Unknown(envelope.type)

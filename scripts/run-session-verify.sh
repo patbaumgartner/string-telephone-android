@@ -24,6 +24,7 @@ node scripts/verify-read-receipts.mjs
 node scripts/verify-typing.mjs
 node scripts/verify-reactions.mjs
 node scripts/verify-reply.mjs
+node scripts/verify-deletion.mjs
 node scripts/verify-screenshots.mjs
 
 echo "SESSION-VERIFY-OK"

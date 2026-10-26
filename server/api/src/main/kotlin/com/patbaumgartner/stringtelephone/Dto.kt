@@ -38,6 +38,10 @@ data class MessageDto(
     val reactions: List<ReactionDto>? = null,
     /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
     val replyToId: String? = null,
+    /** Tombstone (ADR-0011, Phase 10): non-null once deleted for both sides. */
+    val deletedAt: Long? = null,
+    /** Who deleted the message; null while it exists. */
+    val deletedBy: String? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -109,6 +113,10 @@ data class WsNewMessageEvent(
     val height: Int? = null,
     /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
     val replyToId: String? = null,
+    /** Tombstone (ADR-0011, Phase 10): non-null once deleted for both sides. */
+    val deletedAt: Long? = null,
+    /** Who deleted the message; null while it exists. */
+    val deletedBy: String? = null,
 )
 
 /** Read-receipt event pushed on /v1/ws as `{"type":"message-read"}` (ADR-0010). */
@@ -138,4 +146,13 @@ data class WsReactionEvent(
     val authorUsername: String,
     val emoji: String,
     val action: String, // "added" or "removed"
+)
+
+/** Deletion event pushed on /v1/ws as `{"type":"message-deleted"}` (ADR-0011, Phase 10). */
+@kotlinx.serialization.Serializable
+data class WsMessageDeletedEvent(
+    val messageId: String,
+    val peer: String,   // the conversation peer of the deleter
+    val deletedBy: String,
+    val deletedAt: Long,
 )

@@ -236,6 +236,14 @@ internal fun ChatScreen(
                 replySheetMessage = null
                 pendingReactionMessage = message
             },
+            onDeleteForMe = {
+                viewModel.deleteForMe(peer, message)
+                replySheetMessage = null
+            },
+            onDeleteForBoth = {
+                viewModel.deleteMessage(peer, message)
+                replySheetMessage = null
+            },
             onDismiss = { replySheetMessage = null },
         )
     }
@@ -394,9 +402,10 @@ private fun ChatBubble(
             }
         }
         val shape = BubbleShape(tailOnEnd = message.fromMe, withTail = startsGroup)
-        // Long-press opens the reply/reaction sheet (ADR-0011, Phase 9). A failed
-        // bubble keeps tap-to-retry: it has no server id to react to yet.
-        val pressModifier = if (canReact) {
+        // Long-press opens the reply/reaction/delete sheet (ADR-0011). A failed
+        // bubble keeps tap-to-retry: it has no server id to act on yet.
+        val canDelete = viewModel != null && !message.deleted
+        val pressModifier = if (canReact || canDelete) {
             Modifier.combinedClickable(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null,
@@ -412,7 +421,36 @@ private fun ChatBubble(
             .then(pressModifier)
             .semantics(mergeDescendants = true) { contentDescription = description }
         val bubbleContent: @Composable () -> Unit = {
-            if (message.type == "IMAGE" && message.mediaId != null) {
+            if (message.deleted) {
+                // Tombstone (ADR-0011, Phase 10): the content is gone at the
+                // server; both sides render this placeholder instead.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(
+                        start = if (message.fromMe) 10.dp else 10.dp + TAIL_WIDTH,
+                        end = if (message.fromMe) 10.dp + TAIL_WIDTH else 10.dp,
+                        top = 6.dp,
+                        bottom = 6.dp,
+                    ),
+                ) {
+                    Icon(
+                        StringTelephoneIcons.Delete,
+                        contentDescription = null,
+                        tint = colors.meta,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        stringResource(R.string.chat_deleted),
+                        style = MaterialTheme.typography.bodySmall.copy(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
+                        color = colors.meta,
+                    )
+                    if (message.fromMe) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(time, style = MaterialTheme.typography.labelSmall, color = colors.meta)
+                    }
+                }
+            } else if (message.type == "IMAGE" && message.mediaId != null) {
                 ImageBubbleContent(message, colors, time, failed, status, viewModel)
             } else {
                 MessageWithMeta(
@@ -882,7 +920,9 @@ private fun QuotedBubble(
 }
 
 /**
- * Long-press options sheet: Reply or React (ADR-0011, Phase 9).
+ * Long-press options sheet: Reply, React, Delete (ADR-0011, Phases 9–10).
+ * Delete offers "for me" (local hide) and — only for messages the peer can
+ * still see — "for both" (tombstone).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -890,6 +930,8 @@ private fun ReplyOptionsSheet(
     message: ChatMessage,
     onReply: () -> Unit,
     onReact: () -> Unit,
+    onDeleteForMe: () -> Unit,
+    onDeleteForBoth: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -952,6 +994,70 @@ private fun ReplyOptionsSheet(
                             stringResource(R.string.react),
                             style = MaterialTheme.typography.labelLarge,
                         )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.chat_delete),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(start = 20.dp, top = 8.dp, bottom = 12.dp),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                Surface(
+                    onClick = onDeleteForMe,
+                    shape = RoundedCornerShape(12.dp),
+                    color = StringTelephoneTheme.chat.incoming.copy(alpha = 0.7f),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 16.dp),
+                    ) {
+                        Icon(
+                            StringTelephoneIcons.Delete,
+                            contentDescription = null,
+                            tint = StringTelephoneTheme.chat.meta,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+                        Text(
+                            stringResource(R.string.chat_delete_for_me),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
+                // "Delete for both" needs a stored message; an optimistic or
+                // failed send has no server id to tombstone yet.
+                if (message.serverId != null) {
+                    Surface(
+                        onClick = onDeleteForBoth,
+                        shape = RoundedCornerShape(12.dp),
+                        color = StringTelephoneTheme.chat.incoming.copy(alpha = 0.7f),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(vertical = 16.dp),
+                        ) {
+                            Icon(
+                                StringTelephoneIcons.Delete,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(28.dp),
+                            )
+                            androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+                            Text(
+                                stringResource(R.string.chat_delete_for_everyone),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }

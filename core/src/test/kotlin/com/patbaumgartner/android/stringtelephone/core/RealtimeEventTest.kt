@@ -32,6 +32,18 @@ class RealtimeEventTest {
     }
 
     @Test
+    fun `parses a message-deleted envelope into an event`() {
+        val frame = """
+            {"type":"message-deleted","payload":"{\"messageId\":\"m1\",\"peer\":\"alice\",\"deletedBy\":\"bob\",\"deletedAt\":77}"}
+        """.trimIndent()
+        val event = assertIs<RealtimeEvent.MessageDeleted>(parseRealtimeEvent(frame))
+        assertEquals("m1", event.messageId)
+        assertEquals("alice", event.peer)
+        assertEquals("bob", event.deletedBy)
+        assertEquals(77, event.deletedAtEpochMs)
+    }
+
+    @Test
     fun `parses a presence envelope`() {
         val frame = """{"type":"presence","payload":"{\"username\":\"bob\",\"presence\":\"online\",\"updatedAt\":7}"}"""
         assertEquals(RealtimeEvent.Presence("bob", "online", 7), parseRealtimeEvent(frame))

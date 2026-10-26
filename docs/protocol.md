@@ -127,6 +127,28 @@ is in the local cache and from nothing otherwise. `replyToId` appears in
 history responses and in the `new-message` event payload; it is omitted (null)
 for non-replies.
 
+#### Delete a message
+
+`DELETE /v1/conversations/{peer}/messages/{messageId}` tombstones a message
+for both sides (ADR-0011, Phase 10). Either conversation participant may
+delete; the deleter is derived from the authenticated principal, never from
+the body. The server clears the message content and stamps `deletedAt` and
+`deletedBy`; the row itself stays so pagination, ids and reply references
+remain stable — sync can never resurrect the text.
+
+- Response `200` is the tombstone shape: `content` is `""`,
+  `deletedAt` is the deletion epoch millisecond, `deletedBy` is the deleter's
+  username. `404` unknown message, `403` when the message is not in the
+  caller's conversation with `{peer}`.
+- The call is idempotent: deleting an already-deleted message returns the
+  first tombstone unchanged.
+- A `message-deleted` frame is pushed to both participants
+  (see [Realtime events](#realtime-events-websocket)).
+- *Delete for me* has no endpoint: it is a client-local hide with no server
+  change, so the peer keeps the message and a history reload brings it back.
+- A tombstoned message still satisfies reply references; the client renders
+  the quote from its cached copy (ADR-0011).
+
 #### Image messages
 
 Send `{"type":"IMAGE","recipient":"bob","mediaId":"<id>","clientKey":"..."}`.
@@ -338,6 +360,15 @@ Invalid credentials close with `1008` immediately after upgrade.
   `{"messageId":"uuid","peer":"bob","authorUsername":"alice","emoji":"👍","action":"added|removed"}`;
   `peer` is the other participant (not the author), so each device can tell
   its own reaction apart from the peer's.
+- `{"type":"message-deleted","payload":"<JSON string>"}` (Phase 10) is a
+  durable fan-out of a tombstone. Both conversation participants receive it;
+  the client renders the placeholder immediately without a history refresh.
+  The payload is
+  `{"messageId":"uuid","peer":"alice","deletedBy":"bob","deletedAt":1760000000000}`;
+  `peer` is the other participant (not the deleter), `deletedBy` names who
+  deleted the message. Events accelerate but REST history remains
+  authoritative: after a reconnect the tombstone also appears in history
+  responses (`deletedAt`/`deletedBy` on the message).
 - Client frames do not create messages. Use the HTTP send endpoint.
 - Disable/reset closes all user streams with `1008`.
 
