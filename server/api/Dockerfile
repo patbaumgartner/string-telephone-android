@@ -1,5 +1,5 @@
 # Build context is the repository root (see server/compose.yaml).
-FROM gradle:9.8.1-jdk27 AS build
+FROM gradle:9.8.2-jdk27 AS build
 WORKDIR /workspace
 
 COPY gradle/libs.versions.toml gradle/libs.versions.toml
