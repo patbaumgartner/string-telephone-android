@@ -32,6 +32,17 @@ class RealtimeEventTest {
     }
 
     @Test
+    fun `a new-message frame carries voice duration and waveform`() {
+        val frame = """
+            {"type":"new-message","payload":"{\"id\":\"m3\",\"sender\":\"bob\",\"recipient\":\"alice\",\"content\":\"\",\"createdAt\":44,\"clientKey\":\"k3\",\"type\":\"VOICE\",\"mediaId\":\"med1\",\"durationMs\":12345,\"waveform\":\"10,50,90\"}"}
+        """.trimIndent()
+        val event = assertIs<RealtimeEvent.NewMessage>(parseRealtimeEvent(frame))
+        assertEquals("VOICE", event.type)
+        assertEquals(12_345, event.durationMs)
+        assertEquals("10,50,90", event.waveform)
+    }
+
+    @Test
     fun `parses a message-deleted envelope into an event`() {
         val frame = """
             {"type":"message-deleted","payload":"{\"messageId\":\"m1\",\"peer\":\"alice\",\"deletedBy\":\"bob\",\"deletedAt\":77}"}

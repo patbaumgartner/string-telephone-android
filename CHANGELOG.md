@@ -9,6 +9,13 @@ No public release has been published yet.
 
 ### Changed
 
+- The chat now supports voice messages (Phase 11). Hold the mic button to
+  record, slide up > 140 px to lock for hands-free recording, or cancel by
+  sliding left. The bubble renders a waveform, duration and playback controls
+  (play/pause, speed cycling through five presets, tap-to-scrub). Audio is
+  recorded as Opus (API 29+) or AAC (API 26–28) through the Phase 4 media
+  pipeline. The waveform is persisted on the message as comma-separated
+  amplitudes, clamped to 0–100 server-side and capped at 64 samples.
 - The chat now supports message deletion (Phase 10, ADR-0011). Long-press a
   bubble to choose Delete for me (local hide) or Delete for both (tombstone);
   deleted messages render as a "Message deleted" placeholder on both phones.

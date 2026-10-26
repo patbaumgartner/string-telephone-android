@@ -17,7 +17,7 @@ object WsFrames {
 
     fun newMessage(message: MessageRecord): String =
         Json.encodeToString(WsMessageDto("new-message", Json.encodeToString(
-            WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo),
+            WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo, message.deletedAt, message.deletedBy, message.durationMs, message.waveform),
         )))
 
     /** Read receipt (ADR-0010): the reader opened these messages in the conversation. */

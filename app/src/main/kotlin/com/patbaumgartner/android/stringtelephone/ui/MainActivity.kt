@@ -63,6 +63,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         stringTelephoneContainer.session.onAppHidden()
+        // A locked voice take is hands-free, so it outlives the composer. Android
+        // hands a backgrounded app silence instead of microphone input, so the
+        // take would only record nothing; discard it rather than send a silent
+        // message. This is a no-op when nothing is recording.
+        viewModel.cancelVoiceRecording()
         super.onStop()
     }
 

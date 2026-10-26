@@ -117,7 +117,14 @@ check('Core ApiDtos — RealtimeEvent.NewMessage carries replyToId', coreDtos.in
 
 check('ApiClient — sendText accepts replyToId',    vmSend.includes('replyToId'));
 check('ApiClient — MessageResult carries replyToId', apiClient.includes('val replyToId: String? = null'));
-check('ApiClient — history maps replyToId',        apiClient.includes('it.replyToId'));
+// Reply mapping lives in the shared toMessageResult() seam (see verify-voice.mjs).
+const messageResultMapper = (() => {
+    const start = apiClient.indexOf('private fun toMessageResult(');
+    return start < 0 ? '' : apiClient.slice(start, apiClient.indexOf('\n)', start) + 2);
+})();
+check('ApiClient — toMessageResult maps replyToId', messageResultMapper.includes('m.replyToId'));
+check('ApiClient — history maps through toMessageResult',
+    apiClient.includes('messages = page.messages.map { toMessageResult(it) }'));
 
 // ── App repository / cache ───────────────────────────────────────────────────
 

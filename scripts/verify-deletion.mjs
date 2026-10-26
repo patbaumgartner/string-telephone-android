@@ -123,7 +123,13 @@ check('Core ApiDtos — message-deleted parse branch', read(core + 'ApiDtos.kt')
 
 check('ApiClient — deleteMessage method',      read(app + 'network/ApiClient.kt').includes('fun deleteMessage(peer: String, messageId: String): MessageResult'));
 check('ApiClient — MessageResult carries tombstone', read(app + 'network/ApiClient.kt').includes('val deletedAt: Long? = null'));
-check('ApiClient — history maps tombstone',    read(app + 'network/ApiClient.kt').includes('it.deletedAt, it.deletedBy'));
+// Tombstone mapping lives in the shared toMessageResult() seam (see verify-voice.mjs).
+const mapperStart = apiClient.indexOf('private fun toMessageResult(');
+const messageResultMapper = mapperStart < 0
+    ? ''
+    : apiClient.slice(mapperStart, apiClient.indexOf('\n)', mapperStart) + 2);
+check('ApiClient — toMessageResult maps tombstone',
+    messageResultMapper.includes('m.deletedAt') && messageResultMapper.includes('m.deletedBy'));
 
 // ── App repository / cache ───────────────────────────────────────────────────
 

@@ -61,6 +61,7 @@ class ScreenshotActivity : ComponentActivity() {
                 chatReactions = route == ScreenshotRoute.CHAT_REACTIONS.ordinal,
                 chatReply = route == ScreenshotRoute.CHAT_REPLY.ordinal,
                 chatDeletion = route == ScreenshotRoute.CHAT_DELETION.ordinal,
+                chatVoice = route == ScreenshotRoute.CHAT_VOICE.ordinal,
             ).apply {
                 if (intent.getBooleanExtra(EXTRA_ERROR, false)) {
                     updateIncomingCallAccess(com.patbaumgartner.android.stringtelephone.notify.IncomingCallAccess.FULL_SCREEN_OFF)
@@ -81,6 +82,7 @@ class ScreenshotActivity : ComponentActivity() {
                         ScreenshotRoute.CHAT_REACTIONS.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CHAT_REPLY.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CHAT_DELETION.ordinal -> ChatScreen(peer, viewModel)
+                        ScreenshotRoute.CHAT_VOICE.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CALL.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
                         else -> SettingsScreen(viewModel)
                     }
@@ -97,4 +99,4 @@ class ScreenshotActivity : ComponentActivity() {
     }
 }
 
-enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION }
+enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION, CHAT_VOICE }

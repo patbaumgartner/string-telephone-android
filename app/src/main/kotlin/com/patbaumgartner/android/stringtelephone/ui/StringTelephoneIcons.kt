@@ -79,4 +79,16 @@ internal object StringTelephoneIcons {
     /** Placeholder while a chat image loads (Phase 6). */
     val Image: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_image)
+
+    /** Play button of a voice bubble (Phase 11). */
+    val Play: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_play_arrow)
+
+    /** Pause button of a playing voice bubble (Phase 11). */
+    val Pause: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_pause)
+
+    /** Hands-free recording lock (Phase 11). */
+    val Lock: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_lock)
 }

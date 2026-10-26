@@ -257,6 +257,8 @@ class StringTelephoneRepository(
                 width = event.width,
                 height = event.height,
                 replyToId = event.replyToId,
+                durationMs = event.durationMs,
+                waveform = event.waveform,
             ),
             me,
         )
@@ -374,13 +376,48 @@ class StringTelephoneRepository(
     }
 
     /**
+     * Sends a voice message (Phase 11): optimistic VOICE bubble, then the
+     * upload + send dance. The reply banner, if any, is consumed by the
+     * caller (the ViewModel clears it before recording ends).
+     */
+    fun sendVoice(peer: String, mediaId: String, durationMs: Int, waveform: String, replyToId: String? = null, onResult: (Boolean) -> Unit) {
+        scope.launch(sessionJob) {
+            val key = newMessageClientKey()
+            chatCache.append(peer, ChatMessage(null, key, fromMe = true, content = "", sentAtEpochMs = System.currentTimeMillis(), state = SendState.PENDING, type = "VOICE", mediaId = mediaId, durationMs = durationMs, waveform = waveform, replyToId = replyToId))
+            onResult(deliverVoice(peer, mediaId, key, durationMs, waveform, replyToId))
+        }
+    }
+
+    /**
+     * Uploads recorded audio and sends the VOICE message (Phase 11). Kept in
+     * the repository so a retry re-runs the exact same path; the composer
+     * hands over finished recording bytes only. Once the upload returns, the
+     * send goes through [sendVoice] so the optimistic bubble and the failed-
+     * message retry work exactly like text and images.
+     */
+    fun sendVoiceRecording(peer: String, bytes: ByteArray, contentType: String, fileName: String, durationMs: Int, waveform: String, replyToId: String? = null, onResult: (Boolean) -> Unit) {
+        scope.launch(sessionJob) {
+            try {
+                val media = withContext(Dispatchers.IO) { uploadMedia(peer, bytes, contentType, fileName) }
+                ensureActive()
+                sendVoice(peer, media.id, durationMs, waveform, replyToId, onResult)
+            } catch (e: Exception) {
+                ensureActive()
+                onResult(false)
+            }
+        }
+    }
+
+    /**
      * Sends a failed message again with its original client key, so the
      * server stores it once even if the first attempt actually arrived.
      */
     fun resend(peer: String, message: ChatMessage) {
         if (!message.fromMe || !chatCache.markRetrying(message.clientKey)) return
         scope.launch(sessionJob) {
-            if (message.type == "IMAGE" && message.mediaId != null) {
+            if (message.type == "VOICE" && message.mediaId != null) {
+                deliverVoice(peer, message.mediaId, message.clientKey, message.durationMs ?: 0, message.waveform ?: "", message.replyToId)
+            } else if (message.type == "IMAGE" && message.mediaId != null) {
                 deliverImage(peer, message.mediaId, message.clientKey, message.replyToId)
             } else {
                 deliver(peer, message.content, message.clientKey, message.replyToId)
@@ -406,6 +443,20 @@ class StringTelephoneRepository(
         val client = apiProvider() ?: run { chatCache.markFailed(key); return false }
         return try {
             val sent = withContext(Dispatchers.IO) { client.sendMedia(peer, mediaId, key, replyToId = replyToId) }
+            currentCoroutineContext().ensureActive()
+            chatCache.markSent(key, sent.id)
+            true
+        } catch (_: ApiException) {
+            currentCoroutineContext().ensureActive()
+            chatCache.markFailed(key)
+            false
+        }
+    }
+
+    private suspend fun deliverVoice(peer: String, mediaId: String, key: String, durationMs: Int, waveform: String, replyToId: String? = null): Boolean {
+        val client = apiProvider() ?: run { chatCache.markFailed(key); return false }
+        return try {
+            val sent = withContext(Dispatchers.IO) { client.sendVoice(peer, mediaId, key, durationMs, waveform, replyToId) }
             currentCoroutineContext().ensureActive()
             chatCache.markSent(key, sent.id)
             true

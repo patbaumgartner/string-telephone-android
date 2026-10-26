@@ -20,6 +20,10 @@ data class MessageRecord(
     val deletedAt: Long? = null,
     /** Who deleted the message for both sides (ADR-0011, Phase 10). */
     val deletedBy: String? = null,
+    /** Voice length in milliseconds (Phase 11); null for non-voice messages. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
+    val waveform: String? = null,
 ) {
     /** True when the message is a tombstone; the content is cleared server-side. */
     val deleted: Boolean get() = deletedAt != null
@@ -39,7 +43,7 @@ class Messages(
 
         /** Every persisted column, in [fromRow] order. */
         private const val SELECT_COLUMNS =
-            "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to, deleted_at, deleted_by"
+            "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to, deleted_at, deleted_by, duration_ms, waveform"
     }
 
     private fun fromRow(rs: java.sql.ResultSet): MessageRecord = MessageRecord(
@@ -57,6 +61,8 @@ class Messages(
         rs.getString("reply_to"),
         rs.getLong("deleted_at").let { if (rs.wasNull()) null else it },
         rs.getString("deleted_by"),
+        rs.getInt("duration_ms").let { if (rs.wasNull()) null else it },
+        rs.getString("waveform"),
     )
 
     // A single INSERT ... ON CONFLICT DO NOTHING is atomic by itself; the
@@ -99,7 +105,34 @@ class Messages(
             "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, media_id, width, height, reply_to) VALUES(:id, :sender, :recipient, '', :createdAt, :clientKey, :type, :mediaId, :width, :height, :replyTo) ON CONFLICT DO NOTHING",
         ).param("id", id).param("sender", sender).param("recipient", recipient)
             .param("createdAt", now).param("clientKey", clientKey).param("type", "IMAGE")
-            .param("mediaId", mediaId).param("width", media.width ?: 0).param("height", media.height ?: 0)
+            .param("replyTo", replyTo).update()
+        val stored = find(sender, recipient, clientKey)
+            ?: error("stored message disappeared after insert")
+        if (inserted > 0) onNewMessage(stored)
+        return stored
+    }
+
+    /**
+     * Stores a VOICE message (Phase 11): a media reference plus the recorded
+     * duration and waveform so both clients render the player identically.
+     */
+    fun insertVoice(
+        sender: String,
+        recipient: String,
+        clientKey: String,
+        mediaId: String,
+        durationMs: Int,
+        waveform: String,
+        replyTo: String? = null,
+    ): MessageRecord {
+        val id = newId()
+        val now = System.currentTimeMillis()
+        val inserted = db.sql(
+            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, media_id, duration_ms, waveform, reply_to) " +
+                "VALUES(:id, :sender, :recipient, '', :createdAt, :clientKey, :type, :mediaId, :durationMs, :waveform, :replyTo) ON CONFLICT DO NOTHING",
+        ).param("id", id).param("sender", sender).param("recipient", recipient)
+            .param("createdAt", now).param("clientKey", clientKey).param("type", "VOICE")
+            .param("mediaId", mediaId).param("durationMs", durationMs).param("waveform", waveform)
             .param("replyTo", replyTo).update()
         val stored = find(sender, recipient, clientKey)
             ?: error("stored message disappeared after insert")

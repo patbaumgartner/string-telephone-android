@@ -26,6 +26,14 @@ import com.patbaumgartner.android.stringtelephone.data.SignInError
 import com.patbaumgartner.android.stringtelephone.data.StringTelephoneRepository
 import com.patbaumgartner.android.stringtelephone.di.AppContainer
 import com.patbaumgartner.android.stringtelephone.notify.IncomingCallAccess
+import com.patbaumgartner.android.stringtelephone.voice.MediaPlayerVoicePlayer
+import com.patbaumgartner.android.stringtelephone.voice.MediaRecorderVoiceRecorder
+import com.patbaumgartner.android.stringtelephone.voice.PlaybackSpeed
+import com.patbaumgartner.android.stringtelephone.voice.VoicePlayer
+import com.patbaumgartner.android.stringtelephone.voice.VoicePlayerState
+import com.patbaumgartner.android.stringtelephone.voice.VoiceRecording
+import com.patbaumgartner.android.stringtelephone.voice.VoiceRecordingState
+import com.patbaumgartner.android.stringtelephone.voice.VoiceRecorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -344,6 +352,78 @@ class AppViewModel(
             }
         }
     }
+
+    // ── Voice messages (Phase 11) ────────────────────────────────────────────
+
+    private val voiceRecorder: VoiceRecorder by lazy {
+        val dir = java.io.File(container.context.cacheDir, "voice")
+        dir.mkdirs()
+        MediaRecorderVoiceRecorder(container.context, dir, viewModelScope)
+    }
+
+    private val voicePlayer: VoicePlayer by lazy {
+        MediaPlayerVoicePlayer(container.context, viewModelScope)
+    }
+
+    val voiceRecordingState: StateFlow<VoiceRecordingState>
+        get() = voiceRecorder.state
+
+    val voicePlayerState: StateFlow<VoicePlayerState>
+        get() = voicePlayer.state
+
+    val voicePlaybackSpeed: StateFlow<PlaybackSpeed>
+        get() = voicePlayer.currentSpeed
+
+    /** Starts recording; the composer draws [voiceRecordingState] while a take runs. */
+    fun startVoiceRecording(): Boolean = voiceRecorder.start()
+
+    /**
+     * Finishes the held recording and sends it as a VOICE message. The reply
+     * banner (if any) quotes the finished message. A delivery failure leaves
+     * a failed bubble the user can retry; an upload failure discards the
+     * recording, the same way a failed image upload is discarded.
+     */
+    fun finishVoiceRecording(peer: String) {
+        val replyToId = _replyingTo.value?.serverId
+        _replyingTo.value = null
+        voiceRecorder.finish { recording ->
+            if (recording == null) return@finish
+            viewModelScope.launch {
+                withContext(Dispatchers.Main) {
+                    repository.sendVoiceRecording(
+                        peer,
+                        recording.bytes,
+                        recording.contentType,
+                        recording.fileName,
+                        recording.durationMs,
+                        recording.waveform,
+                        replyToId,
+                    ) { }
+                }
+            }
+        }
+    }
+
+    /** Aborts the in-progress recording (cancel gesture); safe when idle. */
+    fun cancelVoiceRecording() {
+        voiceRecorder.cancel()
+    }
+
+    // ── Voice playback (Phase 11) ────────────────────────────────────────────
+
+    /** Plays the message's media through the authenticated media endpoint. */
+    fun playVoiceMessage(message: ChatMessage) {
+        val mediaId = message.mediaId ?: return
+        val baseUrl = repository.apiBaseUrl() ?: return
+        val token = repository.apiToken()
+        voicePlayer.play(mediaId, "$baseUrl/v1/media/$mediaId", token)
+    }
+
+    fun pauseVoicePlayback() = voicePlayer.pause()
+    fun resumeVoicePlayback() = voicePlayer.resume()
+    fun seekVoicePlayback(positionMs: Int) = voicePlayer.seekTo(positionMs)
+    fun cycleVoicePlaybackSpeed() = voicePlayer.cycleSpeed()
+    fun stopVoicePlayback() = voicePlayer.stop()
 
     fun sendCurrent(peer: String) {
         val content = chatInput.trim()
