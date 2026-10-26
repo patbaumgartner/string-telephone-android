@@ -95,6 +95,14 @@ class WsHub(
         sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.reaction(message, author, emoji, added))
 
     /**
+     * Fan-out for a deletion tombstone (ADR-0011, Phase 10): both
+     * participants receive the frame, so each device can render the
+     * placeholder immediately without a history refresh.
+     */
+    fun broadcastMessageDeleted(message: MessageRecord) =
+        sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.messageDeleted(message))
+
+    /**
      * Tells the author which messages the reader has read (ADR-0010). The
      * author turns them into double ticks; the reader learns the receipt from
      * the response to its own mark.

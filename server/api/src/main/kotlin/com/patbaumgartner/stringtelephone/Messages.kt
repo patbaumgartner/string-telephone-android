@@ -16,7 +16,14 @@ data class MessageRecord(
     val height: Int? = null,
     /** Message this one replies to; null when the message is not a reply (ADR-0011, Phase 9). */
     val replyTo: String? = null,
-)
+    /** Tombstone (ADR-0011, Phase 10): non-null once deleted for both sides. */
+    val deletedAt: Long? = null,
+    /** Who deleted the message for both sides (ADR-0011, Phase 10). */
+    val deletedBy: String? = null,
+) {
+    /** True when the message is a tombstone; the content is cleared server-side. */
+    val deleted: Boolean get() = deletedAt != null
+}
 
 /** Result of marking a conversation read: the affected ids and the read timestamp. */
 data class ReadMark(val messageIds: List<String>, val readAt: Long)
@@ -29,6 +36,10 @@ class Messages(
     companion object {
         const val MAX_CONTENT_BYTES = 8192
         const val MAX_PAGE = 200
+
+        /** Every persisted column, in [fromRow] order. */
+        private const val SELECT_COLUMNS =
+            "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to, deleted_at, deleted_by"
     }
 
     private fun fromRow(rs: java.sql.ResultSet): MessageRecord = MessageRecord(
@@ -44,6 +55,8 @@ class Messages(
         rs.getObject("width", Integer::class.java)?.toInt()?.takeIf { it > 0 },
         rs.getObject("height", Integer::class.java)?.toInt()?.takeIf { it > 0 },
         rs.getString("reply_to"),
+        rs.getLong("deleted_at").let { if (rs.wasNull()) null else it },
+        rs.getString("deleted_by"),
     )
 
     // A single INSERT ... ON CONFLICT DO NOTHING is atomic by itself; the
@@ -96,7 +109,7 @@ class Messages(
 
     fun page(sender: String, recipient: String, before: Pair<Long, String>?, limit: Int): List<MessageRecord> {
         val effectiveLimit = limit.coerceIn(1, MAX_PAGE)
-        val columns = "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to"
+        val columns = SELECT_COLUMNS
         val sql = if (before == null) {
             "SELECT $columns FROM messages " +
                 "WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?) " +
@@ -114,13 +127,13 @@ class Messages(
 
     fun find(sender: String, recipient: String, clientKey: String): MessageRecord? =
         db.sql(
-            "SELECT id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to FROM messages " +
+            "SELECT $SELECT_COLUMNS FROM messages " +
                 "WHERE sender = ? AND recipient = ? AND client_key = ?",
         ).params(sender, recipient, clientKey).query { rs, _ -> fromRow(rs) }.optional().orElse(null)
 
     fun findById(id: String): MessageRecord? =
         db.sql(
-            "SELECT id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to FROM messages WHERE id = ?",
+            "SELECT $SELECT_COLUMNS FROM messages WHERE id = ?",
         ).param(id).query { rs, _ -> fromRow(rs) }.optional().orElse(null)
 
     /**
@@ -161,5 +174,23 @@ class Messages(
         if (upTo != null) bound = bound.param(upTo.first).param(upTo.first).param(upTo.second)
         val ids = bound.query(String::class.java).list().filterNotNull()
         return ReadMark(ids, now)
+    }
+
+    /**
+     * Tombstones a message for both sides (ADR-0011, Phase 10): clears the
+     * content, stamps `deleted_at`/`deleted_by`, and keeps the row so sync
+     * and pagination stay stable. Returns the tombstoned record, or null
+     * when the message does not exist.
+     *
+     * Idempotent: deleting an already-deleted message keeps the first
+     * tombstone, so a repeated request never moves the timestamp.
+     */
+    fun delete(messageId: String, deletedBy: String): MessageRecord? {
+        val now = System.currentTimeMillis()
+        db.sql(
+            "UPDATE messages SET content = '', deleted_at = ?, deleted_by = ? " +
+                "WHERE id = ? AND deleted_at IS NULL",
+        ).params(now, deletedBy, messageId).update()
+        return findById(messageId)
     }
 }

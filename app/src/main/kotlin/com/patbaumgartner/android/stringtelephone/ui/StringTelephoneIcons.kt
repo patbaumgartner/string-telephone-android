@@ -73,6 +73,9 @@ internal object StringTelephoneIcons {
     val Close: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_close)
 
+    val Delete: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_delete)
+
     /** Placeholder while a chat image loads (Phase 6). */
     val Image: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_image)

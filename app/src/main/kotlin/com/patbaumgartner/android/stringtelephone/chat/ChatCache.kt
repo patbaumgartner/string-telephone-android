@@ -32,7 +32,14 @@ data class ChatMessage(
     val reactions: Map<String, String> = emptyMap(),
     /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
     val replyToId: String? = null,
+    /** Tombstone (ADR-0011, Phase 10): non-null once deleted for both sides. */
+    val deletedAtEpochMs: Long? = null,
+    /** Who deleted the message; null while it exists. */
+    val deletedBy: String? = null,
 ) {
+    /** True when deleted for both sides; the bubble renders a placeholder. */
+    val deleted: Boolean get() = deletedAtEpochMs != null
+
     companion object {
         fun fromServer(m: com.patbaumgartner.android.stringtelephone.network.MessageResult, myUsername: String): ChatMessage = ChatMessage(
             serverId = m.id,
@@ -48,10 +55,11 @@ data class ChatMessage(
             height = m.height,
             reactions = m.reactions.associate { it.authorUsername to it.emoji },
             replyToId = m.replyToId,
+            deletedAtEpochMs = m.deletedAt,
+            deletedBy = m.deletedBy,
         )
     }
 }
-
 /**
  * In-memory conversation cache backed by server pagination on reconnect.
  * v1 keeps app-private in-memory state plus persisted server history; no
@@ -181,6 +189,39 @@ class ChatCache {
             }
         }
         return null
+    }
+
+    /**
+     * Applies a deletion tombstone (ADR-0011, Phase 10) to the message with
+     * the given [serverId]. Content stays in the local record so the reply
+     * quote can still render the cached copy (ADR-0011), but the bubble
+     * renders the placeholder. Returns the peer to re-emit on, or null if
+     * the message is not cached.
+     */
+    @Synchronized
+    fun applyDeleted(serverId: String, deletedAtEpochMs: Long, deletedBy: String?): String? {
+        for (entry in byPeer) {
+            val index = entry.value.indexOfFirst { it.serverId == serverId }
+            if (index >= 0) {
+                val current = entry.value[index]
+                if (current.deleted) return entry.key
+                entry.value[index] = current.copy(deletedAtEpochMs = deletedAtEpochMs, deletedBy = deletedBy)
+                emit(entry.key)
+                return entry.key
+            }
+        }
+        return null
+    }
+
+    /** Local hide ("delete for me", ADR-0011, Phase 10): no server change. */
+    @Synchronized
+    fun hideLocally(peer: String, clientKey: String): Boolean {
+        val list = byPeer[peer] ?: return false
+        val index = list.indexOfFirst { it.clientKey == clientKey }
+        if (index < 0) return false
+        list.removeAt(index)
+        emit(peer)
+        return true
     }
 
     /**

@@ -9,6 +9,12 @@ No public release has been published yet.
 
 ### Changed
 
+- The chat now supports message deletion (Phase 10, ADR-0011). Long-press a
+  bubble to choose Delete for me (local hide) or Delete for both (tombstone);
+  deleted messages render as a "Message deleted" placeholder on both phones.
+  The server clears the content, keeps the row so reply references stay
+  stable, and fans a `message-deleted` frame; updates are optimistic and roll
+  back if the request fails.
 - The chat now supports reply/quote (Phase 9, ADR-0011). Long-press a bubble
   to choose Reply or React; replying shows a quoted banner above the composer
   and the sent message renders a snapshot of the quoted message (author and

@@ -220,6 +220,24 @@ class StringTelephoneRepositoryRealtimeTest {
         repo.stopRealtime()
     }
 
+    @Test
+    fun `a deletion frame tombstones the cached message`() = runBlocking {
+        val cache = ChatCache()
+        val fake = FakeRealtimeStream()
+        val repo = repository(cache, fake)
+        repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
+        cache.append("bob", ChatMessage("m1", "k1", false, "secret", 1, SendState.SENT))
+
+        repo.startRealtime()
+        fake.emit(RealtimeEvent.MessageDeleted("m1", "alice", "bob", 77))
+        awaitUntil { cache.history("bob").single().deleted }
+        val deleted = cache.history("bob").single()
+        assertTrue(deleted.deleted)
+        assertEquals(77L, deleted.deletedAtEpochMs)
+        assertEquals("bob", deleted.deletedBy)
+        repo.stopRealtime()
+    }
+
     private suspend fun awaitUntil(condition: () -> Boolean) = withTimeout(5_000) {
         while (!condition()) delay(10)
     }

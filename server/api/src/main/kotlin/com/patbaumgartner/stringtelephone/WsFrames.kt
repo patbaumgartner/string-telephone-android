@@ -47,4 +47,19 @@ object WsFrames {
                 action = if (added) "added" else "removed",
             ),
         )))
+
+    /**
+     * Deletion tombstone (ADR-0011, Phase 10). Both participants learn the
+     * message was deleted; [deletedBy] is who deleted it, so each device can
+     * tell its own action apart from the peer's.
+     */
+    fun messageDeleted(message: MessageRecord): String =
+        Json.encodeToString(WsMessageDto("message-deleted", Json.encodeToString(
+            WsMessageDeletedEvent(
+                messageId = message.id,
+                peer = if (message.sender == message.deletedBy) message.recipient else message.sender,
+                deletedBy = message.deletedBy ?: "",
+                deletedAt = message.deletedAt ?: 0L,
+            ),
+        )))
 }

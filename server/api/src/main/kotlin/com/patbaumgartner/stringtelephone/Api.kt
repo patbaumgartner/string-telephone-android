@@ -176,8 +176,38 @@ class ApiController(
         val me = principal(request)
         return reactions.removeReaction(messageId, me.username)
     }
+
+    // ── Deletion (ADR-0011, Phase 10) ───────────────────────────────────────
+
+    /**
+     * Deletes a message for both sides (ADR-0011, Phase 10). Either
+     * participant may tombstone a message of their conversation; the server
+     * derives the deleter from the authenticated principal. The response is
+     * the tombstone: content cleared, `deletedAt`/`deletedBy` stamped.
+     *
+     * Idempotent: deleting twice returns the first tombstone unchanged.
+     */
+    @DeleteMapping("/v1/conversations/{peer}/messages/{messageId}")
+    fun deleteMessage(
+        request: HttpServletRequest,
+        @PathVariable peer: String,
+        @PathVariable messageId: String,
+    ): MessageDto {
+        val me = principal(request)
+        val message = messages.findById(messageId)
+            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        val participant = message.sender == me.username || message.recipient == me.username
+        if (!participant) {
+            throw ApiFailure(HttpStatus.FORBIDDEN, "not a participant")
+        }
+        val tombstone = messages.delete(messageId, me.username)
+        if (tombstone != null && tombstone.deletedAt != null) {
+            hub.broadcastMessageDeleted(tombstone)
+        }
+        return messageDto(tombstone!!)
+    }
 }
 
 private fun messageDto(record: MessageRecord, reactions: List<ReactionDto> = emptyList()) =
     MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt, record.type, record.mediaId, record.width, record.height,
-        if (reactions.isEmpty()) null else reactions, record.replyTo)
+        if (reactions.isEmpty()) null else reactions, record.replyTo, record.deletedAt, record.deletedBy)

@@ -94,8 +94,8 @@ check('Migration V7 — reply_to column',            migration.includes('ADD COL
 check('Migration V7 — references messages',        migration.includes('REFERENCES messages(id)'));
 check('Messages — record carries replyTo',         messages.includes('val replyTo: String?'));
 check('Messages — insert persists reply_to',       insertFn.includes('reply_to'));
-check('Messages — page selects reply_to',          memberBody(messages, 'fun page(').includes('reply_to'));
-check('Messages — findById persists reply_to',     memberBody(messages, 'fun findById(').includes('reply_to'));
+check('Messages — page selects reply_to',          memberBody(messages, 'fun page(').includes('SELECT_COLUMNS') && messages.includes('reply_to, deleted_at'));
+check('Messages — findById persists reply_to',     memberBody(messages, 'fun findById(').includes('SELECT_COLUMNS') && messages.includes('reply_to, deleted_at'));
 check('WsFrames — new-message frame carries replyTo', wsFrames.includes('message.replyTo'));
 check('Dto — MessageDto carries replyToId',        dto.includes('val replyToId: String? = null'));
 check('Dto — SendMessageRequest carries replyToId', dto.includes('val replyToId: String? = null'));

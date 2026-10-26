@@ -189,6 +189,20 @@ object PreviewFactory {
     /** Which preview message index replies to which earlier server id. */
     private val REPLIES = mapOf(1 to "preview-0")
 
+    /**
+     * The deletion preview (Phase 10): one outgoing tombstone ("deleted for
+     * both" placeholder) among live messages, plus one message the peer
+     * deleted, so both sides' rendering is visible in one screen.
+     */
+    private val DELETION_CHAT = listOf(
+        Triple(false, "Did you already send the report?", "2025-06-13T09:30:00Z"),
+        Triple(true, "Yes, this morning — one moment, checking…", "2025-06-13T09:31:00Z"),
+        Triple(false, "Wrong window, sorry — ignore that last one.", "2025-06-13T09:32:00Z"),
+    )
+
+    /** Which preview message is a tombstone, with its deletion stamp. */
+    private val DELETIONS: Map<Int, Pair<Long, String>> = mapOf(2 to Pair(1_750_000_000_000L, "alice"))
+
     fun viewModel(
         context: Context,
         callEngine: CallEngine = FakeCallEngine(),
@@ -196,9 +210,11 @@ object PreviewFactory {
         chatImage: Boolean = false,
         chatReactions: Boolean = false,
         chatReply: Boolean = false,
+        chatDeletion: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
         val conversation: List<Triple<Boolean, String, String>> = when {
+            chatDeletion -> DELETION_CHAT
             chatReply -> REPLY_CHAT
             chatReactions -> REACTIONS_CHAT
             chatImage -> IMAGE_CHAT
@@ -207,13 +223,14 @@ object PreviewFactory {
         }
         conversation.forEachIndexed { index, (fromMe, content, at) ->
             val state = when {
-                chatImage || chatReactions || chatReply -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
+                chatImage || chatReactions || chatReply || chatDeletion -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
                 deliveryStates -> DELIVERY_STATES[index]
                 index == conversation.lastIndex -> com.patbaumgartner.android.stringtelephone.chat.SendState.PENDING
                 index == conversation.lastIndex - 1 -> com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED
                 else -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
             }
             val key = "preview-" + index
+            val tombstone = if (chatDeletion) DELETIONS[index] else null
             cache.append(
                 "bob",
                 com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
@@ -225,6 +242,8 @@ object PreviewFactory {
                     },
                     reactions = if (chatReactions) REACTIONS.getOrElse(index) { emptyMap() } else emptyMap(),
                     replyToId = if (chatReply) REPLIES[index] else null,
+                    deletedAtEpochMs = tombstone?.first,
+                    deletedBy = tombstone?.second,
                 ),
             )
         }

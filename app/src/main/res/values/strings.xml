@@ -112,6 +112,11 @@
     <string name="react">React</string>
     <string name="reply_to">Reply to</string>
     <string name="cd_close">Close</string>
+    <string name="chat_delete">Delete</string>
+    <string name="chat_delete_for_me">Delete for me</string>
+    <string name="chat_delete_for_everyone">Delete for both</string>
+    <string name="chat_deleted">Message deleted</string>
+    <string name="cd_delete">Delete message</string>
     <string name="notification_call_channel">Calls</string>
     <string name="notification_message_channel">Messages</string>
     <string name="notification_missed_call_title">Missed call</string>

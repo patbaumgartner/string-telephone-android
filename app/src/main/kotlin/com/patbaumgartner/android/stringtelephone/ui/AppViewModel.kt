@@ -285,6 +285,19 @@ class AppViewModel(
         _replyingTo.value = null
     }
 
+    /** Deletes a message for both sides (ADR-0011, Phase 10). */
+    fun deleteMessage(peer: String, message: ChatMessage) {
+        repository.deleteMessage(peer, message)
+        // A pending reply to a deleted message makes no sense; drop the banner.
+        if (_replyingTo.value?.clientKey == message.clientKey) _replyingTo.value = null
+    }
+
+    /** Hides a message on this device only (ADR-0011, Phase 10). */
+    fun deleteForMe(peer: String, message: ChatMessage) {
+        repository.deleteForMe(peer, message)
+        if (_replyingTo.value?.clientKey == message.clientKey) _replyingTo.value = null
+    }
+
     fun unreadState(): StateFlow<Map<String, Int>> = repository.unread
 
     /** The username of the peer currently composing, or null when the indicator is hidden. */

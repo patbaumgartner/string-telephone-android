@@ -195,12 +195,17 @@ class StringTelephoneRepository(
             is RealtimeEvent.MessageRead -> onMessageRead(event)
             is RealtimeEvent.Typing -> onTyping(event)
             is RealtimeEvent.MessageReaction -> onMessageReaction(event)
+            is RealtimeEvent.MessageDeleted -> onMessageDeleted(event)
             is RealtimeEvent.Unknown -> Unit
         }
     }
 
     private fun onMessageReaction(event: RealtimeEvent.MessageReaction) {
         chatCache.applyReaction(event.messageId, event.authorUsername, event.emoji, event.added)
+    }
+
+    private fun onMessageDeleted(event: RealtimeEvent.MessageDeleted) {
+        chatCache.applyDeleted(event.messageId, event.deletedAtEpochMs, event.deletedBy)
     }
 
     /** Resets the 5-second UI expiry whenever a new typing signal arrives. */
@@ -439,6 +444,40 @@ class StringTelephoneRepository(
                 chatCache.applyReaction(serverId, me, emoji, added = !adding)
             }
         }
+    }
+
+    /**
+     * Deletes a message for both sides (ADR-0011, Phase 10): tombstones it
+     * optimistically, then asks the server to clear the content. A failed
+     * request rolls the tombstone back; a later history load reconciles.
+     */
+    fun deleteMessage(peer: String, message: ChatMessage) {
+        val me = _account.value.me?.username ?: return
+        val serverId = message.serverId ?: return
+        chatCache.applyDeleted(serverId, System.currentTimeMillis(), me)
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: return@launch
+            try {
+                withContext(Dispatchers.IO) { client.deleteMessage(peer, serverId) }
+                ensureActive()
+            } catch (_: ApiException) {
+                ensureActive()
+                // Roll the optimistic tombstone back; history load reconciles.
+                chatCache.applyDeleted(serverId, 0L, null)
+                // Re-fetching is the honest reconciliation for a tombstone
+                // that may or may not have landed: reload this conversation.
+                loadHistory(peer, me)
+            }
+        }
+    }
+
+    /**
+     * Hides a message locally only ("delete for me", ADR-0011, Phase 10):
+     * no server change, so the peer still sees it and a history reload
+     * brings it back.
+     */
+    fun deleteForMe(peer: String, message: ChatMessage) {
+        chatCache.hideLocally(peer, message.clientKey)
     }
 
     fun history(peer: String): List<ChatMessage> = chatCache.history(peer)

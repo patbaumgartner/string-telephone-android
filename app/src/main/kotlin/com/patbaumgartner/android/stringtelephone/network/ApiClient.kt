@@ -45,6 +45,10 @@ data class MessageResult(
     val reactions: List<com.patbaumgartner.android.stringtelephone.core.ReactionDto> = emptyList(),
     /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
     val replyToId: String? = null,
+    /** Tombstone (ADR-0011, Phase 10): non-null once deleted for both sides. */
+    val deletedAt: Long? = null,
+    /** Who deleted the message; null while it exists. */
+    val deletedBy: String? = null,
 )
 
 data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
@@ -210,7 +214,7 @@ class CompanionApiClient(
                             MessageResult(
                                 it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey,
                                 it.readAt, it.type, it.mediaId, it.width, it.height,
-                                it.reactions.orEmpty(), it.replyToId,
+                                it.reactions.orEmpty(), it.replyToId, it.deletedAt, it.deletedBy,
                             )
                         },
                         nextCursor = page.nextCursor,
@@ -262,6 +266,32 @@ class CompanionApiClient(
                 r.code == 404 -> throw ApiException.Protocol("no such message")
                 !r.isSuccessful -> throw ApiException.Unexpected(r.code)
                 else -> decodeReactions(r.body.string())
+            }
+        }
+    }
+
+    /**
+     * Deletes a message for both sides (ADR-0011, Phase 10): the server
+     * tombstones it and clears the content. The response carries the
+     * tombstone so the caller can render the placeholder immediately.
+     */
+    fun deleteMessage(peer: String, messageId: String): MessageResult = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$peer/messages/$messageId")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .delete()
+                .build(),
+        ).execute()
+        response.use { r ->
+            val body = r.body.string()
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such message")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(MessageDto.serializer(), body).let { m ->
+                    MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height, m.reactions ?: emptyList(), m.replyToId, m.deletedAt, m.deletedBy)
+                }
             }
         }
     }

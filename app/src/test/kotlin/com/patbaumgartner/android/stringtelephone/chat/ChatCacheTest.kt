@@ -194,4 +194,46 @@ class ChatCacheTest {
         assertEquals(null, cache.findQuotedMessage("bob", "missing"))
         assertEquals(null, cache.findQuotedMessage("carol", "m1"))
     }
+
+    @Test
+    fun `applyDeleted tombstones exactly the named message`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", false, "secret", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "other", 2, SendState.SENT))
+
+        val peer = cache.applyDeleted("m1", 500, "bob")
+        assertEquals("bob", peer)
+        val deleted = cache.history("bob").single { it.serverId == "m1" }
+        assertTrue(deleted.deleted)
+        assertEquals(500L, deleted.deletedAtEpochMs)
+        assertEquals("bob", deleted.deletedBy)
+        // Content stays in the local record so a reply quote can still render it.
+        assertEquals("secret", deleted.content)
+        // The other message is untouched.
+        assertTrue(cache.history("bob").single { it.serverId == "m2" }.content.isNotEmpty())
+    }
+
+    @Test
+    fun `applyDeleted is idempotent and keeps the first tombstone`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", true, "hello", 1, SendState.SENT))
+        cache.applyDeleted("m1", 500, "alice")
+        cache.applyDeleted("m1", 999, "bob")
+
+        val stored = cache.history("bob").single()
+        assertEquals(500L, stored.deletedAtEpochMs)
+        assertEquals("alice", stored.deletedBy)
+    }
+
+    @Test
+    fun `hideLocally removes only the named message and does not touch the server record`() {
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", false, "keep", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "hide me", 2, SendState.SENT))
+
+        assertTrue(cache.hideLocally("bob", "k2"))
+        assertEquals(listOf("keep"), cache.history("bob").map { it.content })
+        // Hiding an unknown key is a no-op.
+        assertTrue(!cache.hideLocally("bob", "missing"))
+    }
 }
