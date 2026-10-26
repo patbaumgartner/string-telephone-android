@@ -117,6 +117,12 @@
     <string name="chat_delete_for_everyone">Delete for both</string>
     <string name="chat_deleted">Message deleted</string>
     <string name="cd_delete">Delete message</string>
+    <string name="chat_voice_recording">Recording voice message</string>
+    <string name="chat_voice_locked">Locked</string>
+    <string name="chat_voice_play">Play voice message</string>
+    <string name="chat_voice_pause">Pause voice message</string>
+    <string name="cd_voice_record">Record voice message</string>
+    <string name="cd_voice_cancel">Discard recording</string>
     <string name="notification_call_channel">Calls</string>
     <string name="notification_message_channel">Messages</string>
     <string name="notification_missed_call_title">Missed call</string>

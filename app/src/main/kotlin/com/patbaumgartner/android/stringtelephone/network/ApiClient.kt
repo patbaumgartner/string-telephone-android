@@ -49,9 +49,19 @@ data class MessageResult(
     val deletedAt: Long? = null,
     /** Who deleted the message; null while it exists. */
     val deletedBy: String? = null,
+    /** Voice message duration in milliseconds (Phase 11); null for non-voice messages. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
+    val waveform: String? = null,
 )
 
 data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
+
+/** Maps a wire message onto the app-side result, keeping every field in sync in one place. */
+private fun toMessageResult(m: MessageDto) = MessageResult(
+    m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId,
+    m.width, m.height, m.reactions ?: emptyList(), m.replyToId, m.deletedAt, m.deletedBy, m.durationMs, m.waveform,
+)
 
 class CompanionApiClient(
     private val baseUrl: String,
@@ -139,7 +149,7 @@ class CompanionApiClient(
                 401, 403 -> throw ApiException.Auth
                 404 -> throw ApiException.Protocol("peer unknown")
                 413 -> throw ApiException.Protocol("content too large")
-                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height, m.reactions ?: emptyList(), m.replyToId) }
+                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request toMessageResult(m) }
                 else -> throw ApiException.Unexpected(r.code)
             }
         }
@@ -161,7 +171,34 @@ class CompanionApiClient(
             when (r.code) {
                 401, 403 -> throw ApiException.Auth
                 404 -> throw ApiException.Protocol("peer unknown")
-                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height, m.reactions ?: emptyList(), m.replyToId) }
+                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request toMessageResult(m) }
+                else -> throw ApiException.Unexpected(r.code)
+            }
+        }
+    }
+
+    /**
+     * Sends a VOICE message (Phase 11): the uploaded audio media plus the
+     * recorded duration and waveform, so the receiver renders the player
+     * without decoding the file first.
+     */
+    fun sendVoice(recipient: String, mediaId: String, clientKey: String, durationMs: Int, waveform: String, replyToId: String? = null): MessageResult = request {
+        val payload = json.encodeToString(
+            SendMessageRequest.serializer(),
+            SendMessageRequest(recipient, "", clientKey, "VOICE", mediaId, replyToId, durationMs, waveform),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$recipient/messages")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when (r.code) {
+                401, 403 -> throw ApiException.Auth
+                404 -> throw ApiException.Protocol("peer unknown")
+                in 200..299 -> { val m = json.decodeFromString(MessageDto.serializer(), r.body.string()); return@request toMessageResult(m) }
                 else -> throw ApiException.Unexpected(r.code)
             }
         }
@@ -210,13 +247,7 @@ class CompanionApiClient(
                 else -> {
                     val page = json.decodeFromString(MessagesPageDto.serializer(), r.body.string())
                     return@request MessagesPage(
-                        messages = page.messages.map {
-                            MessageResult(
-                                it.id, it.sender, it.recipient, it.content, it.createdAt, it.clientKey,
-                                it.readAt, it.type, it.mediaId, it.width, it.height,
-                                it.reactions.orEmpty(), it.replyToId, it.deletedAt, it.deletedBy,
-                            )
-                        },
+                        messages = page.messages.map { toMessageResult(it) },
                         nextCursor = page.nextCursor,
                     )
                 }
@@ -290,7 +321,7 @@ class CompanionApiClient(
                 r.code == 404 -> throw ApiException.Protocol("no such message")
                 !r.isSuccessful -> throw ApiException.Unexpected(r.code)
                 else -> json.decodeFromString(MessageDto.serializer(), body).let { m ->
-                    MessageResult(m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId, m.width, m.height, m.reactions ?: emptyList(), m.replyToId, m.deletedAt, m.deletedBy)
+                    toMessageResult(m)
                 }
             }
         }

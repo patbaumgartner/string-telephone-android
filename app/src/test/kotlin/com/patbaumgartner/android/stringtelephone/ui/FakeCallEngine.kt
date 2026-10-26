@@ -189,6 +189,15 @@ object PreviewFactory {
     /** Which preview message index replies to which earlier server id. */
     private val REPLIES = mapOf(1 to "preview-0")
 
+    /** The voice preview (Phase 11): an incoming voice message among text. */
+    private val VOICE_CHAT = listOf(
+        Triple(false, "Can't talk now — listen to this:", "2025-06-13T09:40:00Z"),
+        Triple(true, "Got it, replying tonight.", "2025-06-13T09:41:00Z"),
+    )
+
+    /** The voice preview's waveform bars and duration. */
+    private val VOICE_WAVEFORM = "12,38,55,72,40,64,88,30,52,20,45,76,58,35,15,68,90,44,26,60,82,38,18,50"
+
     /**
      * The deletion preview (Phase 10): one outgoing tombstone ("deleted for
      * both" placeholder) among live messages, plus one message the peer
@@ -211,9 +220,11 @@ object PreviewFactory {
         chatReactions: Boolean = false,
         chatReply: Boolean = false,
         chatDeletion: Boolean = false,
+        chatVoice: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
         val conversation: List<Triple<Boolean, String, String>> = when {
+            chatVoice -> VOICE_CHAT
             chatDeletion -> DELETION_CHAT
             chatReply -> REPLY_CHAT
             chatReactions -> REACTIONS_CHAT
@@ -223,7 +234,7 @@ object PreviewFactory {
         }
         conversation.forEachIndexed { index, (fromMe, content, at) ->
             val state = when {
-                chatImage || chatReactions || chatReply || chatDeletion -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
+                chatImage || chatReactions || chatReply || chatDeletion || chatVoice -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
                 deliveryStates -> DELIVERY_STATES[index]
                 index == conversation.lastIndex -> com.patbaumgartner.android.stringtelephone.chat.SendState.PENDING
                 index == conversation.lastIndex - 1 -> com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED
@@ -261,6 +272,23 @@ object PreviewFactory {
                     mediaId = "preview-media-1",
                     width = 4032,
                     height = 3024,
+                ),
+            )
+        }
+        if (chatVoice) {
+            cache.append(
+                "bob",
+                com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
+                    serverId = "preview-voice",
+                    clientKey = "preview-voice",
+                    fromMe = false,
+                    content = "",
+                    sentAtEpochMs = java.time.Instant.parse("2025-06-13T09:40:30Z").toEpochMilli(),
+                    state = com.patbaumgartner.android.stringtelephone.chat.SendState.SENT,
+                    type = "VOICE",
+                    mediaId = "preview-voice-1",
+                    durationMs = 42_000,
+                    waveform = VOICE_WAVEFORM,
                 ),
             )
         }

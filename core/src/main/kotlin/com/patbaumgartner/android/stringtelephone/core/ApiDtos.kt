@@ -42,6 +42,10 @@ data class MessageDto(
     val deletedAt: Long? = null,
     /** Who deleted the message; null while it exists. */
     val deletedBy: String? = null,
+    /** Voice message duration in milliseconds (Phase 11); null for non-voice messages. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
+    val waveform: String? = null,
 )
 
 /** One emoji reaction: who reacted and when (ADR-0011, Phase 8). */
@@ -61,6 +65,10 @@ data class SendMessageRequest(
     val mediaId: String? = null,
     /** Message this one replies to; must be in the same conversation (ADR-0011, Phase 9). */
     val replyToId: String? = null,
+    /** Voice message duration in milliseconds (Phase 11); required for VOICE. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 11); required for VOICE. */
+    val waveform: String? = null,
 )
 
 @Serializable
@@ -112,6 +120,10 @@ data class WsNewMessageDto(
     val deletedAt: Long? = null,
     /** Who deleted the message; null while it exists. */
     val deletedBy: String? = null,
+    /** Voice message duration in milliseconds (Phase 11); null for non-voice messages. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
+    val waveform: String? = null,
 )
 
 @Serializable
@@ -158,6 +170,10 @@ sealed interface RealtimeEvent {
         val height: Int? = null,
         /** Message this one replies to; null when not a reply (ADR-0011, Phase 9). */
         val replyToId: String? = null,
+        /** Voice message duration in milliseconds (Phase 11); null for non-voice messages. */
+        val durationMs: Int? = null,
+        /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
+        val waveform: String? = null,
     ) : RealtimeEvent
 
     data class Presence(
@@ -229,6 +245,8 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 width = event.width,
                 height = event.height,
                 replyToId = event.replyToId,
+                durationMs = event.durationMs,
+                waveform = event.waveform,
             )
         }.getOrNull()
         "presence" -> runCatching {

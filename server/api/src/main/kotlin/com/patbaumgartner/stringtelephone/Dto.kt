@@ -42,6 +42,10 @@ data class MessageDto(
     val deletedAt: Long? = null,
     /** Who deleted the message; null while it exists. */
     val deletedBy: String? = null,
+    /** Voice message duration in milliseconds (Phase 11); null for non-voice messages. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
+    val waveform: String? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -49,11 +53,15 @@ data class SendMessageRequest(
     @field:jakarta.validation.constraints.NotBlank val recipient: String,
     val content: String = "",
     val clientKey: String,
-    /** TEXT (default) or IMAGE. An IMAGE message references [mediaId]. */
+    /** TEXT (default), IMAGE or VOICE. An IMAGE/VOICE message references [mediaId]. */
     val type: String = "TEXT",
     val mediaId: String? = null,
     /** Message this one replies to; must be in the same conversation (ADR-0011, Phase 9). */
     val replyToId: String? = null,
+    /** Voice message duration in milliseconds (Phase 11); required for VOICE. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 11); required for VOICE. */
+    val waveform: String? = null,
 )
 
 /** Marks the peer's messages read; `upToMessageId` bounds the mark to one point in the history. */
@@ -117,6 +125,10 @@ data class WsNewMessageEvent(
     val deletedAt: Long? = null,
     /** Who deleted the message; null while it exists. */
     val deletedBy: String? = null,
+    /** Voice message duration in milliseconds (Phase 11); null for non-voice messages. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
+    val waveform: String? = null,
 )
 
 /** Read-receipt event pushed on /v1/ws as `{"type":"message-read"}` (ADR-0010). */

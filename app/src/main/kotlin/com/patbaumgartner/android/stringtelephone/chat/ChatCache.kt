@@ -22,9 +22,9 @@ data class ChatMessage(
     val state: SendState,
     /** Server-assigned read timestamp for messages the peer read; null while unread. */
     val readAtEpochMs: Long? = null,
-    /** Message kind: TEXT (default) or IMAGE. */
+    /** Message kind: TEXT (default), IMAGE or VOICE. */
     val type: String = "TEXT",
-    /** Media id referenced by an IMAGE message. */
+    /** Media id referenced by an IMAGE or VOICE message. */
     val mediaId: String? = null,
     val width: Int? = null,
     val height: Int? = null,
@@ -36,6 +36,10 @@ data class ChatMessage(
     val deletedAtEpochMs: Long? = null,
     /** Who deleted the message; null while it exists. */
     val deletedBy: String? = null,
+    /** Voice message duration in milliseconds (Phase 11); null for non-voice messages. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
+    val waveform: String? = null,
 ) {
     /** True when deleted for both sides; the bubble renders a placeholder. */
     val deleted: Boolean get() = deletedAtEpochMs != null
@@ -57,6 +61,8 @@ data class ChatMessage(
             replyToId = m.replyToId,
             deletedAtEpochMs = m.deletedAt,
             deletedBy = m.deletedBy,
+            durationMs = m.durationMs,
+            waveform = m.waveform,
         )
     }
 }

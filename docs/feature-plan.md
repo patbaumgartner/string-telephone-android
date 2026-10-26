@@ -1,7 +1,7 @@
 # String Telephone — Feature Roadmap
 
 Date: 2026-10-25
-Status: In progress (phases 1 to 3, 5 to 10 done; see the table below)
+Status: In progress (phases 1 to 3, 5 to 11 done; see the table below)
 
 This document captures feature requests, the decisions behind them, and the
 planned phases. It is a working document; status updates live in GitHub issues
@@ -40,7 +40,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 8 | Emoji reactions | Medium | Done | Phase 5 |
 | 9 | Reply/quote | Medium | Done | Phase 5 |
 | 10 | Message deletion | Medium | Done | Phase 5 |
-| 11 | Voice messages | Large | Planned | Phase 4 |
+| 11 | Voice messages | Large | Done (2026-10-26) | Phase 4 |
 | 12 | Video calls | Large | Planned | — |
 | 13 | Last-seen & multi-device polish | Medium | Planned | — |
 | 14 | Quick reply from notification | Small | Planned | Phase 5 |
@@ -334,14 +334,48 @@ tombstone with rollback and history re-fetch on failure. Oracle:
 ### Phase 11 — Voice messages (full parity)
 
 **Effort:** Large
+**Status:** Done (2026-10-26)
 
-Full WhatsApp-style experience on top of the Phase 4 media pipeline:
+Implements voice messages on top of the Phase 4 media pipeline.
 
-- Hold-to-record with **lock gesture** (slide up to lock hands-free recording).
-- Waveform rendering with **scrubbing**, playback **speed control**,
-  **pause/resume**, draft kept if cancelled mid-record.
-- Opus audio, 50 MB cap, duration metadata, mic-permission gating consistent
-  with calls.
+**Recording:**
+- Hold-to-record with MediaRecorder. API 29+ records Opus in OGG container
+  (`.ogg`), API 26–28 falls back to AAC in M4A (`.m4a`). The UI uses the
+  correct extension per codec. Max size: 50 MB (enforced server-side).
+- Mic-permission gate lives inside the mic button's pointer-gesture handler;
+  permission is requested only when the user first touches the button.
+- Slide up > 140 px to lock recording hands-free. Cancel by sliding left > 90 px
+  while unlocked, or with the bar's cancel button once locked.
+- Draft file deleted on cancel, on error, and after the bytes are read.
+
+**UI:** `MicRecordButton` owns the press-and-hold gesture and stays composed
+for the whole take — detaching it would cancel the pointer handler and swallow
+release-to-send. `VoiceRecordingBar` takes the text field's place and shows
+the timer, a live waveform, and cancel/send; a locked take shows the lock
+marker instead and ends on one of those buttons. `VoiceBubbleContent` renders
+a waveform, duration, play/pause, speed-control chips (0.5×/0.75×/1×/1.5×/2×)
+and tap-to-scrub. Leaving the chat, or the app going to the background (Android
+hands it silence, not microphone input), cancels an in-flight take as well as
+stopping playback. Waveform persisted on the message as comma-separated
+integer amplitudes (≤ 64 samples, each clamped to 0–100 server-side).
+
+**Playback:** `VoicePlayer` wraps `MediaPlayer` with `PlaybackParams` speed,
+pause/resume, and seek. Playback speed cycles through the 5 preset values.
+One player serves the whole chat, so its state names the media it belongs to
+and only that bubble offers controls and a progress fill.
+
+**Seams:** `MediaRecorderVoiceRecorder` (Android framework) and
+`MediaPlayerVoicePlayer` are implementation classes; `VoiceRecorder` /
+`VoicePlayer` are the tested interfaces. `FakeCallEngine` seeds VOICE_CHAT
+conversations for screenshot and UI tests.
+
+**ADR:** no new ADR needed — voice uses the existing media-type pipeline
+defined by ADR-0009 and the extras pattern from ADR-0011.
+
+**Tests:** `VoiceMessageTest` (format duration, normalised waveform, speed
+labels), `ChatCacheTest` voice round-trip, `RealtimeEventTest` voice frame,
+`FakeCallEngine` VOICE_CHAT seed. Oracle: `scripts/verify-voice.mjs`.
+Screenshots: `15-chat-voice.png` (light) and `dark-chat-voice.png`.
 
 ---
 

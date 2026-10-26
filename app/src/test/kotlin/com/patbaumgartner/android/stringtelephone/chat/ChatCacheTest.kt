@@ -236,4 +236,20 @@ class ChatCacheTest {
         // Hiding an unknown key is a no-op.
         assertTrue(!cache.hideLocally("bob", "missing"))
     }
+
+    @Test
+    fun `voice fields round-trip through fromServer and the cache`() {
+        val message = com.patbaumgartner.android.stringtelephone.network.MessageResult(
+            "m1", "bob", "alice", "", 7, "kv", type = "VOICE", mediaId = "media1",
+            durationMs = 12_345, waveform = "10,50,90,30",
+        )
+        val cache = ChatCache()
+        cache.append("bob", ChatMessage.fromServer(message, myUsername = "alice"))
+
+        val stored = cache.history("bob").single()
+        assertEquals("VOICE", stored.type)
+        assertEquals("media1", stored.mediaId)
+        assertEquals(12_345, stored.durationMs)
+        assertEquals("10,50,90,30", stored.waveform)
+    }
 }

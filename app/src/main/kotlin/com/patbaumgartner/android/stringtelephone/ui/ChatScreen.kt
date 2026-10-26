@@ -4,6 +4,10 @@ import android.text.format.DateFormat
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
@@ -44,11 +48,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +66,8 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -79,6 +87,9 @@ import com.patbaumgartner.android.stringtelephone.chat.ChatMessage
 import com.patbaumgartner.android.stringtelephone.chat.SendState
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
 import com.patbaumgartner.android.stringtelephone.ui.theme.StringTelephoneTheme
+import com.patbaumgartner.android.stringtelephone.voice.PlaybackSpeed
+import com.patbaumgartner.android.stringtelephone.voice.VoicePlayerState
+import com.patbaumgartner.android.stringtelephone.voice.VoiceRecordingState
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -86,6 +97,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.time.format.TextStyle
 import java.util.Date
+import kotlinx.coroutines.flow.StateFlow
 
 val LocalViewModel = androidx.compose.runtime.compositionLocalOf<AppViewModel?> { null }
 
@@ -106,6 +118,17 @@ internal fun ChatScreen(
     var emojiPickerVisible by remember { mutableStateOf(false) }
     var replySheetMessage by remember { mutableStateOf<ChatMessage?>(null) }
     var pendingReactionMessage by remember { mutableStateOf<ChatMessage?>(null) }
+
+    // Voice playback belongs to this screen: leaving the chat stops the audio
+    // instead of letting it play on behind another screen.
+    DisposableEffect(viewModel) {
+        onDispose {
+            viewModel.stopVoicePlayback()
+            // A locked take is hands-free: leaving the chat must not leave the
+            // microphone recording with no UI left to send or discard it.
+            viewModel.cancelVoiceRecording()
+        }
+    }
 
     LaunchedEffect(rows.size) {
         if (rows.isNotEmpty()) listState.animateScrollToItem(rows.size - 1)
@@ -210,6 +233,10 @@ internal fun ChatScreen(
                     )
                 },
                 onSend = { viewModel.sendCurrent(peer) },
+                recordingStateFlow = viewModel.voiceRecordingState,
+                onStartRecording = { viewModel.startVoiceRecording() },
+                onFinishRecording = { viewModel.finishVoiceRecording(peer) },
+                onCancelRecording = { viewModel.cancelVoiceRecording() },
             )
         }
     }
@@ -452,6 +479,8 @@ private fun ChatBubble(
                 }
             } else if (message.type == "IMAGE" && message.mediaId != null) {
                 ImageBubbleContent(message, colors, time, failed, status, viewModel)
+            } else if (message.type == "VOICE" && message.mediaId != null) {
+                VoiceBubbleContent(message, colors, time, failed, viewModel)
             } else {
                 MessageWithMeta(
                     text = message.content,
@@ -612,6 +641,172 @@ private fun ImageBubbleContent(message: ChatMessage, colors: com.patbaumgartner.
     }
 }
 
+/**
+ * The voice-message bubble (Phase 11): play/pause, a scrubable waveform,
+ * the duration, and the speed toggle. Playback state comes from the shared
+ * [AppViewModel] player, so only one message plays at a time and leaving
+ * the screen stops the audio.
+ */
+@Composable
+private fun VoiceBubbleContent(
+    message: ChatMessage,
+    colors: com.patbaumgartner.android.stringtelephone.ui.theme.ChatColors,
+    time: String,
+    failed: Boolean,
+    viewModel: AppViewModel?,
+) {
+    val durationMs = message.durationMs ?: 0
+    val playerState = viewModel?.voicePlayerState?.collectAsState()?.value ?: VoicePlayerState.Idle
+    val speed = viewModel?.voicePlaybackSpeed?.collectAsState()?.value ?: PlaybackSpeed.X1
+    val bars = remember(message.waveform) { normalizedWaveform(message.waveform) }
+    // One player serves the whole chat: only the bubble whose media is loaded
+    // may show playback controls or a progress fill.
+    val isCurrent = playerState.mediaId != null && playerState.mediaId == message.mediaId
+    val playing = isCurrent && playerState is VoicePlayerState.Playing
+    val paused = isCurrent && playerState is VoicePlayerState.Paused
+    val positionMs = when {
+        !isCurrent -> 0
+        playerState is VoicePlayerState.Playing -> playerState.playbackPosition
+        playerState is VoicePlayerState.Paused -> playerState.position
+        else -> 0
+    }
+    Column(modifier = Modifier.padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = {
+                    when {
+                        playing -> viewModel?.pauseVoicePlayback()
+                        paused -> viewModel?.resumeVoicePlayback()
+                        else -> viewModel?.playVoiceMessage(message)
+                    }
+                },
+                modifier = Modifier.size(34.dp),
+            ) {
+                Icon(
+                    if (playing) StringTelephoneIcons.Pause else StringTelephoneIcons.Play,
+                    contentDescription = stringResource(
+                        if (playing) R.string.chat_voice_pause else R.string.chat_voice_play,
+                    ),
+                    tint = if (failed) MaterialTheme.colorScheme.error else StringTelephoneTheme.accents.brand,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            VoiceWaveform(
+                samples = bars,
+                progress = if (isCurrent && durationMs > 0) positionMs.toFloat() / durationMs else 0f,
+                onScrub = if (viewModel != null && isCurrent) {
+                    { fraction -> viewModel.seekVoicePlayback((durationMs * fraction).toInt()) }
+                } else {
+                    null
+                },
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .width(130.dp)
+                    .padding(horizontal = 4.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                formatVoiceDuration(durationMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.meta,
+            )
+            if (viewModel != null) {
+                Spacer(Modifier.width(4.dp))
+                Surface(
+                    onClick = { viewModel.cycleVoicePlaybackSpeed() },
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.meta.copy(alpha = 0.14f),
+                    contentColor = colors.meta,
+                ) {
+                    Text(
+                        speed.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                    )
+                }
+            }
+        }
+        // Same edge as text bubbles: meta hugs the end away from the sender.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
+            modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 2.dp),
+        ) {
+            Text(time, style = MaterialTheme.typography.labelSmall, color = colors.meta)
+            if (message.fromMe) {
+                Spacer(Modifier.width(3.dp))
+                Icon(
+                    when (message.state) {
+                        SendState.PENDING -> StringTelephoneIcons.Schedule
+                        SendState.SENT -> StringTelephoneIcons.Done
+                        SendState.READ -> StringTelephoneIcons.DoneAll
+                        SendState.FAILED -> StringTelephoneIcons.ErrorOutline
+                    },
+                    contentDescription = null,
+                    tint = if (failed) MaterialTheme.colorScheme.error else StringTelephoneTheme.accents.brand,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
+    }
+}
+
+/** "0:42" from milliseconds; voice durations are minutes:seconds. */
+internal fun formatVoiceDuration(durationMs: Int): String {
+    val totalSeconds = durationMs / 1000
+    return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
+}
+
+/** Parses the server waveform string into normalized sample values. */
+internal fun normalizedWaveform(waveform: String?): List<Int> {
+    if (waveform.isNullOrBlank()) return emptyList()
+    return waveform.split(',').mapNotNull { it.trim().toIntOrNull() }.map { it.coerceIn(0, 100) }
+}
+
+/** Fallback bars so an empty waveform still draws a player-shaped row. */
+private fun fallbackWaveform(barCount: Int): List<Int> =
+    List(barCount) { index -> 30 + ((index * 37) % 55) }
+
+/** The voice waveform (Phase 11): bars up to the played position brighten. */
+@Composable
+private fun VoiceWaveform(
+    samples: List<Int>,
+    progress: Float,
+    onScrub: ((Float) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val barColor = StringTelephoneTheme.accents.brand
+    val inactiveColor = StringTelephoneTheme.chat.meta.copy(alpha = 0.45f)
+    val bars = remember(samples) { if (samples.isEmpty()) fallbackWaveform(24) else samples }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = modifier.then(
+            if (onScrub != null) {
+                Modifier.pointerInput(samples) {
+                    detectTapGestures { offset -> onScrub(offset.x / size.width.toFloat()) }
+                }
+            } else {
+                Modifier
+            },
+        ),
+    ) {
+        bars.forEachIndexed { index, amplitude ->
+            val played = progress <= 0f || index.toFloat() / bars.size <= progress
+            val barHeight = 6.dp + 18.dp * (amplitude / 100f)
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(barHeight)
+                    .background(
+                        color = if (played) StringTelephoneTheme.accents.brand else inactiveColor,
+                        shape = RoundedCornerShape(2.dp),
+                    ),
+            ) {}
+        }
+    }
+}
+
 @Composable
 private fun Composer(
     value: String,
@@ -620,75 +815,305 @@ private fun Composer(
     onToggleEmoji: () -> Unit,
     onAttach: () -> Unit,
     onSend: () -> Unit,
+    recordingStateFlow: StateFlow<VoiceRecordingState>,
+    onStartRecording: () -> Boolean,
+    onFinishRecording: () -> Unit,
+    onCancelRecording: () -> Unit,
 ) {
     val hint = stringResource(R.string.chat_hint)
+    // Collected here rather than in ChatScreen: the recorder emits a new sample
+    // every 50 ms and only the composer draws them.
+    val recordingState by recordingStateFlow.collectAsState()
+    val recordingActive = recordingState is VoiceRecordingState.Recording
+    // The lock is a composer-level fact: the mic button's gesture sets it and
+    // the recording bar announces it (hands-free takes end on a button, not on
+    // release). It clears whenever a take ends, by send or by cancel.
+    var locked by remember { mutableStateOf(false) }
+    LaunchedEffect(recordingActive) {
+        if (!recordingActive) locked = false
+    }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = StringTelephoneTheme.chat.incoming,
-            shadowElevation = 1.dp,
-            modifier = Modifier.weight(1f),
-        ) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                IconButton(onClick = onToggleEmoji) {
-                    Icon(
-                        StringTelephoneIcons.Mood,
-                        contentDescription = stringResource(R.string.cd_emoji_picker),
-                        tint = if (emojiPickerVisible) {
-                            StringTelephoneTheme.accents.brand
-                        } else {
-                            StringTelephoneTheme.chat.meta
-                        },
-                    )
-                }
-                IconButton(onClick = onAttach) {
-                    Text("📎", style = MaterialTheme.typography.titleMedium)
-                }
-                BasicTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = StringTelephoneTheme.chat.onBubble),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    maxLines = 6,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(top = 13.dp, bottom = 13.dp, end = 16.dp)
-                        .semantics { contentDescription = hint },
-                    decorationBox = { field ->
-                        Box {
-                            if (value.isEmpty()) {
-                                Text(hint, style = MaterialTheme.typography.bodyLarge, color = StringTelephoneTheme.chat.meta)
-                            }
-                            field()
-                        }
-                    },
+        Box(modifier = Modifier.weight(1f)) {
+            if (recordingActive) {
+                VoiceRecordingBar(
+                    recordingState = recordingState,
+                    locked = locked,
+                    onSend = onFinishRecording,
+                    onCancel = onCancelRecording,
+                    modifier = Modifier.fillMaxWidth(),
                 )
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = StringTelephoneTheme.chat.incoming,
+                    shadowElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        IconButton(onClick = onToggleEmoji) {
+                            Icon(
+                                StringTelephoneIcons.Mood,
+                                contentDescription = stringResource(R.string.cd_emoji_picker),
+                                tint = if (emojiPickerVisible) {
+                                    StringTelephoneTheme.accents.brand
+                                } else {
+                                    StringTelephoneTheme.chat.meta
+                                },
+                            )
+                        }
+                        IconButton(onClick = onAttach) {
+                            Text("📎", style = MaterialTheme.typography.titleMedium)
+                        }
+                        BasicTextField(
+                            value = value,
+                            onValueChange = onValueChange,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = StringTelephoneTheme.chat.onBubble),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            maxLines = 6,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(top = 13.dp, bottom = 13.dp, end = 16.dp)
+                                .semantics { contentDescription = hint },
+                            decorationBox = { field ->
+                                Box {
+                                    if (value.isEmpty()) {
+                                        Text(
+                                            hint,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = StringTelephoneTheme.chat.meta,
+                                        )
+                                    }
+                                    field()
+                                }
+                            },
+                        )
+                    }
+                }
             }
         }
-        val canSend = value.isNotBlank()
-        Surface(
-            onClick = onSend,
-            enabled = canSend,
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = if (canSend) 1f else 0.5f),
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            shadowElevation = 1.dp,
-            modifier = Modifier.size(48.dp),
+        // The mic button stays composed for the whole take. It owns the
+        // press-and-hold gesture, and Compose cancels pointer handlers whose
+        // node leaves the tree — swapping it for the bar on the first frame
+        // would swallow release-to-send and the slide-up lock.
+        if (value.isNotBlank() && !recordingActive) {
+            Surface(
+                onClick = onSend,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shadowElevation = 1.dp,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        StringTelephoneIcons.Send,
+                        contentDescription = stringResource(R.string.chat_send),
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+        } else {
+            MicRecordButton(
+                locked = locked,
+                recording = recordingActive,
+                onLockedChange = { locked = it },
+                onStart = onStartRecording,
+                onFinish = onFinishRecording,
+                onCancel = onCancelRecording,
+            )
+        }
+    }
+}
+
+/**
+ * The mic button (Phase 11): press-and-hold records; sliding up past the lock
+ * threshold locks hands-free recording; releasing sends. Mic permission is
+ * requested on first press, consistent with the call gate.
+ *
+ * The composer keeps this composable in the tree while a take runs: the
+ * gesture below decides when the take ends, and a pointer handler whose node
+ * is detached is cancelled — which would swallow the release.
+ */
+@Composable
+private fun MicRecordButton(
+    locked: Boolean,
+    recording: Boolean,
+    onLockedChange: (Boolean) -> Unit,
+    onStart: () -> Boolean,
+    onFinish: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (!granted) onCancel()
+    }
+    // The gesture outlives recomposition, so it must not capture a stale take
+    // state or stale callbacks.
+    val isRecording by rememberUpdatedState(recording)
+    val setLocked by rememberUpdatedState(onLockedChange)
+    val startRecording by rememberUpdatedState(onStart)
+    val finishRecording by rememberUpdatedState(onFinish)
+    val cancelRecording by rememberUpdatedState(onCancel)
+    Surface(
+        shape = CircleShape,
+        color = if (locked) StringTelephoneTheme.accents.brand else MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
+        shadowElevation = 1.dp,
+        modifier = Modifier
+            .size(48.dp)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = true)
+                    // A running take — locked or not — is owned by the
+                    // recording bar; a press here must not restart or end it.
+                    if (isRecording) {
+                        waitForUpOrCancellation()
+                        return@awaitEachGesture
+                    }
+                    setLocked(false)
+                    // Mic gate first (same as calls): no permission, no recording.
+                    val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        android.Manifest.permission.RECORD_AUDIO,
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    if (!granted) {
+                        permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        waitForUpOrCancellation()
+                        return@awaitEachGesture
+                    }
+                    if (!startRecording()) {
+                        waitForUpOrCancellation()
+                        return@awaitEachGesture
+                    }
+                    var travelUp = 0f
+                    var travelLeft = 0f
+                    var tookLock = false
+                    var cancelled = false
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (change.changedToUp()) break
+                        travelUp += change.previousPosition.y - change.position.y
+                        travelLeft += change.previousPosition.x - change.position.x
+                        if (!tookLock && travelUp > LOCK_GESTURE_PX) {
+                            tookLock = true
+                            setLocked(true)
+                        }
+                        // Slide left to throw the draft away; a locked recording
+                        // is hands-free, so the bar's cancel button owns it.
+                        if (!tookLock && travelLeft > CANCEL_GESTURE_PX) {
+                            cancelled = true
+                            change.consume()
+                            break
+                        }
+                        change.consume()
+                    }
+                    if (cancelled) cancelRecording() else if (!tookLock) finishRecording()
+                    // A locked recording continues; the bar owns the outcome.
+                }
+            },
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                if (locked) StringTelephoneIcons.Lock else StringTelephoneIcons.Mic,
+                contentDescription = stringResource(
+                    if (locked) R.string.chat_voice_locked else R.string.cd_voice_record,
+                ),
+                modifier = Modifier.size(22.dp),
+            )
+        }
+    }
+}
+
+/**
+ * The recording bar (Phase 11): replaces the text field while a take is in
+ * progress, showing the elapsed time, a live waveform, and cancel/send.
+ * [locked] marks a hands-free take, which keeps recording until one of those
+ * buttons is tapped.
+ */
+@Composable
+private fun VoiceRecordingBar(
+    recordingState: VoiceRecordingState,
+    locked: Boolean,
+    onSend: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val recording = recordingState as? VoiceRecordingState.Recording
+    val elapsed = recording?.elapsedMs ?: 0L
+    val samples = recording?.samples ?: emptyList()
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = StringTelephoneTheme.chat.incoming,
+        shadowElevation = 1.dp,
+        modifier = modifier,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Icon(
+                if (locked) StringTelephoneIcons.Lock else StringTelephoneIcons.Mic,
+                contentDescription = stringResource(R.string.chat_voice_recording),
+                tint = StringTelephoneTheme.accents.brand,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                formatVoiceDuration(elapsed.toInt()),
+                style = MaterialTheme.typography.bodyMedium,
+                color = StringTelephoneTheme.chat.onBubble,
+            )
+            Spacer(Modifier.width(10.dp))
+            if (locked) {
+                // Hands-free takes have no live bars to watch; the lock marker
+                // is the useful signal, and the buttons end the take.
+                Text(
+                    stringResource(R.string.chat_voice_locked),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = StringTelephoneTheme.accents.brand,
+                )
+                Spacer(Modifier.weight(1f))
+            } else {
+                VoiceWaveform(
+                    samples = samples,
+                    progress = 1f,
+                    onScrub = null,
+                    modifier = Modifier.width(80.dp),
+                )
+                Spacer(Modifier.weight(1f))
+            }
+            IconButton(onClick = onCancel) {
+                Icon(
+                    StringTelephoneIcons.Delete,
+                    contentDescription = stringResource(R.string.cd_voice_cancel),
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            IconButton(onClick = onSend) {
                 Icon(
                     StringTelephoneIcons.Send,
                     contentDescription = stringResource(R.string.chat_send),
-                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }
     }
 }
+
+/** Slide-up distance (in px) that locks hands-free recording. */
+private const val LOCK_GESTURE_PX = 140f
+
+/** Slide-left distance (in px) that discards the recording instead of sending. */
+private const val CANCEL_GESTURE_PX = 90f
 
 /** Curated quick-pick emoji set; the system IME emoji panel also works. */
 private val QUICK_EMOJIS = listOf(

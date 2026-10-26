@@ -102,7 +102,7 @@ class ApiController(
         }
 
         val type = body.type.uppercase()
-        if (type == "IMAGE") {
+        if (type == "IMAGE" || type == "VOICE") {
             val mediaId = body.mediaId?.takeIf { it.isNotBlank() }
                 ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "mediaId required")
             val mediaRecord = media.getRecord(mediaId)
@@ -112,6 +112,21 @@ class ApiController(
             }
             if (mediaRecord.state != "ready") {
                 throw ApiFailure(HttpStatus.BAD_REQUEST, "media not ready")
+            }
+            if (type == "VOICE") {
+                // The recorded audio must be the media the sender uploaded.
+                if (mediaRecord.contentType !in MediaService.AUDIO_TYPES) {
+                    throw ApiFailure(HttpStatus.BAD_REQUEST, "voice message requires audio media")
+                }
+                val durationMs = body.durationMs
+                    ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "durationMs required")
+                if (durationMs <= 0 || durationMs > 600_000) {
+                    throw ApiFailure(HttpStatus.BAD_REQUEST, "duration out of range")
+                }
+                val waveform = normalizeWaveform(body.waveform)
+                    ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "waveform required")
+                val stored = messages.insertVoice(me.username, peer, body.clientKey, mediaId, durationMs, waveform, replyToId)
+                return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
             }
             val stored = messages.insertMedia(me.username, peer, body.clientKey, mediaId, mediaRecord, replyToId)
             return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
@@ -210,4 +225,17 @@ class ApiController(
 
 private fun messageDto(record: MessageRecord, reactions: List<ReactionDto> = emptyList()) =
     MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt, record.type, record.mediaId, record.width, record.height,
-        if (reactions.isEmpty()) null else reactions, record.replyTo, record.deletedAt, record.deletedBy)
+        if (reactions.isEmpty()) null else reactions, record.replyTo, record.deletedAt, record.deletedBy, record.durationMs, record.waveform)
+
+/**
+ * Normalizes the client's waveform sample list (Phase 11): keeps numeric
+ * amplitudes 0-100, caps the sample count at 64, and returns null when the
+ * payload is absent or entirely non-numeric — the message is then rejected.
+ */
+private fun normalizeWaveform(waveform: String?): String? {
+    if (waveform.isNullOrBlank()) return null
+    val samples = waveform.split(',').mapNotNull { it.trim().toIntOrNull() }
+        .map { it.coerceIn(0, 100) }
+    if (samples.isEmpty()) return null
+    return samples.take(64).joinToString(",")
+}

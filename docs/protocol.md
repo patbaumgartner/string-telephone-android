@@ -166,6 +166,28 @@ Image fields in responses: `type` (`"TEXT"` default, or `"IMAGE"`),
 original image; `0`/absent when unknown). The same fields appear in history
 responses and in the `new-message` event payload.
 
+#### Voice messages
+
+Send `{"type":"VOICE","recipient":"bob","mediaId":"<id>","clientKey":"..."}`.
+The `content` field stays empty for voice messages.
+
+- `mediaId` must reference audio media uploaded to `POST /v1/media` by the
+  caller for this peer (`404` unknown media, `403` when the record belongs to
+  another conversation, `400` when it is not `ready`).
+- `durationMs` (integer milliseconds, 1–600 000) and `waveform` (comma-separated
+  integer amplitudes `0`–`100`, at most 64 samples, up to 255 characters) are
+  required body fields; the server clamps each amplitude to `0`–`100`, caps the
+  sample count at 64 and stores the result.
+- The server derives the author from the authenticated principal and stores
+  the duration and waveform; clients cannot fake either.
+- Audio media is capped at 50 MB server-side.
+
+Voice fields in responses: `type` (`"TEXT"` default, `"IMAGE"` or `"VOICE"`),
+`mediaId` (null for text), `durationMs` (integer milliseconds, absent when
+unknown), `waveform` (comma-separated integer amplitudes `0`–`100`, at most 64
+samples, absent for text/image). The same
+fields appear in history responses and in the `new-message` event payload.
+
 ### `GET /v1/conversations/{peer}/messages`
 
 Returns conversation history in both directions, newest first.

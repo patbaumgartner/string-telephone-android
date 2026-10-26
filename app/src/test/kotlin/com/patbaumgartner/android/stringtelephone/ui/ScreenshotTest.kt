@@ -88,6 +88,12 @@ class ScreenshotTest {
         capture("14-chat-deletion", ScreenshotRoute.CHAT_DELETION)
     }
 
+    /** Voice-message bubble with waveform, duration and speed toggle (Phase 11). */
+    @Test
+    fun captureChatVoice() {
+        capture("15-chat-voice", ScreenshotRoute.CHAT_VOICE)
+    }
+
     @Test
     fun captureCall() {
         capture("04-call", ScreenshotRoute.CALL)
