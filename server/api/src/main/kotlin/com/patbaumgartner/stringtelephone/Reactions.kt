@@ -70,7 +70,7 @@ class Reactions(
         if (messageIds.isEmpty()) return emptyMap()
         val placeholders = messageIds.indices.joinToString(",") { "?" }
         return db.sql("SELECT message_id, author_username, emoji, created_at FROM reactions WHERE message_id IN ($placeholders) ORDER BY created_at")
-            .params(messageIds.toTypedArray())
+            .params(*messageIds.toTypedArray())
             .query { rs, _ ->
                 ReactionDto(rs.getString("author_username"), rs.getString("emoji"), rs.getLong("created_at")) to rs.getString("message_id")
             }.list()

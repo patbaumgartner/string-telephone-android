@@ -135,6 +135,12 @@ No public release has been published yet.
 
 ### Fixed
 
+- Sending an image message and loading any conversation history failed with
+  a 500: `Messages.insertMedia` never bound the `mediaId`/`width`/`height`
+  parameters of its INSERT, and `Reactions.listForMessages` passed its id
+  array as one parameter instead of spreading it across the `IN (?, …)`
+  placeholders. Both are bound correctly now, and the PostgreSQL integration
+  tests for images, voice and reactions pass.
 - The API container never turned healthy: its Compose healthcheck probes the
   readiness endpoint with `curl`, but the slim JRE runtime image ships no HTTP
   client, so `docker compose up --wait` failed on a perfectly fine API. The

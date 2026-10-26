@@ -105,6 +105,7 @@ class Messages(
             "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, media_id, width, height, reply_to) VALUES(:id, :sender, :recipient, '', :createdAt, :clientKey, :type, :mediaId, :width, :height, :replyTo) ON CONFLICT DO NOTHING",
         ).param("id", id).param("sender", sender).param("recipient", recipient)
             .param("createdAt", now).param("clientKey", clientKey).param("type", "IMAGE")
+            .param("mediaId", mediaId).param("width", media.width).param("height", media.height)
             .param("replyTo", replyTo).update()
         val stored = find(sender, recipient, clientKey)
             ?: error("stored message disappeared after insert")
