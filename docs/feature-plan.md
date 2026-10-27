@@ -33,9 +33,9 @@ Phases land in this order. Each is small enough for one focused review.
 | 1 | Chat scrollbar | Small | Done | — |
 | 2 | Bluetooth audio routing | Small | Done | — |
 | 3 | PostgreSQL migration | Large | Done | — |
-| 4 | Garage media storage (server only) | Medium | Planned | Phase 3 |
+| 4 | Garage media storage (server only) | Medium | Done | Phase 3 |
 | 5 | Read receipts | Medium | Done | Phase 3 |
-| 6 | Image sharing | Medium | Planned | Phases 3+4 |
+| 6 | Image sharing | Medium | Done | Phases 3+4 |
 | 7 | Typing indicators | Small | Done | Phase 3 |
 | 8 | Emoji reactions | Medium | Done | Phase 5 |
 | 9 | Reply/quote | Medium | Done | Phase 5 |
@@ -145,6 +145,9 @@ compose, tests and guidance docs.
 ---
 
 ### Phase 4 — Garage media storage (server only)
+
+**Effort:** Medium
+**Status:** Done (2026-10-21)
 
 Implements [ADR-0009](adr/0009-media-storage-s3.md) with **Garage** as the
 prototype-stack default object store. This phase ships storage, upload and

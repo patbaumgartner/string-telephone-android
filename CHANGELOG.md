@@ -146,6 +146,12 @@ No public release has been published yet.
 
 ### Fixed
 
+- A deployed API never received its media-store settings: the Compose `api`
+  service passed no `ST_MEDIA_*` variables, so despite `server/.env.example`
+  enabling Garage the running API silently used the in-memory store and lost
+  every uploaded image and voice note on restart. Compose now passes the
+  media settings through (S3 endpoint pinned to the Garage service), and the
+  example env lists the Garage cluster credentials.
 - Sending an image message and loading any conversation history failed with
   a 500: `Messages.insertMedia` never bound the `mediaId`/`width`/`height`
   parameters of its INSERT, and `Reactions.listForMessages` passed its id
