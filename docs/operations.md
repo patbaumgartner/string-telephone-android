@@ -20,7 +20,7 @@ socket, shell access or privileged container is required.
 | --- | --- | --- |
 | API | 127.0.0.1:8080 HTTP by default; 8443 HTTPS when enabled | none — application state lives in `db` |
 | PostgreSQL (`db`) | none; 5432 is internal to the compose network | `db-data`: users, messages, desired PBX identities and settings |
-| Asterisk | 5060/UDP SIP; 5061/TCP SIP/TLS; 10000-10100/UDP RTP | `pbx-config`: generated configuration |
+| Asterisk | 5060/UDP SIP; 5061/TCP SIP/TLS; 10000-10100/UDP RTP (audio and video) | `pbx-config`: generated configuration |
 | Garage (media store) | 127.0.0.1:3900 S3; 127.0.0.1:3902 static website | `garage-meta`, `garage-data`: object metadata and blocks |
 
 The API's Compose healthcheck probes `/ready`, which checks PostgreSQL rather
@@ -162,11 +162,12 @@ reconcile the existing account.
 
 ## Managed PBX settings
 
-The dashboard controls codec preference (`opus`, `ulaw`, `alaw`), ring timeout
-(5-120 seconds), device limit (1-5), symmetric RTP, and optional external IPv4
-and local IPv4/CIDR network. Settings are validated server-side before being
-persisted and applied. Arbitrary Asterisk text, trunks, PSTN routing and shell
-commands are deliberately not exposed.
+The dashboard controls codec preference (`opus`, `ulaw`, `alaw`), the video
+codec (`vp8` or `none`), ring timeout (5-120 seconds), device limit (1-5),
+symmetric RTP, and optional external IPv4 and local IPv4/CIDR network. Settings
+are validated server-side before being persisted and applied. Arbitrary
+Asterisk text, trunks, PSTN routing and shell commands are deliberately not
+exposed.
 
 Transport reloads can briefly interrupt signaling. Schedule network changes
 for a maintenance window. SIP listener ports, the RTP port range and
@@ -175,6 +176,29 @@ When configured, the external IPv4 is also applied as each endpoint's advertised
 media address. This keeps SDP reachable when Docker's port proxy hides remote
 clients behind the bridge gateway. Never bind RTP sockets to that external
 address unless it is actually assigned to the container.
+
+### Video calls
+
+Video is enabled by default (`video = vp8`) and can be switched off for every
+account with `video = none`; the change applies to new calls immediately.
+Video uses VP8, is relayed by Asterisk together with the audio
+([ADR-0013](adr/0013-video-calls.md)), and is never stored or recorded.
+
+Sizing:
+
+- One video call takes two media streams (audio and video, each with RTP and
+  RTCP), so four ports from the `10000-10100/UDP` range. The range still
+  allows about 25 concurrent video calls; keep it if you expect that many,
+  otherwise the default is enough.
+- Budget roughly 0.5–1.5 Mbit/s **per direction** for 640x480 VP8, on top of
+  the audio stream. The server relays both directions, so a call costs the
+  host twice that. Enable `video = none` on metered or CPU-bound hosts.
+- A video call needs the same UDP reachability as audio; the existing
+  `externalAddress`/`localNetwork` setting and firewall rule cover both.
+- The client captures video only while its call screen is visible. A
+  backgrounded video call continues as audio and resumes video only when the
+  user turns the camera back on, so no background camera permission is
+  required.
 
 ### Private LAN audio (development only)
 
@@ -191,8 +215,9 @@ RTP range. For phones outside the Docker bridge:
    CIDR (not the phone's Wi-Fi network). Save and apply.
 3. Allow SIP and UDP 10000-10100 through the host firewall only from the
    intended private network. Ensure both directions of routing work.
-4. Test two real phones, microphone permission, mute, speaker and Bluetooth
-   routing.
+4. Test two real phones, microphone and camera permission, mute, speaker and
+   Bluetooth routing, and a video call in both directions (camera on/off,
+   flip, then background the app and confirm audio continues).
 
 Do not expose development HTTP/SIP/UDP directly to the Internet. For an
 Internet-facing release deployment, publish HTTPS/WSS and SIP/TLS only,

@@ -67,7 +67,7 @@ function answer(inviteStr) {
   const callIdHeader = inviteStr.split('\r\n').find(l => l.startsWith('Call-ID: '));
   const cseqHeader = inviteStr.split('\r\n').find(l => l.startsWith('CSeq: '));
   const fromTagM = fromHeader.match(/tag=([^;\r\n]+)/);
-  const sdp = [
+  const lines = [
     'v=0',
     `o=- 0 0 IN IP4 ${IP()}`,
     's=answer',
@@ -76,7 +76,19 @@ function answer(inviteStr) {
     'm=audio 49172 RTP/AVP 0 8',
     'a=rtpmap:0 PCMU/8000',
     'a=rtpmap:8 PCMA/8000',
-  ].join('\r\n') + '\r\n';
+  ];
+  // Answer a video stream only when Asterisk offered one, so the caller leg
+  // can keep VP8 active end to end. An unknown codec offer stays `m=video 0`.
+  const offer = inviteStr.split('\r\n\r\n')[1] || '';
+  const video = offer.split('\r\n').find(line => line.startsWith('m=video '));
+  if (video && !/^m=video 0 /.test(video)) {
+    const payloadType = (offer.split('\r\n').find(line => /^a=rtpmap:\d+ VP8\/90000/i.test(line)) || '').match(/a=rtpmap:(\d+)/);
+    const pt = payloadType ? payloadType[1] : '96';
+    lines.push(`m=video 49174 RTP/AVP ${pt}`);
+    lines.push(`a=rtpmap:${pt} VP8/90000`);
+    lines.push('a=sendrecv');
+  }
+  const sdp = lines.join('\r\n') + '\r\n';
   send([
     'SIP/2.0 200 OK',
     viaHeader,

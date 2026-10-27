@@ -62,6 +62,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        // Android 11+ silences cameras for backgrounded apps: keep the audio
+        // call alive but renegotiate video away instead of freezing a frame.
+        viewModel.onCallScreenHidden()
         stringTelephoneContainer.session.onAppHidden()
         // A locked voice take is hands-free, so it outlives the composer. Android
         // hands a backgrounded app silence instead of microphone input, so the

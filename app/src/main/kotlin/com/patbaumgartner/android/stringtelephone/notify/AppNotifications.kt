@@ -121,7 +121,7 @@ object AppNotifier {
      * the microphone permission gate still applies. On locked devices the
      * full-screen intent shows the call screen when the OS allows it.
      */
-    fun notifyIncomingCall(context: Context, peer: String, displayPeer: String) {
+    fun notifyIncomingCall(context: Context, peer: String, displayPeer: String, withVideo: Boolean = false) {
         if (!canPost(context)) return
         ensureChannels(context)
         val show = activityIntent(context, MainActivity.ACTION_SHOW_CALL, peer, REQUEST_SHOW_CALL)
@@ -133,10 +133,21 @@ object AppNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = NotificationCompat.Builder(context, INCOMING_CALL_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_call)
+            .setSmallIcon(if (withVideo) R.drawable.ic_videocam else R.drawable.ic_call)
             .setColor(context.getColor(R.color.notification_accent))
-            .setContentTitle(context.getString(R.string.notification_incoming_call_title))
-            .setContentText(context.getString(R.string.notification_incoming_call_text, displayPeer))
+            .setContentTitle(
+                context.getString(
+                    if (withVideo) R.string.notification_incoming_call_video_title
+                    else R.string.notification_incoming_call_title,
+                ),
+            )
+            .setContentText(
+                context.getString(
+                    if (withVideo) R.string.notification_incoming_call_video_text
+                    else R.string.notification_incoming_call_text,
+                    displayPeer,
+                ),
+            )
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

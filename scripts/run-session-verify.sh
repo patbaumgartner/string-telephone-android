@@ -26,6 +26,7 @@ node scripts/verify-reactions.mjs
 node scripts/verify-reply.mjs
 node scripts/verify-deletion.mjs
 node scripts/verify-voice.mjs
+node scripts/verify-video-calls.mjs
 node scripts/verify-screenshots.mjs
 
 echo "SESSION-VERIFY-OK"

@@ -103,6 +103,10 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
   Screens are functions of (state, viewModel); no Navigation-Compose.
 - `CallEngine` (app/call) is the only seam to liblinphone. The SDK must not
   leak into UI or domain code; GPL obligations flow from this link (ADR-0002).
+- Video calls (ADR-0013) are VP8 only and anchored on Asterisk; the camera
+  runs only while the call screen is visible. Camera off means `RecvOnly`;
+  leaving the screen removes the stream and keeps audio. There is no camera
+  FGS type, and a denied camera permission degrades to audio.
 - Messaging goes through the companion API with client idempotency keys and
   cursor sync; `ChatCache` is framework-free and unit-tested (ADR-0003).
 - Read receipts (ADR-0010): the server stores a read state per message and
@@ -146,18 +150,20 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    `verify-postgres.mjs`, `verify-audio-route.mjs`,
    `verify-call-ui-routes.mjs`, `verify-read-receipts.mjs`,
    `verify-typing.mjs`, `verify-reactions.mjs`, `verify-reply.mjs`,
-   `verify-deletion.mjs`, `verify-voice.mjs` and `verify-screenshots.mjs`
-   run from the gate ledgers; the last eight are
+   `verify-deletion.mjs`, `verify-voice.mjs`, `verify-video-calls.mjs` and
+   `verify-screenshots.mjs`
+   run from the gate ledgers; the last nine are
    also appended to `scripts/run-session-verify.sh`
    (`verify-screenshots.mjs` needs the suite's `app/build/screenshots`).
 3. Live prototype: `scripts/test-prototype.sh` (Docker) proves REGISTER,
    INVITE/BYE, and the negative auth path against real Asterisk config.
    It also proves read receipts end to end (send, author-may-not-mark,
-   recipient mark, history `readAt`, idempotence) and revocation of active
+   recipient mark, history `readAt`, idempotence), video negotiation (VP8
+   accepted, a disallowed codec answered `m=video 0`) and revocation of active
    calls and password resets. It uses a unique `st-admin-test-*` project and
    deletes only its own volumes; stop a demo first to free SIP/RTP ports.
    It starts only the services it exercises (Asterisk, PostgreSQL, API) and
-   does not verify Android audio or the media store.
+   does not verify Android audio/video or the media store.
 4. CI runs 1 + assemble + lint + API installDist on main pushes and pull requests.
    Security CI builds app and API for CodeQL and reviews PR dependency changes.
    Dependabot patch/minor auto-merge requires repository auto-merge and branch

@@ -158,6 +158,34 @@ fi
 rm -f "$CALLEE_LOG"
 echo "G3-CALL-COMPLETE"
 
+echo "== G3b: video offer negotiates VP8 and a disallowed codec is refused =="
+run_video_call() {
+    local label="$1" codec="$2" expected="$3" caller_log callee_log callee_pid
+    caller_log="$(mktemp)"
+    callee_log="$(mktemp)"
+    node "$SIP_DIR/callee.cjs" 127.0.0.1 5060 bob "$SIP_PASSWORD" > "$callee_log" 2>&1 &
+    callee_pid=$!
+    sleep 3
+    if ! CALL_VIDEO="$codec" node "$SIP_DIR/caller.cjs" 127.0.0.1 5060 alice "$SIP_PASSWORD" bob > "$caller_log" 2>&1; then
+        echo "PROTOTYPE-FAIL: $label call did not complete" >&2
+        cat "$caller_log" "$callee_log" >&2
+        rm -f "$caller_log" "$callee_log"
+        return 1
+    fi
+    wait "$callee_pid" || true
+    if ! grep -q "$expected" "$caller_log"; then
+        echo "PROTOTYPE-FAIL: $label expected $expected in the caller SDP answer" >&2
+        cat "$caller_log" >&2
+        rm -f "$caller_log" "$callee_log"
+        return 1
+    fi
+    rm -f "$caller_log" "$callee_log"
+    echo "G3b-${label}-OK"
+}
+run_video_call VP8 vp8 VIDEO-NEGOTIATED
+run_video_call VP9 vp9 VIDEO-REJECTED
+echo "G3b-VIDEO-NEGOTIATION-COMPLETE"
+
 echo "== G4: unprovisioned user with wrong password cannot register =="
 set +e
 node "$SIP_DIR/reg-inline.cjs" 127.0.0.1 5060 mallory definitely-wrong

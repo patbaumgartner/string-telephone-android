@@ -11,11 +11,13 @@ data class PbxSettings(
     val externalAddress: String = "",
     val localNetwork: String = "",
     val symmetricMedia: Boolean = true,
+    val video: String = "vp8",
 ) {
     fun validate() {
         require(codecs.split(",").isNotEmpty() && codecs.split(",").all { it in setOf("opus", "ulaw", "alaw") }) {
             "Codecs must be a comma-separated selection of opus, ulaw, alaw"
         }
+        require(video in setOf("vp8", "none")) { "Video codec must be vp8 or none" }
         require(ringSeconds in 5..120) { "Ring duration must be between 5 and 120 seconds" }
         require(maxContacts in 1..5) { "Devices per account must be between 1 and 5" }
         require(externalAddress.isEmpty() || validIpv4(externalAddress)) { "External address must be an IPv4 address" }
@@ -72,7 +74,9 @@ object AsteriskConfig {
             appendLine("auth=${account.username}-auth")
             appendLine("aors=${account.username}")
             appendLine("disallow=all")
-            appendLine("allow=${settings.codecs}")
+            // Video codecs trail the audio preference order: an endpoint that
+            // allows no video answers an INVITE with `m=video 0`.
+            appendLine("allow=${settings.codecs}${if (settings.video == "none") "" else ",${settings.video}"}")
             appendLine("direct_media=no")
             if (settings.externalAddress.isNotEmpty()) appendLine("media_address=${settings.externalAddress}")
             appendLine("dtmf_mode=rfc4733")

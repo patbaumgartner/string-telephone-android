@@ -5,12 +5,15 @@ import com.patbaumgartner.android.stringtelephone.call.AudioRoute
 import com.patbaumgartner.android.stringtelephone.call.CallEngine
 import com.patbaumgartner.android.stringtelephone.call.CallEvent
 import com.patbaumgartner.android.stringtelephone.call.CallSessionInfo
+import com.patbaumgartner.android.stringtelephone.call.CameraFacing
 import com.patbaumgartner.android.stringtelephone.call.EngineConfig
 import com.patbaumgartner.android.stringtelephone.core.CallState
 import com.patbaumgartner.android.stringtelephone.di.AppContainer
 import com.patbaumgartner.android.stringtelephone.chat.ChatCache
 import com.patbaumgartner.android.stringtelephone.data.StringTelephoneRepository
+import com.patbaumgartner.android.stringtelephone.network.CompanionApiClient
 import com.patbaumgartner.android.stringtelephone.security.CredentialStore
+import okhttp3.OkHttpClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -29,21 +32,78 @@ class FakeCallEngine(initial: CallSessionInfo = CallSessionInfo("", CallState.ID
     override fun start(config: EngineConfig) { startedConfig = config }
     override fun stop() { startedConfig = null }
     val calls = mutableListOf<String>()
+
+    /** Whether each entry in [calls] asked for video. */
+    val videoCalls = mutableListOf<Boolean>()
     val routed = mutableListOf<AudioRoute>()
     var hungUp = false
         private set
+    var acceptedWithVideo: Boolean? = null
+        private set
+    val videoToggles = mutableListOf<Boolean>()
 
-    override fun call(remoteUser: String) {
+    /** True once the background policy removed the video stream. */
+    var releasedVideo = false
+        private set
+    var cameraFlips = 0
+        private set
+    var attachedSurfaces: Pair<Any?, Any?>? = null
+        private set
+
+    override fun call(remoteUser: String, withVideo: Boolean) {
         calls += remoteUser
-        _state.value = CallSessionInfo(remoteUser, CallState.OUTGOING)
+        videoCalls += withVideo
+        _state.value = CallSessionInfo(
+            remoteUser = remoteUser,
+            state = CallState.OUTGOING,
+            audioRoute = if (withVideo) AudioRoute.SPEAKER else AudioRoute.EARPIECE,
+            videoOffered = withVideo,
+            videoEnabled = withVideo,
+        )
     }
-    override fun accept() {}
+
+    override fun accept(withVideo: Boolean) {
+        acceptedWithVideo = withVideo
+        _state.value = _state.value.copy(
+            videoOffered = _state.value.videoOffered || withVideo,
+            videoEnabled = withVideo,
+        )
+    }
+
     override fun reject() { rejected = true }
     override fun hangUp() { hungUp = true }
     override fun setMute(muted: Boolean) {}
     override fun setAudioRoute(route: AudioRoute) {
         routed += route
         _state.value = _state.value.copy(audioRoute = route)
+    }
+
+    override fun setVideoEnabled(enabled: Boolean) {
+        videoToggles += enabled
+        _state.value = _state.value.copy(
+            videoOffered = _state.value.videoOffered || enabled,
+            videoEnabled = enabled,
+        )
+    }
+
+    override fun releaseVideo() {
+        releasedVideo = true
+        _state.value = _state.value.copy(videoOffered = false, videoEnabled = false, videoActive = false)
+    }
+
+    override fun switchCamera() {
+        cameraFlips++
+        _state.value = _state.value.copy(
+            cameraFacing = if (_state.value.cameraFacing == CameraFacing.FRONT) {
+                CameraFacing.BACK
+            } else {
+                CameraFacing.FRONT
+            },
+        )
+    }
+
+    override fun attachVideoSurfaces(remote: Any?, preview: Any?) {
+        attachedSurfaces = remote to preview
     }
 }
 
@@ -303,7 +363,19 @@ object PreviewFactory {
             context,
             credentialStoreOverride = store,
             callEngineOverride = callEngine,
-            repositoryOverride = StringTelephoneRepository({ null }, cache),
+            repositoryOverride = StringTelephoneRepository(
+                // A real client pointed at the in-test media server: only the
+                // image screenshot fetches anything, and the base URL is what
+                // makes ImageBubbleContent resolve a thumbnail URL at all.
+                apiProvider = {
+                    CompanionApiClient(
+                        PreviewMediaServer.baseUrl(),
+                        { requireNotNull(store.apiToken()) },
+                        OkHttpClient.Builder().callTimeout(2, java.util.concurrent.TimeUnit.SECONDS).build(),
+                    )
+                },
+                chatCache = cache,
+            ),
             buildInfo = com.patbaumgartner.android.stringtelephone.di.BuildInfo("0.1.0", "1a2b3c4d5e"),
         )
         container.repository.seedForPreviews(

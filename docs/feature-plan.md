@@ -41,7 +41,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 9 | Reply/quote | Medium | Done | Phase 5 |
 | 10 | Message deletion | Medium | Done | Phase 5 |
 | 11 | Voice messages | Large | Done (2026-10-26) | Phase 4 |
-| 12 | Video calls | Large | Planned | — |
+| 12 | Video calls | Large | Done (2026-10-27) | — |
 | 13 | Last-seen & multi-device polish | Medium | Planned | — |
 | 14 | Quick reply from notification | Small | Planned | Phase 5 |
 | 15 | Conversation list: previews & search | Medium | Planned | Phase 3 |
@@ -382,11 +382,163 @@ Screenshots: `15-chat-voice.png` (light) and `dark-chat-voice.png`.
 ### Phase 12 — Video calls
 
 **Effort:** Large
+**Status:** Done (2026-10-27)
 
-liblinphone supports video; the work is camera capture integration,
-video codecs/NAT (the server stack currently manages audio only), call-UI
-video surface, camera permissions, and PBX settings for video. Requires its
-own review of `server/asterisk/` codec and bandwidth configuration.
+Plan written 2026-10-26 and confirmed by the maintainer: full-parity
+bidirectional video, VP8 only, Asterisk-anchored media, camera used only while
+the call screen is visible.
+
+**Decisions (captured as [ADR-0013](adr/0013-video-calls.md)):**
+
+- **Asterisk stays in the media path.** `direct_media=no` is already set, so a
+  video call has one NAT surface (`external_media_address` plus
+  `local_net` when configured) and no dependence on ICE. No ICE on the Asterisk
+  side: liblinphone's candidates are ignored and the anchored path carries the
+  media. The cost is that video bandwidth flows through the server; that is
+  accepted for a self-hosted deployment and is why the setting can be turned
+  off.
+- **VP8 only.** Every liblinphone Android build ships VP8, Asterisk 22 passes
+  it through as a plain codec, and there is no royalty surface. H264 (hardware
+  decode) and AV1 are follow-ups, not part of this phase.
+- **Camera only while the call screen is in the foreground.** Leaving the app
+  re-negotiates the call to audio-only; audio keeps running under the existing
+  microphone foreground service. No `camera` foreground-service type and no
+  `FOREGROUND_SERVICE_CAMERA` permission, so there is never a hidden camera.
+  ADR-0006 gains an amendment; the microphone type and the no-Telecom stance
+  stay as they are.
+- **"Camera off" keeps the peer visible.** The in-call camera button
+  re-INVITEs with `videoDirection = RecvOnly` (stop sending, keep watching)
+  rather than tearing the stream down; only backgrounding removes video
+  entirely.
+- **SRTP over TLS stays mandatory.** Video is not a reason to relax the call
+  security settings (`media_encryption=sdes`, `verifyServerCertificates`,
+  `setCapabilityNegociationEnabled(false)`).
+
+**Server first (open decision 3: before any client work):**
+
+- `PbxSettings` gains `video: String = "vp8"`, allowed values `vp8` and
+  `none`. `validate()` rejects anything else and the endpoint template appends
+  it to `allow=` (audio order untouched, video last). The settings row is
+  JSON-backed, so a defaulted field is backward compatible without a Flyway
+  migration.
+- Admin form gains a "Video codec" select bound to the same value; the
+  managed admin template, `Admin.kt`, and `test-admin-ui.mjs` move together.
+- Bandwidth and port review: a video call needs four RTP/RTCP ports (audio and
+  video) and roughly 0.5-1.5 Mbit/s per direction at 640x480. The
+  `10000-10100` range and the Compose UDP export stay as they are (101 ports
+  still allow ~25 concurrent video calls); `docs/operations.md` gains the
+  sizing note and the firewall guidance.
+- Prototype proof: the caller offers `m=video … RTP/AVP 96` with
+  `a=rtpmap:96 VP8/90000` and the `200 OK` keeps the video stream active with
+  VP8 negotiated; a negative step proves a codec outside the allow-list
+  (`vp9`) is answered with `m=video 0` instead of a broken call.
+
+**App — engine seam (no SDK types outside `call/`):**
+
+- `CallEngine` gains `start(peer, withVideo)`, `setVideoEnabled(enabled)` and
+  `switchCamera()`. `CallSessionInfo` gains `videoOffered`, `videoEnabled`,
+  `videoActive` and `cameraFacing`.
+- Video policy lives in pure functions next to `resolveAudioRoute` and
+  `callFailureFor`, so unit tests cover it without liblinphone: start with or
+  without video, what to do when the call screen is backgrounded, cycle the
+  camera, pick the default audio route (speaker unless Bluetooth is connected),
+  and fall back to audio-only when camera permission is denied.
+- `LinphoneCallEngine` uses the SDK surface verified against the 5.4.88 AAR on
+  2026-10-26: `core.setVideoCaptureEnabled`/`setVideoDisplayEnabled`, the
+  remote and self-view surfaces through `core.setNativeVideoWindowId` and
+  `setNativePreviewWindowId`, `call.update(params)` for every re-INVITE,
+  `CallParams.setVideoEnabled` for on/off and `setVideoDirection`
+  (`SendRecv` while sending, `RecvOnly` for camera off), `core.videoDevicesList`
+  plus `core.setVideoDevice` for the flip, and `PayloadType.normalBitrate` to
+  cap the video bitrate. There is no dedicated video-state listener in this
+  SDK build, so "video active" is derived from the `StreamsRunning` call params
+  (`usedVideoPayloadType`, `videoDirection`) plus
+  `call.requestNotifyNextVideoFrameDecoded()` for the first frame.
+
+**App — UI:**
+
+- The chat header gains a video-call button next to the phone button; placing
+  a call from it invites with video. An audio call keeps the existing path.
+- `CallScreen` renders the remote stream full-bleed with the peer name, timer
+  and controls overlaid, and the local self-view as a draggable picture-in-
+  picture. Controls gain camera on/off and camera flip in the existing
+  `CircleAction` row; with no negotiated video the screen keeps its current
+  audio layout.
+- The camera permission gate mirrors the microphone gate: requested on the
+  first video action, and a denial falls back to audio-only with an inline
+  notice plus a link to app settings (the recovery pattern already used for
+  microphone denial).
+- Background policy: `MainActivity.onStop` re-negotiates to audio-only (the
+  same hook that now cancels a voice take). Returning does not silently
+  re-enable the camera; the call screen shows "Camera off" until the user
+  turns it back on.
+- The screen stays awake while a video call is active, and incoming/missed
+  call notifications say "video" when the INVITE carried a video stream.
+
+**Tests and proof:**
+
+- Unit: the video policy functions; `CameraPermissionTest` (Robolectric)
+  mirroring `MicrophonePermissionTest`.
+- Screenshots: `16-call-video.png` plus `dark-call-video.png` from a fake
+  engine with video state. Robolectric cannot decode video, so the fixture
+  draws a deterministic placeholder in the surface slot; the oracle asserts
+  the real `SurfaceView` wiring separately.
+- Server: `AsteriskConfig`/`PbxGatewayTest` assertions for
+  `allow=opus,ulaw,vp8`, rejection of unknown codecs, and the admin round-trip.
+- Live: the prototype step above plus a maintainer checklist on a device and a
+  second device/emulator (send and receive, flip, on/off mid-call,
+  backgrounding, an audio-only peer, denied camera permission). Emulator
+  cameras give a synthetic scene, so the checklist is the real gate for
+  hardware.
+- Oracle: `scripts/verify-video-calls.mjs` (engine API, surface wiring,
+  permission gate, background downgrade, notification wording, server setting
+  and admin form, prototype step, docs and ADR, no dead strings), appended to
+  `scripts/run-session-verify.sh`.
+
+**Gates:** G1 oracle, G2 `:core:test` + `:app:testDebugUnitTest`, G3 lint +
+both assembles + `:server:api:installDist`, G3b
+`:server:api:compileTestKotlin`, G4 static gates, G5 all oracles plus
+`verify-plan-status.mjs 1 2 3 5 6 7 8 9 10 11 12`, G6 helper suites, G7 the two
+new screenshots against `app/build/screenshots`, G8 docs plus one commit.
+G9 (`:server:api:test`) and G10 (`scripts/test-prototype.sh`) both need Docker
+and stay CI/maintainer hand-offs, as in Phases 9-11.
+
+**Risks:**
+
+1. Video surfaces and camera behaviour differ per device; an emulator-only
+   pass can hide hardware problems, so the manual checklist is not optional.
+2. SDES SRTP with VP8 through Asterisk is the least-exercised path in this
+   stack. If it fails, fix it in the PBX configuration; never downgrade the
+   encryption policy to get video working.
+3. Video through Asterisk doubles CPU and bandwidth. The setting defaults to
+   `vp8` for parity but an operator can set `none`; the operations note makes
+   the cost explicit.
+4. Robolectric cannot render video, so the screenshot is a fixture and the
+   prototype is the real proof of the media path.
+
+**Done 2026-10-27.** `PbxSettings.video` (`vp8`/`none`) is validated, appended
+last to the endpoint `allow=` list, exposed in the admin form and the managed
+admin helper, and covered by `PbxGatewayTest` (VP8 negotiated, unknown codecs
+rejected, `none` removes the payload). The prototype gains a `G3b` step whose
+caller offers VP8 (answered `VIDEO-NEGOTIATED`) and VP9 (answered
+`VIDEO-REJECTED`, i.e. `m=video 0`). On the client, `CallEngine` gains
+`call(peer, withVideo)`, `accept(withVideo)`, `setVideoEnabled`,
+`releaseVideo`, `switchCamera` and `attachVideoSurfaces`, plus pure video
+policy (`startWithVideo`, `afterCallScreenHidden`, `nextCameraFacing`,
+`defaultAudioRoute`). `LinphoneCallEngine` enables only VP8, caps its bitrate,
+derives `videoActive` from `StreamsRunning` params, uses
+`setNativeVideoWindowId`/`setNativePreviewWindowId` for both surfaces, and
+re-INVITEs `SendRecv`/`RecvOnly`/disabled for camera on, camera off and
+backgrounding. The chat header has a video button; `CallScreen` renders the
+remote stream full-bleed with a draggable self-view and camera/flip controls;
+the camera permission gate falls back to audio. `MainActivity.onStop` drops
+video while audio continues, and incoming-call notifications say "video".
+Tests: `VideoCallPolicyTest`, `CameraPermissionTest`; screenshots
+`16-call-video.png` and `dark-call-video.png`. Oracle:
+`scripts/verify-video-calls.mjs`, appended to `scripts/run-session-verify.sh`.
+Docs: ADR-0013, ADR-0006 amendment, protocol call section, operations sizing.
+Manual device/emulator checklist (send, receive, flip, mid-call on/off,
+backgrounding, audio-only peer, denied permission) remains the hardware gate.
 
 ---
 
@@ -629,8 +781,10 @@ Remaining small choices, resolved during the phase that needs them:
 2. **HikariCP sizing** — resolved in Phase 3: Spring Boot's defaults (pool
    max 10) are enough for the prototype; tune `spring.datasource.hikari.*`
    and document it in `docs/operations.md` once real load is measured.
-3. **Video call server-side settings** — codec and NAT configuration review
-   happens in Phase 12, before any client work.
+3. **Video call server-side settings** — resolved while planning Phase 12:
+   VP8 only, Asterisk stays in the media path (`direct_media=no`, no ICE on
+   Asterisk), the RTP range is unchanged, and the codec becomes an admin
+   setting (`vp8` or `none`). See [Phase 12](#phase-12--video-calls).
 4. **Search text normalisation** — diacritics/case folding config for the
    PostgreSQL tsvector column is decided in the Phase 16 migration.
 5. **Pin limit count** — how many conversations can be pinned at once is a

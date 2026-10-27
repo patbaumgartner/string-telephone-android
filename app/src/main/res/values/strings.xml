@@ -35,6 +35,10 @@
     <string name="microphone_permission_message">Allow microphone access to start or answer calls.
         You can still use messages without it. If Android no longer shows the permission prompt,
         enable Microphone in this app\'s permissions in Settings.</string>
+    <string name="camera_permission_title">Camera access needed</string>
+    <string name="camera_permission_message">Allow camera access for video calls. The call continues
+        with audio only if you decline. If Android no longer shows the permission prompt,
+        enable Camera in this app\'s permissions in Settings.</string>
     <string name="open_app_settings">Open app settings</string>
     <string name="incoming_call_access_full_screen">Allow full-screen notifications so incoming calls
         open String Telephone like the phone app, also on the lock screen.</string>
@@ -71,6 +75,8 @@
     <string name="call_hang_up">Hang up</string>
     <string name="call_mute">Mute</string>
     <string name="call_unmute">Unmute</string>
+    <string name="call_video_waiting">Waiting for video…</string>
+    <string name="call_video_self">Your camera</string>
     <string name="call_speaker">Speaker</string>
     <string name="call_earpiece">Earpiece</string>
     <string name="call_bluetooth">Bluetooth</string>
@@ -130,6 +136,8 @@
     <string name="notification_incoming_call_channel">Incoming calls</string>
     <string name="notification_incoming_call_title">Incoming call</string>
     <string name="notification_incoming_call_text">%1$s is calling</string>
+    <string name="notification_incoming_call_video_title">Incoming video call</string>
+    <string name="notification_incoming_call_video_text">%1$s is calling with video</string>
     <string name="notification_keep_alive_channel">Connection</string>
     <string name="notification_keep_alive_title">Ready for calls and messages</string>
     <string name="notification_keep_alive_text">Keeps you reachable while String Telephone is closed.</string>
@@ -139,6 +147,10 @@
         <item quantity="other">%1$d unread messages</item>
     </plurals>
     <string name="cd_call">Start a call</string>
+    <string name="cd_video_call">Start a video call</string>
+    <string name="cd_camera_on">Turn the camera on</string>
+    <string name="cd_camera_off">Turn the camera off</string>
+    <string name="cd_switch_camera">Switch camera</string>
     <string name="cd_open_chat">Open messages</string>
     <string name="cd_answer">Answer the call</string>
     <string name="cd_reject">Reject the call</string>

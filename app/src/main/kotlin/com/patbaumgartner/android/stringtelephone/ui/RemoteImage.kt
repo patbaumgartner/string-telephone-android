@@ -29,6 +29,14 @@ fun RemoteImage(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
 ) {
+    // Screenshot previews only: a pre-decoded bitmap rendered synchronously,
+    // because Robolectric dispatches compose effects of later activities on a
+    // stale looper, which would make the fetch non-deterministic. Null in
+    // production, where the network path below always runs.
+    RemoteImagePreview?.let { preset ->
+        Image(bitmap = preset.asImageBitmap(), contentDescription = null, modifier = modifier, contentScale = contentScale)
+        return
+    }
     var bitmap by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(url, token) {
         if (url.isBlank()) return@LaunchedEffect
@@ -51,3 +59,6 @@ fun RemoteImage(
         Image(bitmap = bmp.asImageBitmap(), contentDescription = null, modifier = modifier, contentScale = contentScale)
     }
 }
+
+/** Test-only seam: when set, [RemoteImage] renders this bitmap instead of fetching. */
+internal var RemoteImagePreview: android.graphics.Bitmap? = null
