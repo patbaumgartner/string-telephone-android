@@ -67,6 +67,15 @@ services:
       PBX_AMI_USERNAME: ${PBX_AMI_USERNAME:-stringtelephone}
       PBX_AMI_PASSWORD: ${PBX_AMI_PASSWORD:?Set PBX_AMI_PASSWORD in your environment or .env}
       ASTERISK_MANAGED_DIR: /managed
+      # Media object store (ADR-0009): point the API at the Garage service.
+      # With ST_MEDIA_ENABLED=false the API falls back to the in-memory store,
+      # which loses uploaded media on restart — set this only deliberately.
+      ST_MEDIA_ENABLED: ${ST_MEDIA_ENABLED:-true}
+      ST_MEDIA_BUCKET: ${ST_MEDIA_BUCKET:-garage}
+      ST_MEDIA_ENDPOINT: http://garage:3900
+      ST_MEDIA_REGION: ${ST_MEDIA_REGION:-garage}
+      ST_MEDIA_ACCESS_KEY: ${ST_MEDIA_ACCESS_KEY:-}
+      ST_MEDIA_SECRET_KEY: ${ST_MEDIA_SECRET_KEY:-}
       # Native HTTPS/WSS is opt-in: point API_TLS_KEYSTORE at a PKCS12/JKS
       # keystore (e.g. /certs/api-keystore.p12) to add the 8443 listener.
       # Leave unset when a TLS-terminating proxy fronts the API. The plain

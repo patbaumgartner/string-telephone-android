@@ -27,13 +27,17 @@ The API's Compose healthcheck probes `/ready`, which checks PostgreSQL rather
 than just the process; `/health` stays a plain liveness alias, and
 `/actuator/health` exposes the database probe for external monitoring.
 
-The media object store (ADR-0009) is still work in progress: the `garage`
-service is in the Compose stack but the API does not talk to it yet — see the
-[feature roadmap](feature-plan.md). Garage refuses to start without its RPC
-secret, so set `GARAGE_RPC_SECRET` (`openssl rand -hex 32`) before starting
-that service; `GARAGE_ADMIN_TOKEN` guards its administration API. For
-interactive database inspection a loopback-only pgweb container ships in the
-developer overlay `server/compose.dev.yaml`, never in the production stack.
+The media object store (ADR-0009) runs as the `garage` service; the API talks
+to it over the compose network with the `ST_MEDIA_*` settings below. Garage
+refuses to start without its RPC secret, so set `GARAGE_RPC_SECRET`
+(`openssl rand -hex 32`) before starting that service; `GARAGE_ADMIN_TOKEN`
+guards its administration API. The Garage S3 access key and secret
+(`ST_MEDIA_ACCESS_KEY`/`ST_MEDIA_SECRET_KEY`) must be created once in the
+Garage administration API and then handed to the API; until they are set the
+API starts with the in-memory store, which loses uploaded media on restart.
+For interactive database inspection a loopback-only pgweb container ships in
+the developer overlay `server/compose.dev.yaml`, never in the production
+stack.
 
 AMI port 5038 is **not published**. The API and Asterisk share the same
 private AMI username/password. Never expose AMI through the host or public
@@ -74,6 +78,11 @@ default admin passwords.
 | `PJSIP_TLS_ENABLE` | `auto` | `auto`, `true` or `false`; true requires mounted certificates |
 | `GARAGE_RPC_SECRET` | unset | Cluster credential of the media object store; Garage refuses to start without it (`openssl rand -hex 32`) |
 | `GARAGE_ADMIN_TOKEN` | unset | Guards the media store's administration API; the API is disabled without it |
+| `ST_MEDIA_ENABLED` | `true` | When `false`, the API keeps uploads in memory and loses media on restart |
+| `ST_MEDIA_BUCKET` | `garage` | S3 bucket the API stores media in |
+| `ST_MEDIA_ENDPOINT` | `http://garage:3900` | S3 endpoint; compose pins it to the Garage service |
+| `ST_MEDIA_ACCESS_KEY` | unset | Garage S3 access key created in the Garage admin API |
+| `ST_MEDIA_SECRET_KEY` | unset | Matching secret key; both must be set for S3 storage to engage |
 
 The old `API_ADMIN_TOKEN` is removed. Admin login uses Spring Security's
 session authentication with PBKDF2 password hashing, CSRF protection on every
