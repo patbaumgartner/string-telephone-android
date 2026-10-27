@@ -106,6 +106,7 @@ internal fun ChatScreen(
     peer: String,
     viewModel: AppViewModel,
     onCall: (String) -> Unit = viewModel::startCall,
+    onVideoCall: (String) -> Unit = { viewModel.startCall(it, withVideo = true) },
     scrollbarVisible: Boolean? = null,
 ) {
     val messages by viewModel.messagesFor(peer).collectAsState()
@@ -156,6 +157,7 @@ internal fun ChatScreen(
             isTyping = typingPeer == peer,
             onBack = viewModel::backToContacts,
             onCall = { onCall(peer) },
+            onVideoCall = { onVideoCall(peer) },
         )
         Column(
             modifier = Modifier
@@ -284,6 +286,7 @@ private fun ChatHeader(
     isTyping: Boolean = false,
     onBack: () -> Unit,
     onCall: () -> Unit,
+    onVideoCall: () -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.background, shadowElevation = 2.dp) {
         Row(
@@ -329,6 +332,13 @@ private fun ChatHeader(
                 Icon(
                     StringTelephoneIcons.Call,
                     contentDescription = stringResource(R.string.cd_call),
+                    tint = StringTelephoneTheme.accents.brand,
+                )
+            }
+            IconButton(onClick = onVideoCall) {
+                Icon(
+                    StringTelephoneIcons.Videocam,
+                    contentDescription = stringResource(R.string.cd_video_call),
                     tint = StringTelephoneTheme.accents.brand,
                 )
             }

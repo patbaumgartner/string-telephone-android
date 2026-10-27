@@ -114,7 +114,7 @@ class SessionController(
         appVisible = false
         updateActiveConversation()
         val call = engine.state.value
-        if (call.state == CallState.RINGING) showIncomingCall(call.remoteUser)
+        if (call.state == CallState.RINGING) showIncomingCall(call.remoteUser, call.videoOffered)
     }
 
     /** The conversation shown by the UI, or null when no chat is open. */
@@ -158,7 +158,7 @@ class SessionController(
             CallEvent.RegistrationFailed -> _registrationFailed.value = true
             is CallEvent.IncomingCall -> {
                 awaitingIncomingPeer = event.remoteUser
-                if (!appVisible) showIncomingCall(event.remoteUser)
+                if (!appVisible) showIncomingCall(event.remoteUser, event.withVideo)
             }
             is CallEvent.CallConnected -> {
                 awaitingIncomingPeer = null
@@ -200,8 +200,8 @@ class SessionController(
         }
     }
 
-    private fun showIncomingCall(peer: String) {
-        AppNotifier.notifyIncomingCall(context, peer, displayNameOf(peer))
+    private fun showIncomingCall(peer: String, withVideo: Boolean = false) {
+        AppNotifier.notifyIncomingCall(context, peer, displayNameOf(peer), withVideo)
     }
 
     /**

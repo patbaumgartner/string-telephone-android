@@ -89,6 +89,12 @@
       <form th:action="@{/admin/pbx/settings}" method="post">
         <label for="codecs">Audio codecs, in preference order</label>
         <input id="codecs" name="codecs" th:value="${settings.codecs}" pattern="(opus|ulaw|alaw)(,(opus|ulaw|alaw))*" required>
+        <label for="video">Video codec</label>
+        <select id="video" name="video">
+          <option value="vp8" th:selected="${settings.video == 'vp8'}">VP8 (video calls enabled)</option>
+          <option value="none" th:selected="${settings.video == 'none'}">None (audio only)</option>
+        </select>
+        <p class="hint">Video calls use VP8 through Asterisk. Choose None to disable video for every account; existing calls keep their negotiation until they end.</p>
         <label for="ring-seconds">Ring duration (seconds)</label>
         <input id="ring-seconds" name="ringSeconds" type="number" min="5" max="120" th:value="${settings.ringSeconds}" required>
         <label for="max-contacts">Devices per account</label>

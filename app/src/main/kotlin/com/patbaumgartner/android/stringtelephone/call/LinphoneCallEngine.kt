@@ -1,6 +1,9 @@
 package com.patbaumgartner.android.stringtelephone.call
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import com.patbaumgartner.android.stringtelephone.BuildConfig
 import com.patbaumgartner.android.stringtelephone.core.CallState
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +23,7 @@ import org.linphone.core.Call
 import org.linphone.core.Core
 import org.linphone.core.CoreListenerStub
 import org.linphone.core.Factory
+import org.linphone.core.MediaDirection
 import org.linphone.core.MediaEncryption
 import org.linphone.core.RegistrationState
 import java.util.concurrent.atomic.AtomicReference
@@ -80,9 +84,16 @@ class LinphoneCallEngine(
                 activeCall = call
                 peerRang = false
                 val remote = call.remoteAddress.username ?: ""
-                _state.value = CallSessionInfo(remoteUser = remote, state = CallState.RINGING)
+                val offered = call.remoteParams?.let {
+                    it.isVideoEnabled && it.videoDirection != MediaDirection.Inactive
+                } == true
+                _state.value = CallSessionInfo(
+                    remoteUser = remote,
+                    state = CallState.RINGING,
+                    videoOffered = offered,
+                )
                 publishAudioState(core)
-                _events.tryEmit(CallEvent.IncomingCall(remote))
+                _events.tryEmit(CallEvent.IncomingCall(remote, offered))
                 return
             }
             if (state == Call.State.OutgoingInit && tracked == null) {
@@ -103,25 +114,49 @@ class LinphoneCallEngine(
                     }
                 }
                 Call.State.Connected, Call.State.StreamsRunning -> {
-                    if (_state.value.state != CallState.ACTIVE) {
+                    val info = _state.value
+                    val firstActive = info.state != CallState.ACTIVE
+                    if (firstActive) {
                         // Re-apply the route chosen while the call connected;
                         // if liblinphone picks its own device anyway,
                         // publishAudioState below mirrors what really happens.
-                        outputDeviceFor(core, _state.value.audioRoute)
+                        outputDeviceFor(core, info.audioRoute)
                             ?.let { core.setOutputAudioDevice(it) }
-                        _state.value = _state.value.copy(
-                            state = CallState.ACTIVE,
-                            startedAtEpochMs = _state.value.startedAtEpochMs ?: System.currentTimeMillis(),
-                        )
                         publishAudioState(core)
-                        _events.tryEmit(CallEvent.CallConnected(_state.value.remoteUser))
                     }
+                    // There is no video-state callback in this SDK build: the
+                    // negotiated payload and direction are the source of truth,
+                    // refreshed on every StreamsRunning (including re-INVITEs).
+                    val params = call.currentParams
+                    val direction = params?.videoDirection ?: MediaDirection.Invalid
+                    val active = params?.usedVideoPayloadType != null && direction != MediaDirection.Inactive
+                    if (active && !_state.value.videoActive) call.requestNotifyNextVideoFrameDecoded()
+                    _state.update {
+                        it.copy(
+                            state = CallState.ACTIVE,
+                            startedAtEpochMs = it.startedAtEpochMs ?: System.currentTimeMillis(),
+                            videoOffered = it.videoOffered || active,
+                            videoActive = active,
+                            videoEnabled = if (active) it.videoEnabled else false,
+                        )
+                    }
+                    if (firstActive) _events.tryEmit(CallEvent.CallConnected(_state.value.remoteUser))
                 }
                 Call.State.End, Call.State.Released, Call.State.Error -> {
                     activeCall = null
                     userPinnedRoute = null
                     core.micGainDb = 0f
-                    _state.value = _state.value.copy(state = CallState.IDLE, startedAtEpochMs = null, muted = false)
+                    core.isVideoCaptureEnabled = false
+                    core.isVideoPreviewEnabled = false
+                    call.setNativeVideoWindowId(null)
+                    _state.value = _state.value.copy(
+                        state = CallState.IDLE,
+                        startedAtEpochMs = null,
+                        muted = false,
+                        videoOffered = false,
+                        videoEnabled = false,
+                        videoActive = false,
+                    )
                     if (state == Call.State.Error) {
                         val error = call.errorInfo
                         val failure = callFailureFor(error.protocolCode, error.reason.name, peerRang)
@@ -197,6 +232,7 @@ class LinphoneCallEngine(
         // Device ringtone and vibration, honouring silent and Do Not Disturb modes.
         core.isNativeRingingEnabled = true
         core.isKeepAliveEnabled = true
+        configureVideo(core)
         check(core.start() == 0) { "SIP engine could not start" }
         coreRef.set(core)
 
@@ -213,6 +249,7 @@ class LinphoneCallEngine(
         _state.value = _state.value.copy(
             state = CallState.REGISTERING,
             availableAudioRoutes = availableRoutes(core),
+            cameraFacing = cameraFacingOf(core.videoDevice),
         )
     }
 
@@ -222,12 +259,14 @@ class LinphoneCallEngine(
         coreRef.getAndSet(null)?.let { core ->
             // Drop stored digest credentials so a signed-out core holds no secret.
             core.clearAllAuthInfo()
+            core.isVideoCaptureEnabled = false
+            core.isVideoPreviewEnabled = false
             core.stop()
         }
         _state.value = CallSessionInfo(remoteUser = "", state = CallState.IDLE)
     }
 
-    override fun call(remoteUser: String) {
+    override fun call(remoteUser: String, withVideo: Boolean) {
         if (activeCall != null) return
         val core = coreRef.get()
         val currentConfig = config
@@ -241,10 +280,26 @@ class LinphoneCallEngine(
             return
         }
         params.account = core.defaultAccount
-        _state.value = _state.value.copy(remoteUser = remoteUser, state = CallState.OUTGOING)
+        // The UI gate ran already, but the permission can be revoked between
+        // the tap and this call; never negotiate a stream we cannot feed.
+        val video = videoAllowed(withVideo)
+        params.isVideoEnabled = video
+        params.videoDirection = MediaDirection.SendRecv
+        val route = defaultAudioRoute(availableRoutes(core), video)
+        _state.value = _state.value.copy(
+            remoteUser = remoteUser,
+            state = CallState.OUTGOING,
+            audioRoute = route,
+            videoOffered = video,
+            videoEnabled = video,
+            videoActive = false,
+        )
+        // Video needs the camera before the first frame; audio-only calls leave it off.
+        core.isVideoCaptureEnabled = video
         val call = core.inviteWithParams(currentConfig.callUri(remoteUser), params)
         if (call == null) {
             activeCall = null
+            core.isVideoCaptureEnabled = false
             failToStart(remoteUser, "INVITE could not be sent", CallFailure.NOT_CONNECTED)
             return
         }
@@ -261,8 +316,24 @@ class LinphoneCallEngine(
         _events.tryEmit(CallEvent.CallFailed(reason, failure))
     }
 
-    override fun accept() {
-        activeCall?.accept()
+    override fun accept(withVideo: Boolean) {
+        val call = activeCall ?: return
+        val core = coreRef.get()
+        val video = videoAllowed(withVideo)
+        _state.value = _state.value.copy(videoOffered = _state.value.videoOffered || video, videoEnabled = video)
+        core?.isVideoCaptureEnabled = video
+        if (!video || core == null) {
+            call.accept()
+            return
+        }
+        val params = core.createCallParams(call)
+        if (params == null) {
+            call.accept()
+            return
+        }
+        params.isVideoEnabled = true
+        params.videoDirection = MediaDirection.SendRecv
+        call.acceptWithParams(params)
     }
 
     override fun reject() {
@@ -295,12 +366,106 @@ class LinphoneCallEngine(
         _state.update { it.copy(audioRoute = route) }
     }
 
+    /**
+     * Camera off keeps the peer visible (`RecvOnly`); turning it back on
+     * re-INVITEs `SendRecv`. Video added to an audio call joins the same way.
+     */
+    override fun setVideoEnabled(enabled: Boolean) {
+        val core = coreRef.get() ?: return
+        val call = activeCall
+        val hadVideo = _state.value.videoOffered || _state.value.videoActive
+        core.isVideoCaptureEnabled = enabled
+        core.isVideoPreviewEnabled = enabled
+        _state.update { it.copy(videoEnabled = enabled, videoOffered = it.videoOffered || enabled) }
+        if (call == null) return
+        if (call.state != Call.State.StreamsRunning && call.state != Call.State.Connected) return
+        if (!hadVideo && !enabled) return
+        val params = core.createCallParams(call) ?: return
+        params.isVideoEnabled = true
+        params.videoDirection = if (enabled) MediaDirection.SendRecv else MediaDirection.RecvOnly
+        call.update(params)
+    }
+
+    /** Background policy: remove video entirely; the audio stream keeps running. */
+    override fun releaseVideo() {
+        val core = coreRef.get() ?: return
+        val call = activeCall
+        val hadVideo = _state.value.videoOffered || _state.value.videoActive
+        core.isVideoCaptureEnabled = false
+        core.isVideoPreviewEnabled = false
+        _state.update { afterCallScreenHidden(it) }
+        if (call == null || !hadVideo) return
+        if (call.state != Call.State.StreamsRunning && call.state != Call.State.Connected) return
+        val params = core.createCallParams(call) ?: return
+        params.isVideoEnabled = false
+        call.update(params)
+    }
+
+    override fun switchCamera() {
+        val core = coreRef.get() ?: return
+        val devices = core.videoDevicesList
+        if (devices.size < 2) return
+        val current = core.videoDevice
+        val nextFacing = nextCameraFacing(cameraFacingOf(current), devices.map(::cameraFacingOf).distinct())
+        val target = devices.firstOrNull { it != current && cameraFacingOf(it) == nextFacing } ?: return
+        if (core.setVideoDevice(target) == 0) {
+            _state.update { it.copy(cameraFacing = nextFacing) }
+        }
+    }
+
+    override fun attachVideoSurfaces(remote: Any?, preview: Any?) {
+        val core = coreRef.get() ?: return
+        activeCall?.setNativeVideoWindowId(remote)
+        core.setNativePreviewWindowId(preview)
+        core.isVideoPreviewEnabled = preview != null && _state.value.videoEnabled
+    }
+
+    /**
+     * The camera gate runs in the UI, but the permission can be revoked
+     * between the tap and the INVITE. Both paths share [startWithVideo], so a
+     * denied camera always degrades to audio instead of a stream without
+     * frames (ADR-0013).
+     */
+    private fun videoAllowed(withVideo: Boolean): Boolean = startWithVideo(
+        requested = withVideo,
+        cameraAllowed = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED,
+    )
+
     /** Republishes route availability and the device liblinphone actually picked. */
     private fun publishAudioState(core: Core) {
         val selected = core.outputAudioDevice?.type?.toAudioRoute()
         val available = availableRoutes(core)
         _state.update { it.copy(audioRoute = selected ?: it.audioRoute, availableAudioRoutes = available) }
     }
+
+    /**
+     * VP8 is the only video codec this project negotiates (ADR-0013); every
+     * other payload stays disabled. Capture and the self-view start off so an
+     * audio call never touches the camera.
+     */
+    private fun configureVideo(core: Core) {
+        core.videoPayloadTypes.forEach { payload ->
+            val vp8 = payload.mimeType.equals("VP8", ignoreCase = true)
+            payload.enable(vp8)
+            if (vp8 && payload.normalBitrate > VIDEO_BITRATE_BPS) payload.normalBitrate = VIDEO_BITRATE_BPS
+        }
+        core.isVideoCaptureEnabled = false
+        core.isVideoDisplayEnabled = true
+        core.isVideoPreviewEnabled = false
+        val policy = core.videoActivationPolicy
+        policy.automaticallyInitiate = false
+        policy.automaticallyAccept = true
+        policy.automaticallyAcceptDirection = MediaDirection.SendRecv
+    }
+
+    /** Maps liblinphone's device name onto the camera vocabulary the UI shows. */
+    private fun cameraFacingOf(device: String?): CameraFacing =
+        if (device?.contains("back", ignoreCase = true) == true || device?.contains("rear", ignoreCase = true) == true) {
+            CameraFacing.BACK
+        } else {
+            CameraFacing.FRONT
+        }
 
     /** The routes liblinphone can currently play audio to. */
     private fun availableRoutes(core: Core): Set<AudioRoute> = core.audioDevices
@@ -354,3 +519,6 @@ internal fun configureCallSecurity(core: Core, config: EngineConfig) {
     transports.tlsPort = -1
     check(core.setTransports(transports) == 0) { "SIP TLS is unavailable" }
 }
+
+/** VP8 ceiling in bits/s: a self-hosted PBX relays every frame of every call. */
+private const val VIDEO_BITRATE_BPS = 1_000_000

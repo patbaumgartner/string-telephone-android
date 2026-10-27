@@ -344,6 +344,29 @@ caches.
 Streams the server-generated JPEG thumbnail for images (falls back to the
 original for non-images). Same authorization as `GET /v1/media/{id}`.
 
+## Calls (SIP media)
+
+Calls never traverse the companion API. The app registers directly with the
+managed Asterisk endpoint (SIP/UDP in development, SIP/TLS with mandatory
+SRTP in release builds) and media is relayed by Asterisk
+(`direct_media=no`); there is no ICE configuration on the PBX
+([ADR-0013](adr/0013-video-calls.md)).
+
+- **Audio** follows the admin codec preference order; managed endpoints
+  publish `allow=<codecs>` (for example `allow=opus,ulaw`).
+- **Video** is VP8 only. With `video = vp8` the endpoint publishes
+  `allow=<codecs>,vp8`, and a video INVITE carries `m=video ... RTP/AVP 96`
+  with `a=rtpmap:96 VP8/90000`. With `video = none` the offer is answered with
+  `m=video 0` and the call continues as audio. Other video codecs (H264,
+  VP9, AV1) are not negotiated.
+- **Camera off** re-INVITEs `videoDirection=RecvOnly` (the peer stays
+  visible); **leaving the call screen** re-INVITEs with video disabled
+  entirely while audio keeps running.
+- The RTP range is `10000-10100/UDP` for both streams of a video call (audio
+  and video, each with RTCP). Nothing about calls is stored by the API; the
+  server only provisions SIP identities and records call state for
+  administration.
+
 ## Realtime stream (`/v1/ws`)
 
 Upgrade `GET /v1/ws` over WSS with the active user token in the
@@ -418,7 +441,7 @@ return `403`. Responses are no-store; pages apply CSP and frame denial.
 | `POST /v1/admin/set-enabled` | `{"username":"bob","enabled":true}` | Enables/disables and reconciles PBX. |
 | `GET /v1/admin/list-users` | none | Lists `username`, `displayName`, desired `enabled`, confirmed `active`. No secrets. |
 | `GET /v1/admin/pbx` | none | Desired settings, sync state, endpoints and active channels. Unreachable PBX returns `503`. |
-| `POST /v1/admin/pbx/settings` | `{"codecs":"opus,ulaw","ringSeconds":30,"maxContacts":2,"externalAddress":"","localNetwork":"","symmetricMedia":true}` | Validates, persists, applies and verifies settings. |
+| `POST /v1/admin/pbx/settings` | `{"codecs":"opus,ulaw","ringSeconds":30,"maxContacts":2,"externalAddress":"","localNetwork":"","symmetricMedia":true,"video":"vp8"}` | Validates, persists, applies and verifies settings. `video` is `vp8` or `none`. |
 | `POST /v1/admin/pbx/reconcile` | `{}` | Retries configuration and pending disconnections. |
 
 Usernames match `[a-z][a-z0-9-]{0,31}`, excluding dialplan special extensions

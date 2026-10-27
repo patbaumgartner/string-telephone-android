@@ -45,6 +45,15 @@ internal object StringTelephoneIcons {
     val Call: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_call)
 
+    val Videocam: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_videocam)
+
+    val VideocamOff: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_videocam_off)
+
+    val CameraFlip: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_camera_flip)
+
     val Message: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_message)
 

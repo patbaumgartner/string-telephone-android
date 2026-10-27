@@ -11,6 +11,11 @@ messages previously reached the user only while the Activity was open, because
 SIP and the realtime stream were tied to the screen's ViewModel. See
 "Background session" below.
 
+Amended: 2026-10-27 — video calls keep the same policy. Leaving the call
+screen re-negotiates the call to audio-only and keeps the microphone FGS
+running; the app declares no `camera` FGS type and never captures video in
+the background (ADR-0013).
+
 ## Context
 
 Android restricts background execution: since Android 12, apps cannot start

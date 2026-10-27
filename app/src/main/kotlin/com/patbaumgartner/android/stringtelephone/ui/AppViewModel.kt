@@ -493,18 +493,40 @@ class AppViewModel(
     }
 
     /** Callers run the microphone permission gate first; the call service needs a visible app. */
-    fun startCall(peer: String) {
+    fun startCall(peer: String, withVideo: Boolean = false) {
         clearCallFailure()
         // Navigate first: a call that fails synchronously must find the call screen to explain itself.
         _screen.value = AppScreen.Call(peer, incoming = false)
-        engine.call(remoteUser = peer)
+        engine.call(remoteUser = peer, withVideo = withVideo)
         if (callFailure == null && engine.state.value.state == CallState.OUTGOING) startCallService(peer)
     }
 
-    fun acceptCall() {
+    fun acceptCall(withVideo: Boolean = false) {
         pendingAnswer = false
-        engine.accept()
+        engine.accept(withVideo = withVideo)
         startCallService(_callState.value.remoteUser)
+    }
+
+    /** Camera on/off mid-call; the engine keeps the peer visible when the camera stops. */
+    fun setVideoEnabled(enabled: Boolean) {
+        engine.setVideoEnabled(enabled)
+    }
+
+    fun switchCamera() {
+        engine.switchCamera()
+    }
+
+    /**
+     * The app left the foreground: drop video, keep audio. Called from
+     * MainActivity.onStop because a backgrounded app gets no camera frames.
+     */
+    fun onCallScreenHidden() {
+        engine.releaseVideo()
+    }
+
+    /** The call screen hands its native surfaces to the engine and clears them on dispose. */
+    fun attachVideoSurfaces(remote: Any?, preview: Any?) {
+        engine.attachVideoSurfaces(remote, preview)
     }
 
     fun rejectCall() {

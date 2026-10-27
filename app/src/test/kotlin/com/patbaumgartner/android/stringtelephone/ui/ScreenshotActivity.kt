@@ -42,18 +42,30 @@ class ScreenshotActivity : ComponentActivity() {
                 onSipSecretChanged("")
             }
         } else {
+            val videoCall = route == ScreenshotRoute.CALL_VIDEO.ordinal
             PreviewFactory.viewModel(
                 applicationContext,
                 FakeCallEngine(
                     com.patbaumgartner.android.stringtelephone.call.CallSessionInfo(
-                        peer, com.patbaumgartner.android.stringtelephone.core.CallState.OUTGOING,
-                        muted = true,
+                        peer,
+                        if (videoCall) {
+                            com.patbaumgartner.android.stringtelephone.core.CallState.ACTIVE
+                        } else {
+                            com.patbaumgartner.android.stringtelephone.core.CallState.OUTGOING
+                        },
+                        muted = !videoCall,
                         audioRoute = com.patbaumgartner.android.stringtelephone.call.AudioRoute.SPEAKER,
                         availableAudioRoutes = setOf(
                             com.patbaumgartner.android.stringtelephone.call.AudioRoute.EARPIECE,
                             com.patbaumgartner.android.stringtelephone.call.AudioRoute.SPEAKER,
                             com.patbaumgartner.android.stringtelephone.call.AudioRoute.BLUETOOTH,
                         ),
+                        // The elapsed timer would make the PNG differ on every
+                        // run; the video fixture leaves it off on purpose.
+                        startedAtEpochMs = null,
+                        videoOffered = videoCall,
+                        videoEnabled = videoCall,
+                        videoActive = false,
                     ),
                 ),
                 deliveryStates = route == ScreenshotRoute.CHAT_DELIVERY_STATES.ordinal,
@@ -84,6 +96,7 @@ class ScreenshotActivity : ComponentActivity() {
                         ScreenshotRoute.CHAT_DELETION.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CHAT_VOICE.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CALL.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
+                        ScreenshotRoute.CALL_VIDEO.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
                         else -> SettingsScreen(viewModel)
                     }
                 }
@@ -99,4 +112,4 @@ class ScreenshotActivity : ComponentActivity() {
     }
 }
 
-enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION, CHAT_VOICE }
+enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION, CHAT_VOICE, CALL_VIDEO }

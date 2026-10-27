@@ -119,10 +119,11 @@ class AdminPages(private val accounts: AccountService, private val pbx: PbxGatew
         @RequestParam(defaultValue = "") externalAddress: String,
         @RequestParam(defaultValue = "") localNetwork: String,
         @RequestParam(defaultValue = "false") symmetricMedia: Boolean,
+        @RequestParam(defaultValue = "vp8") video: String,
         model: Model,
         response: HttpServletResponse,
     ): String = action(model, response) {
-        accounts.settings(PbxSettings(codecs, ringSeconds, maxContacts, externalAddress, localNetwork, symmetricMedia))
+        accounts.settings(PbxSettings(codecs, ringSeconds, maxContacts, externalAddress, localNetwork, symmetricMedia, video))
         model.addAttribute("notice", "PBX settings saved, applied and verified.")
     }
 

@@ -9,6 +9,17 @@ No public release has been published yet.
 
 ### Changed
 
+- Calls now support video (Phase 12, ADR-0013). A video button in the chat
+  header starts a call with the camera; an incoming INVITE that offers video
+  opens the video call screen, and audio calls can add video mid-call. The
+  call screen renders the remote stream full-bleed with a draggable
+  self-view, camera on/off and front/back flip. Camera off keeps the peer
+  visible (receive-only); leaving the call screen drops video and keeps the
+  audio call running, so there is no background camera and no camera
+  foreground-service type. Video is VP8 only and is relayed by Asterisk;
+  administrators can disable it with the new `video` setting (`vp8` or
+  `none`). A denied camera permission never blocks the call: the app starts
+  or answers without sending video.
 - The chat now supports voice messages (Phase 11). Hold the mic button to
   record, slide up > 140 px to lock for hands-free recording, or cancel by
   sliding left. The bubble renders a waveform, duration and playback controls

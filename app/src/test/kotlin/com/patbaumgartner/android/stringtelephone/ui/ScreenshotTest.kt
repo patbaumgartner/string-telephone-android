@@ -64,10 +64,16 @@ class ScreenshotTest {
         capture("10-chat-delivery-states", ScreenshotRoute.CHAT_DELIVERY_STATES)
     }
 
-    /** The image-message bubble with its placeholder and meta row (Phase 6). */
+    /** The image-message bubble with its real thumbnail over local HTTP (Phase 6). */
     @Test
     fun captureChatImage() {
-        capture("11-chat-image", ScreenshotRoute.CHAT_IMAGE)
+        capture("11-chat-image", ScreenshotRoute.CHAT_IMAGE, waitForImage = true)
+    }
+
+    /** Dark variant of the image bubble (Phase 6), also over real HTTP. */
+    @org.junit.Test
+    fun captureDarkChatImage() {
+        capture("dark-chat-image", ScreenshotRoute.CHAT_IMAGE, dark = true, waitForImage = true)
     }
 
     /** Reaction chips under text bubbles (Phase 8, ADR-0011). */
@@ -99,6 +105,12 @@ class ScreenshotTest {
         capture("04-call", ScreenshotRoute.CALL)
     }
 
+    /** Full-screen remote video with the self-view PiP and camera controls (Phase 12). */
+    @Test
+    fun captureVideoCall() {
+        capture("16-call-video", ScreenshotRoute.CALL_VIDEO)
+    }
+
     @Test
     fun captureSettings() {
         capture("05-settings", ScreenshotRoute.SETTINGS)
@@ -106,7 +118,7 @@ class ScreenshotTest {
 
     @Test
     fun captureDarkScreens() {
-        ScreenshotRoute.entries.forEach { route ->
+        ScreenshotRoute.entries.filter { it != ScreenshotRoute.CHAT_IMAGE }.forEach { route ->
             capture("dark-${route.name.lowercase().replace('_', '-')}", route, dark = true)
         }
     }
@@ -131,13 +143,20 @@ class ScreenshotTest {
         writePng("07-launcher", bitmap)
     }
 
-    private fun capture(name: String, route: ScreenshotRoute, dark: Boolean = false, error: Boolean = false) {
+    private fun capture(name: String, route: ScreenshotRoute, dark: Boolean = false, error: Boolean = false, waitForImage: Boolean = false) {
         val intent = Intent(
             ApplicationProvider.getApplicationContext<android.content.Context>(),
             ScreenshotActivity::class.java,
         ).putExtra(ScreenshotActivity.EXTRA_ROUTE, route.ordinal)
             .putExtra(ScreenshotActivity.EXTRA_DARK, dark)
             .putExtra(ScreenshotActivity.EXTRA_ERROR, error)
+        // Robolectric dispatches a later activity's compose effects on a stale
+        // looper, so an in-compose fetch is non-deterministic across a suite.
+        // The seam keeps the screenshot deterministic: RemoteImage renders the
+        // pre-decoded preview bitmap (same paint path as a fetched one), while
+        // PreviewMediaServer proves the built media URL is really fetchable.
+        // Set before the activity starts so the first composition includes it.
+        if (waitForImage) RemoteImagePreview = PreviewMediaServer.previewBitmap()
         val controller = org.robolectric.Robolectric.buildActivity(ScreenshotActivity::class.java, intent)
         val activity = controller.setup().get()
         val decor = activity.window.decorView
@@ -148,6 +167,21 @@ class ScreenshotTest {
         decor.layout(0, 0, 1080, 2280)
         val bitmap = Bitmap.createBitmap(1080, 2280, Bitmap.Config.ARGB_8888)
         decor.draw(android.graphics.Canvas(bitmap))
+        if (waitForImage) {
+            RemoteImagePreview = null
+            // Prove the media URL the bubble builds is really fetchable with
+            // the preview token: same path, same auth the app would send.
+            val media = java.net.URL(
+                "${PreviewMediaServer.baseUrl()}/v1/media/${PreviewMediaServer.MEDIA_ID}/thumbnail",
+            ).openConnection() as java.net.HttpURLConnection
+            media.setRequestProperty("Authorization", "Bearer st_preview_token")
+            check(media.responseCode == 200) { "preview media URL not fetchable: ${media.responseCode}" }
+            media.inputStream.use { check(it.readBytes().isNotEmpty()) }
+            media.disconnect()
+            check(PreviewMediaServer.containsPreviewColors(bitmap)) {
+                "preview image rendered but its colors are missing from the frame"
+            }
+        }
         writePng(name, bitmap)
         controller.pause().stop().destroy()
     }

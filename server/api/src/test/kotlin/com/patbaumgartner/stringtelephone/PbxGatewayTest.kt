@@ -26,6 +26,17 @@ class PbxGatewayTest {
     }
 
     @Test
+    fun `video codec follows the audio preference order and can be disabled`() {
+        val account = PbxAccount("alice", sipDigest("alice", TEST_PASSPHRASE))
+        val withVideo = AsteriskConfig.endpoints(listOf(account), PbxSettings())
+        assertContains(withVideo, "allow=opus,ulaw,vp8\n")
+        val withoutVideo = AsteriskConfig.endpoints(listOf(account), PbxSettings(video = "none"))
+        assertContains(withoutVideo, "allow=opus,ulaw\n")
+        assertFalse(withoutVideo.contains("vp8"))
+        assertFailsWith<IllegalArgumentException> { PbxSettings(video = "h264").validate() }
+    }
+
+    @Test
     fun `invalid manager credentials fail before any provisioning or network access`() {
         val directory = java.nio.file.Path.of("unused-ami-configuration")
         for (password in listOf("short", "$TEST_PASSPHRASE\ninjected")) {

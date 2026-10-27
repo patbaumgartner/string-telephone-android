@@ -12,6 +12,48 @@ const PORT = parseInt(process.argv[3] || '5060', 10);
 const USER = process.argv[4] || 'alice';
 const PASS = process.argv[5] || 'prototest-alice-pass';
 const TARGET = process.argv[6] || 'bob';
+// Optional video offer: `vp8` (allowed) or a codec the PBX does not allow
+// (`vp9`), which must be answered with an inactive stream. Empty = audio only.
+const VIDEO = (process.argv[7] || process.env.CALL_VIDEO || '').trim().toLowerCase();
+const VIDEO_PAYLOAD_TYPES = { vp8: 96, vp9: 98 };
+
+/** Builds the offer SDP; audio stays identical to the audio-only prototype. */
+function offerSdp() {
+  const lines = [
+    'v=0',
+    `o=- 0 0 IN IP4 ${IP()}`,
+    's=call',
+    `c=IN IP4 ${IP()}`,
+    't=0 0',
+    'm=audio 49170 RTP/AVP 0 8',
+    'a=rtpmap:0 PCMU/8000',
+    'a=rtpmap:8 PCMA/8000',
+  ];
+  if (VIDEO) {
+    const payloadType = VIDEO_PAYLOAD_TYPES[VIDEO];
+    if (!payloadType) throw new Error(`Unsupported video codec: ${VIDEO}`);
+    lines.push(`m=video 49172 RTP/AVP ${payloadType}`);
+    lines.push(`a=rtpmap:${payloadType} ${VIDEO.toUpperCase()}/90000`);
+    lines.push('a=sendrecv');
+  }
+  return lines.join('\r\n') + '\r\n';
+}
+
+/** Reports what the 200 OK SDP did with the video stream. */
+function reportVideo(answer) {
+  const lines = answer.split('\r\n');
+  const video = lines.find(line => line.startsWith('m=video '));
+  if (!VIDEO) {
+    if (video) console.log(`UNEXPECTED-VIDEO ${video}`);
+    return;
+  }
+  if (!video || /^m=video 0 /.test(video)) {
+    console.log('VIDEO-REJECTED');
+    return;
+  }
+  const codec = lines.find(line => line.startsWith('a=rtpmap:') && /VP8\/90000/i.test(line));
+  console.log(codec ? `VIDEO-NEGOTIATED ${video}` : `VIDEO-WITHOUT-VP8 ${video}`);
+}
 
 const md5 = s => createHash('md5').update(s).digest('hex');
 const rnd = () => randomUUID().replace(/-/g, '').slice(0, 12);
@@ -67,16 +109,7 @@ function sendRegister(cseqNum, challenge) {
 
 function sendInvite() {
   const uri = `sip:${TARGET}@${SERVER}:${PORT}`;
-  const sdp = [
-    'v=0',
-    `o=- 0 0 IN IP4 ${IP()}`,
-    's=call',
-    `c=IN IP4 ${IP()}`,
-    't=0 0',
-    'm=audio 49170 RTP/AVP 0 8',
-    'a=rtpmap:0 PCMU/8000',
-    'a=rtpmap:8 PCMA/8000',
-  ].join('\r\n') + '\r\n';
+  const sdp = offerSdp();
   send([
     `INVITE ${uri} SIP/2.0`,
     `Via: SIP/2.0/UDP ${me()};branch=${rnd()};rport`,
@@ -95,16 +128,7 @@ function sendInvite() {
 
 function sendInviteAuth(challenge) {
   const uri = `sip:${TARGET}@${SERVER}:${PORT}`;
-  const sdp = [
-    'v=0',
-    `o=- 0 0 IN IP4 ${IP()}`,
-    's=call',
-    `c=IN IP4 ${IP()}`,
-    't=0 0',
-    'm=audio 49170 RTP/AVP 0 8',
-    'a=rtpmap:0 PCMU/8000',
-    'a=rtpmap:8 PCMA/8000',
-  ].join('\r\n') + '\r\n';
+  const sdp = offerSdp();
   send([
     `INVITE ${uri} SIP/2.0`,
     `Via: SIP/2.0/UDP ${me()};branch=${rnd()};rport`,
@@ -203,6 +227,7 @@ socket.on('message', (m) => {
     toTag = t ? t[1] : null;
     const c = str.split('\r\n').find(l => l.startsWith('Contact: '));
     if (c) contactUri = c.slice('Contact: '.length).trim().replace(/<|>/g, '').split(';')[0];
+    reportVideo(str.split('\r\n\r\n')[1] || '');
     console.log('ANSWERED');
     sendAck();
     phase = 'active';

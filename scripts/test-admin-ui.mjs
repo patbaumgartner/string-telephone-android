@@ -31,6 +31,9 @@ test("admin credentials allow long passphrases and managed account actions are e
   assert.match(admin, /name="sipPassword"[^>]*minlength="24" maxlength="1024"/);
   assert.match(admin, /th:text="\$\{credential\.sipSecret\}"/);
   assert.doesNotMatch(admin, /th:utext/);
+  const video = admin.match(/<select[^>]*id="video"[^>]*>[\s\S]*?<\/select>/)[0];
+  for (const value of ["vp8", "none"]) assert.match(video, new RegExp(`value="${value}"`));
+  assert.match(video, /th:selected="\$\{settings\.video == 'none'\}"/);
 });
 
 test("admin styling supports narrow layouts, dark mode, visible keyboard focus and wrapping credentials", () => {

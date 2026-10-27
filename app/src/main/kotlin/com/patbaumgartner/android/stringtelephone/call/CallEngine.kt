@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.StateFlow
 /** Where call audio plays. [BLUETOOTH] covers HFP and A2DP headsets. */
 enum class AudioRoute { EARPIECE, SPEAKER, BLUETOOTH }
 
+/** Which way the camera points. [FRONT] is the selfie camera. */
+enum class CameraFacing { FRONT, BACK }
+
 data class CallSessionInfo(
     val remoteUser: String,
     val state: CallState,
@@ -13,7 +16,48 @@ data class CallSessionInfo(
     val audioRoute: AudioRoute = AudioRoute.EARPIECE,
     val availableAudioRoutes: Set<AudioRoute> = setOf(AudioRoute.EARPIECE, AudioRoute.SPEAKER),
     val startedAtEpochMs: Long? = null,
+    /** The peer offered video or the user asked to add it to this call. */
+    val videoOffered: Boolean = false,
+    /** The camera is currently allowed to send; false while only receiving. */
+    val videoEnabled: Boolean = false,
+    /** A video stream is negotiated and running in either direction. */
+    val videoActive: Boolean = false,
+    val cameraFacing: CameraFacing = CameraFacing.FRONT,
 )
+
+/**
+ * Video starts only when the user asked for it and the camera permission is
+ * granted. A denied permission never blocks the audio call.
+ */
+internal fun startWithVideo(requested: Boolean, cameraAllowed: Boolean): Boolean = requested && cameraAllowed
+
+/**
+ * Leaving the call screen always removes the video stream and leaves audio
+ * running: Android 11+ hands backgrounded apps silence instead of camera
+ * frames, and a hidden camera is never acceptable. Pure so the background
+ * rule is unit-tested rather than inferred from the Activity lifecycle.
+ */
+internal fun afterCallScreenHidden(info: CallSessionInfo): CallSessionInfo =
+    if (!info.videoOffered && !info.videoEnabled && !info.videoActive) info
+    else info.copy(videoOffered = false, videoEnabled = false, videoActive = false)
+
+/** Cycles through the cameras liblinphone reports, wrapping at the end. */
+internal fun nextCameraFacing(current: CameraFacing, available: List<CameraFacing>): CameraFacing {
+    if (available.isEmpty()) return current
+    val index = available.indexOf(current)
+    return if (index < 0) available.first() else available[(index + 1) % available.size]
+}
+
+/**
+ * Video calls start on speaker so the peer is audible without holding the
+ * phone; audio calls keep the earpiece unless a headset is connected.
+ */
+internal fun defaultAudioRoute(available: Set<AudioRoute>, withVideo: Boolean): AudioRoute = when {
+    AudioRoute.BLUETOOTH in available -> AudioRoute.BLUETOOTH
+    withVideo && AudioRoute.SPEAKER in available -> AudioRoute.SPEAKER
+    AudioRoute.EARPIECE in available -> AudioRoute.EARPIECE
+    else -> available.firstOrNull() ?: AudioRoute.EARPIECE
+}
 
 /**
  * Decides the route after the output-device list changed: fall back when the
@@ -45,7 +89,7 @@ internal fun resolveAudioRoute(
 sealed interface CallEvent {
     data object Registered : CallEvent
     data object RegistrationFailed : CallEvent
-    data class IncomingCall(val remoteUser: String) : CallEvent
+    data class IncomingCall(val remoteUser: String, val withVideo: Boolean = false) : CallEvent
     data class OutgoingRinging(val remoteUser: String) : CallEvent
     data class CallConnected(val remoteUser: String) : CallEvent
     data object CallEnded : CallEvent
@@ -81,12 +125,24 @@ interface CallEngine {
 
     fun start(config: EngineConfig)
     fun stop()
-    fun call(remoteUser: String)
-    fun accept()
+    fun call(remoteUser: String, withVideo: Boolean = false)
+    fun accept(withVideo: Boolean = false)
     fun reject()
     fun hangUp()
     fun setMute(muted: Boolean)
     fun setAudioRoute(route: AudioRoute)
+
+    /** Turns the camera on (bidirectional) or off (receive-only). */
+    fun setVideoEnabled(enabled: Boolean)
+
+    /** Removes the video stream entirely; audio keeps running (background policy). */
+    fun releaseVideo()
+
+    /** Switches front/back camera while video is running. */
+    fun switchCamera()
+
+    /** Native remote and self-view surfaces (SurfaceView/TextureView); null detaches. */
+    fun attachVideoSurfaces(remote: Any?, preview: Any?)
 }
 
 data class EngineConfig(

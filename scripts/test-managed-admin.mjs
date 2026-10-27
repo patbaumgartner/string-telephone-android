@@ -12,8 +12,9 @@ if (mode === "setup") {
     state[username] = await admin.request("create-user", { username, displayName: username, sipPassword });
     assert.equal(state[username].ready, true, "PBX must be applied before success");
   }
-  await admin.request("pbx/settings", { codecs: "ulaw,alaw", ringSeconds: 40, maxContacts: 1, symmetricMedia: true });
+  await admin.request("pbx/settings", { codecs: "ulaw,alaw", ringSeconds: 40, maxContacts: 1, symmetricMedia: true, video: "vp8" });
   assert.equal((await admin.request("pbx")).settings.ringSeconds, 40);
+  assert.equal((await admin.request("pbx")).settings.video, "vp8");
   writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
   console.log("MANAGED-PROVISIONING-OK");
 } else if (mode === "revoke") {
