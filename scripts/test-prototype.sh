@@ -105,8 +105,10 @@ echo "API host ports: http=$ST_API_HTTP_PORT https=$ST_API_HTTPS_PORT"
 
 echo "== starting prototype stack =="
 # Only the services the prototype exercises: the PBX, the database and the
-# API. The media object store is not part of this gate — it needs its own
-# cluster secret and the API does not talk to it yet.
+# API. The prototype deliberately keeps ST_MEDIA_ENABLED at its in-memory
+# default (no Garage): media behaviour is proven by the Garage Testcontainers
+# test (G9) and the API integration tests' InMemoryMediaStore, while the
+# production wiring of ST_MEDIA_* is in compose.yaml.
 docker compose -f "$COMPOSE_FILE" -p "$PROJECT" up -d --build --wait asterisk db api
 
 for _ in $(seq 1 60); do
