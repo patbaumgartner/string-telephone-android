@@ -9,6 +9,21 @@ No public release has been published yet.
 
 ### Changed
 
+- Contacts now show when an offline contact was last reachable (Phase 13).
+  The server stamps a durable, minute-granular `last_seen_at` when a user's
+  final realtime session disconnects or the account is disabled, clears it on
+  reconnect, and exposes it as `lastSeenEpochMs` on `GET /v1/contacts` and in
+  the `presence` frame — so an offline transition pushes the timestamp, no
+  polling. The app renders "last seen today at 09:05", "yesterday", the
+  weekday or the date (same buckets as the chat's day chips); online and
+  unknown contacts keep their plain labels. Last seen is derived from
+  connection state only — never from app activity — and carries no more
+  precision than the UI shows.
+- Multi-device accounts now converge (Phase 13). `message-read` frames fan
+  out to the author **and** the reader's other sessions, so a conversation
+  read on one phone clears the unread badge on the other; a device that
+  receives a receipt for messages it is still notifying about cancels that
+  conversation's notification. Applying a receipt twice is idempotent.
 - Calls now support video (Phase 12, ADR-0013). A video button in the chat
   header starts a call with the camera; an incoming INVITE that offers video
   opens the video call screen, and audio calls can add video mid-call. The

@@ -59,7 +59,7 @@ class ApiController(
         val states = presence.all(contacts.map { it.username })
         return ContactsDto(contacts.map {
             val state = states.getValue(it.username)
-            ContactDto(it.username, it.displayName, state.presence, state.observedAtEpochMs)
+            ContactDto(it.username, it.displayName, state.presence, state.observedAtEpochMs, state.lastSeenAtEpochMs)
         })
     }
 
@@ -164,7 +164,7 @@ class ApiController(
             record.createdAt to record.id
         }
         val mark = messages.markRead(me.username, peer, upTo)
-        if (mark.messageIds.isNotEmpty()) hub.broadcastMessageRead(peer, mark)
+        if (mark.messageIds.isNotEmpty()) hub.broadcastMessageRead(me.username, peer, mark)
         return MarkReadResponse(mark.messageIds, mark.readAt)
     }
 

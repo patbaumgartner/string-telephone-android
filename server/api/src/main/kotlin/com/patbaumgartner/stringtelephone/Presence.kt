@@ -1,6 +1,11 @@
 package com.patbaumgartner.stringtelephone
 
-data class PresenceSnapshot(val presence: String, val observedAtEpochMs: Long?)
+data class PresenceSnapshot(
+    val presence: String,
+    val observedAtEpochMs: Long?,
+    /** When the user was last reachable; null when online or never connected (Phase 13). */
+    val lastSeenAtEpochMs: Long? = null,
+)
 
 /**
  * Derives contact presence from two server-side observations: an Asterisk
@@ -35,11 +40,12 @@ class Presence(
         }
     }
 
-    fun of(username: String): PresenceSnapshot = snapshot(username, pbxView())
+    fun of(username: String): PresenceSnapshot = snapshot(username, pbxView(), users.find(username)?.lastSeenAt)
 
     fun all(usernames: Collection<String>): Map<String, PresenceSnapshot> {
         val view = pbxView()
-        return usernames.associateWith { snapshot(it, view) }
+        val lastSeen = usernames.associateWith { users.find(it)?.lastSeenAt }
+        return usernames.associateWith { snapshot(it, view, lastSeen[it]) }
     }
 
     /** Tells every other connected client about [username]'s current presence. */
@@ -53,12 +59,12 @@ class Presence(
         cached = null
     }
 
-    private fun snapshot(username: String, view: PbxView): PresenceSnapshot {
+    private fun snapshot(username: String, view: PbxView, lastSeenAt: Long?): PresenceSnapshot {
         val now = clock()
         if (sessions.isConnected(username)) return PresenceSnapshot(ONLINE, now)
-        val states = view.states ?: return PresenceSnapshot(UNKNOWN, null)
+        val states = view.states ?: return PresenceSnapshot(UNKNOWN, null, lastSeenAt)
         val reachable = states[username]?.let(::sipReachable) == true
-        return PresenceSnapshot(if (reachable) ONLINE else OFFLINE, view.observedAt)
+        return PresenceSnapshot(if (reachable) ONLINE else OFFLINE, view.observedAt, lastSeenAt)
     }
 
     private fun pbxView(): PbxView {

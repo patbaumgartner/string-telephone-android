@@ -169,6 +169,33 @@ class ChatCache {
     }
 
     /**
+     * Applies a read receipt and returns the conversation peers whose cached
+     * messages actually changed (Phase 13). Callers use it to converge
+     * per-device state: clear the unread badge and cancel the shade
+     * notification of a conversation another device just marked read.
+     */
+    fun applyReadReceiptForPeers(messageIds: Set<String>, readAtEpochMs: Long): Set<String> {
+        if (messageIds.isEmpty()) return emptySet()
+        val changedPeers = LinkedHashSet<String>()
+        for (entry in byPeer) {
+            var changed = false
+            for (index in entry.value.indices) {
+                val message = entry.value[index]
+                val id = message.serverId
+                if (id == null || id !in messageIds) continue
+                if (message.state == SendState.READ && message.readAtEpochMs == readAtEpochMs) continue
+                entry.value[index] = message.copy(state = SendState.READ, readAtEpochMs = readAtEpochMs)
+                changed = true
+            }
+            if (changed) {
+                changedPeers += entry.key
+                emit(entry.key)
+            }
+        }
+        return changedPeers
+    }
+
+    /**
      * Applies a reaction change (ADR-0011, Phase 8) to the message with the
      * given [serverId]. Returns the peer to re-emit the changes flow on, or
      * null if the message is not cached.

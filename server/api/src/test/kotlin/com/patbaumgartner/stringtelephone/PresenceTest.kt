@@ -43,3 +43,43 @@ class PresenceTest {
         listOf("Unavailable", "Invalid", "Unknown", "").forEach { assertFalse(Presence.sipReachable(it), it) }
     }
 }
+
+class LastSeenTest {
+    private val pbx = FakePbx()
+    private var now = 1_000L
+    private val users = Users(TestPostgres.newJdbcClient())
+    private val presence = Presence(pbx, WsSessions(), users, clock = { now }, cacheMs = 5_000)
+
+    @Test
+    fun `offline contact carries the stored last-seen and online contacts do not`() {
+        users.create("ann", "Ann")
+        users.markLastSeen("ann", 61_000)
+        now = 200_000
+
+        // Stored value is truncated to the minute.
+        assertEquals(60_000L, users.find("ann")!!.lastSeenAt)
+
+        // With no realtime session, the derived presence carries the stamp.
+        val snapshot = presence.of("ann")
+        assertEquals("offline", snapshot.presence)
+        assertEquals(60_000L, snapshot.lastSeenAtEpochMs)
+
+        // Connecting clears it: online users have no last-seen.
+        users.clearLastSeen("ann")
+        assertEquals(null, users.find("ann")!!.lastSeenAt)
+    }
+
+    @Test
+    fun `users who never connected have no last-seen`() {
+        users.create("newbie", "New")
+        assertEquals(null, users.find("newbie")!!.lastSeenAt)
+        assertEquals(null, presence.of("newbie").lastSeenAtEpochMs)
+    }
+
+    @Test
+    fun `minute truncation floors and never rounds up`() {
+        assertEquals(0L, Users.truncateToMinute(59_999))
+        assertEquals(60_000L, Users.truncateToMinute(60_000))
+        assertEquals(60_000L, Users.truncateToMinute(119_999))
+    }
+}

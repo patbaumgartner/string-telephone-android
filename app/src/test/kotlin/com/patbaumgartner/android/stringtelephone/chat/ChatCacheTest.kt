@@ -253,3 +253,29 @@ class ChatCacheTest {
         assertEquals("10,50,90,30", stored.waveform)
     }
 }
+
+class ChatCacheReadElsewhereTest {
+    private fun message(serverId: String, clientKey: String, fromMe: Boolean, state: SendState) =
+        ChatMessage(serverId = serverId, clientKey = clientKey, fromMe = fromMe, content = "x", sentAtEpochMs = 1, state = state)
+
+    @Test
+    fun `applyReadReceiptForPeers returns the peers whose messages actually changed`() {
+        val cache = ChatCache()
+        cache.append("bob", message("m1", "k1", fromMe = true, state = SendState.SENT))
+        cache.append("carol", message("m2", "k2", fromMe = true, state = SendState.SENT))
+
+        assertEquals(setOf("bob", "carol"), cache.applyReadReceiptForPeers(setOf("m1", "m2"), 500))
+
+        // A repeated receipt is idempotent: no peer reported as changed.
+        assertEquals(emptySet(), cache.applyReadReceiptForPeers(setOf("m1", "m2"), 500))
+    }
+
+    @Test
+    fun `applyReadReceiptForPeers ignores unknown ids and empty sets`() {
+        val cache = ChatCache()
+        cache.append("bob", message("m1", "k1", fromMe = true, state = SendState.SENT))
+        assertEquals(emptySet(), cache.applyReadReceiptForPeers(setOf("other"), 500))
+        assertEquals(emptySet(), cache.applyReadReceiptForPeers(emptySet(), 500))
+        assertEquals(SendState.SENT, cache.history("bob").single().state)
+    }
+}

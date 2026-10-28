@@ -12,6 +12,8 @@ data class UserRecord(
     val apiTokenHash: String,
     val createdAt: Long,
     val revokedAt: Long?,
+    /** When the user's last realtime session disconnected; null when never connected or currently online. */
+    val lastSeenAt: Long? = null,
 )
 
 data class User(
@@ -50,6 +52,7 @@ class Users(private val db: JdbcClient) {
         rs.getString("api_token_hash"),
         rs.getLong("created_at"),
         rs.getLong("revoked_at").takeUnless { rs.wasNull() },
+        rs.getLong("last_seen_at").takeUnless { rs.wasNull() },
     )
 
     // Single-statement writes are atomic on their own; every value is bound
@@ -72,19 +75,41 @@ class Users(private val db: JdbcClient) {
 
     fun list(): List<UserRecord> =
         db.sql(
-            "SELECT id, username, display_name, active, api_token_hash, created_at, revoked_at FROM users ORDER BY username",
+            "SELECT id, username, display_name, active, api_token_hash, created_at, revoked_at, last_seen_at FROM users ORDER BY username",
         ).query { rs, _ -> record(rs) }.list()
 
     fun find(username: String): UserRecord? =
         db.sql(
-            "SELECT id, username, display_name, active, api_token_hash, created_at, revoked_at FROM users WHERE username = ?",
+            "SELECT id, username, display_name, active, api_token_hash, created_at, revoked_at, last_seen_at FROM users WHERE username = ?",
         ).param(username).query { rs, _ -> record(rs) }.optional().orElse(null)
 
     fun findByToken(token: String): UserRecord? {
         val hash = sha256Hex(token)
         return db.sql(
-            "SELECT id, username, display_name, active, api_token_hash, created_at, revoked_at " +
+            "SELECT id, username, display_name, active, api_token_hash, created_at, revoked_at, last_seen_at " +
                 "FROM users WHERE api_token_hash = ? AND active = 1",
         ).param(hash).query { rs, _ -> record(rs) }.optional().orElse(null)
+    }
+
+    /**
+     * Stamps [username]'s last-seen (Phase 13). Called when their last
+     * realtime session disconnects or the account is disabled — "was last
+     * reachable", never "last clicked". Truncated to the minute so the
+     * stored value carries no more precision than the UI shows. A user who
+     * is currently connected has no last-seen; online is the live state.
+     */
+    fun markLastSeen(username: String, at: Long): Boolean =
+        db.sql("UPDATE users SET last_seen_at = ? WHERE username = ?")
+            .params(truncateToMinute(at), username)
+            .update() > 0
+
+    fun clearLastSeen(username: String): Boolean =
+        db.sql("UPDATE users SET last_seen_at = NULL WHERE username = ?")
+            .param(username)
+            .update() > 0
+
+    companion object {
+        /** Last-seen is minute-granular: never expose the exact second. */
+        fun truncateToMinute(epochMs: Long): Long = epochMs / 60_000 * 60_000
     }
 }

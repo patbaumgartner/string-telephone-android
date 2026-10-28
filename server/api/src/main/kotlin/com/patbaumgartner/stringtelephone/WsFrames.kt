@@ -12,7 +12,7 @@ object WsFrames {
 
     fun presence(username: String, snapshot: PresenceSnapshot): String =
         Json.encodeToString(WsMessageDto("presence", Json.encodeToString(
-            WsPresenceEvent(username, snapshot.presence, snapshot.observedAtEpochMs),
+            WsPresenceEvent(username, snapshot.presence, snapshot.observedAtEpochMs, snapshot.lastSeenAtEpochMs),
         )))
 
     fun newMessage(message: MessageRecord): String =

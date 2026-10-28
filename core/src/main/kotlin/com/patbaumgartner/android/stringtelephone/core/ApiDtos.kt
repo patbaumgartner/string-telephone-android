@@ -11,6 +11,8 @@ data class ContactDto(
     val displayName: String,
     val presence: String,
     val presenceUpdatedAtEpochMs: Long? = null,
+    /** When the user was last reachable; null while online or never connected (Phase 13). */
+    val lastSeenEpochMs: Long? = null,
 )
 
 @Serializable
@@ -127,7 +129,13 @@ data class WsNewMessageDto(
 )
 
 @Serializable
-data class WsPresenceDto(val username: String, val presence: String, val updatedAt: Long? = null)
+data class WsPresenceDto(
+    val username: String,
+    val presence: String,
+    val updatedAt: Long? = null,
+    /** When the user was last reachable; null while online or never connected (Phase 13). */
+    val lastSeenAt: Long? = null,
+)
 
 @Serializable
 data class WsMessageReadDto(val messageIds: List<String> = emptyList(), val readAt: Long = 0)
@@ -180,6 +188,8 @@ sealed interface RealtimeEvent {
         val username: String,
         val presence: String,
         val updatedAtEpochMs: Long?,
+        /** When the user was last reachable; null while online or never connected (Phase 13). */
+        val lastSeenEpochMs: Long? = null,
     ) : RealtimeEvent
 
     /** Read receipts (ADR-0010): the peer read the listed message ids. */
@@ -251,7 +261,7 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
         }.getOrNull()
         "presence" -> runCatching {
             val event = realtimeJson.decodeFromString(WsPresenceDto.serializer(), envelope.payload)
-            RealtimeEvent.Presence(event.username, event.presence, event.updatedAt)
+            RealtimeEvent.Presence(event.username, event.presence, event.updatedAt, event.lastSeenAt)
         }.getOrNull()
         "message-read" -> runCatching {
             val event = realtimeJson.decodeFromString(WsMessageReadDto.serializer(), envelope.payload)

@@ -42,7 +42,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 10 | Message deletion | Medium | Done | Phase 5 |
 | 11 | Voice messages | Large | Done (2026-10-26) | Phase 4 |
 | 12 | Video calls | Large | Done (2026-10-27) | — |
-| 13 | Last-seen & multi-device polish | Medium | Planned | — |
+| 13 | Last-seen & multi-device polish | Medium | Done (2026-10-28) | `V10__last_seen.sql` |
 | 14 | Quick reply from notification | Small | Planned | Phase 5 |
 | 15 | Conversation list: previews & search | Medium | Planned | Phase 3 |
 | 16 | Message search | Medium | Planned | Phase 3 |
@@ -548,12 +548,74 @@ backgrounding, audio-only peer, denied permission) remains the hardware gate.
 ### Phase 13 — Last-seen and multi-device polish
 
 **Effort:** Medium
+**Status:** Done (2026-10-28)
 
-- Last-seen timestamps on contacts (privacy-visible, always-on like
-  presence today).
-- Multi-device hardening: the stream already supports multiple sessions per
-  user; this phase covers consistent notification behaviour, unread counts
-  and read-state across simultaneously connected devices.
+Plan written 2026-10-27. Two strands, both small and testable:
+
+**Last-seen timestamps (server + app).** The server already derives
+`presence` from two observations (open realtime stream, registered SIP
+contact) and reports `presenceUpdatedAtEpochMs` — when that state was
+*observed*, which resets on every poll and means nothing to a human. Phase 13
+adds a durable **last-seen** per user:
+
+- **Server:** V10 migration adds `users.last_seen_at BIGINT` (nullable). The
+  value is written when a user's last realtime session closes (WsHub
+  `afterConnectionClosed` → presence hook) and on sign-out/disable — wall
+  clock from the existing `clock` seam. It is *not* touched on every API
+  request: last-seen means "was last reachable", not "last clicked".
+- **Wire:** `GET /v1/contacts` gains `lastSeenEpochMs` per contact (null when
+  they have never connected or are currently online); the `presence` realtime
+  frame carries it too (`lastSeenEpochMs`), so an offline transition delivers
+  the timestamp push — no polling.
+- **App:** an offline contact's row subtitle shows "last seen <relative>"
+  instead of plain "Offline", using the same recency buckets as `dayLabel`
+  (today → time, this week → weekday, older → date). Online stays green-dot
+  "Online"; unknown stays "Unknown". No settings, no opt-out — mirrors the
+  always-on presence and read-receipt decisions (ADR-0010's mutuality logic).
+- **Privacy stance:** last-seen is derived from connection state only, has
+  minute-level granularity (truncated server-side to the minute), and never
+  distinguishes app-open from merely-registered — same visibility as today's
+  presence dot, just with a timestamp.
+
+- **Multi-device hardening (no protocol change):** the registry already
+  fans out per user; this phase proves and fixes the seams:
+  - `markRead` fan-out currently notifies only the *author* (`send(peer)`);
+    the reader's **other** devices learn the new read state only via their
+    own mark response. Fix: broadcast the read event to **both** sides, with
+    the reader's own devices applying it idempotently (read receipt
+    application is already idempotent) so unread badges converge.
+  - Unread badge consistency: unread counts are derived locally; with two
+    devices, a conversation opened on device A leaves device B's badge until
+    its next `message-read` frame — the both-sides broadcast above fixes
+    exactly that.
+  - Notification behaviour: notifications are posted by whichever device is
+    backgrounded (already correct — active-conversation suppression is
+    per-device by design); a device that marks read while another is
+    notifying gets the cancellation through its own `message-read` handler —
+    add cancel-on-receipt for the affected peer's notification.
+  - Document the model in `docs/protocol.md`: multiple streams per user are
+    supported, events fan out to all of a user's sessions, and last-seen
+    means the last disconnection of the final session.
+
+**Tests:** Presence last-seen unit tests (offline path stamps, online path
+clears, idempotent close); integration test: contacts carry `lastSeenEpochMs`
+after disconnect, realtime `presence` frame carries it, second device
+receives `message-read` for its own unread messages; app test: presence event
+with `lastSeenEpochMs` renders the relative label; screenshot of the contacts
+list with an offline "last seen" row.
+
+**Depends on:** nothing new (presence + receipts exist).
+
+Shipped: V10 migration, `Users.markLastSeen`/`clearLastSeen`/
+`truncateToMinute`, WsHub stamp-on-final-disconnect / clear-on-connect,
+disable stamps in the same UPDATE, `lastSeenEpochMs` on contacts and in the
+`presence` frame, `LastSeenLabel` buckets, contacts subtitle, both-sides
+`message-read` fan-out, `readElsewhere` notification cancellation.
+Screenshots: `17-contacts-last-seen.png` and `dark-contacts-last-seen.png`
+(offline Carol with a fixed June 2025 stamp so the DATE bucket is
+deterministic). Oracle: `scripts/verify-last-seen.mjs`, appended to
+`scripts/run-session-verify.sh`. Docs: protocol contacts + presence frame +
+multi-device fan-out, CHANGELOG.
 
 ---
 

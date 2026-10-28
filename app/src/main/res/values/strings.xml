@@ -55,6 +55,10 @@
     <string name="presence_offline">Offline</string>
     <string name="presence_unknown">Unknown</string>
     <string name="contact_subtitle">%1$s · %2$s</string>
+    <string name="last_seen_today">last seen today at %1$s</string>
+    <string name="last_seen_yesterday">last seen yesterday</string>
+    <string name="last_seen_weekday">last seen %1$s</string>
+    <string name="last_seen_date">last seen %1$s</string>
     <string name="call_button">Call</string>
     <string name="chat_button">Messages</string>
     <string name="settings_title">Settings</string>

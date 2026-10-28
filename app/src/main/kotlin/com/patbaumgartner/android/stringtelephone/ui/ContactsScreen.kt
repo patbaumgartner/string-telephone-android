@@ -216,7 +216,7 @@ private fun ContactRow(
                 PresenceDot(presence)
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    stringResource(R.string.contact_subtitle, contact.username, presenceLabel(presence)),
+                    presenceSubtitle(contact),
                     color = StringTelephoneTheme.accents.textMuted,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
@@ -271,6 +271,39 @@ internal fun presenceLabel(status: PresenceStatus): String = stringResource(
         PresenceStatus.UNKNOWN -> R.string.presence_unknown
     },
 )
+
+/**
+ * The contact-row subtitle: online and unknown keep the plain presence
+ * label; offline contacts show when they were last reachable (Phase 13).
+ */
+@Composable
+internal fun presenceSubtitle(contact: com.patbaumgartner.android.stringtelephone.core.ContactDto): String {
+    val status = presenceStatusOf(contact.presence)
+    val presence = presenceLabel(status)
+    if (status != PresenceStatus.OFFLINE || contact.lastSeenEpochMs == null) {
+        return stringResource(R.string.contact_subtitle, contact.username, presence)
+    }
+    val zone = java.time.ZoneId.systemDefault()
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val lastSeen = contact.lastSeenEpochMs ?: return stringResource(R.string.contact_subtitle, contact.username, presence)
+    val seen = java.time.Instant.ofEpochMilli(lastSeen).atZone(zone)
+    val label = when (lastSeenBucket(lastSeen, System.currentTimeMillis(), zone)) {
+        LastSeenLabel.TODAY -> stringResource(
+            R.string.last_seen_today,
+            seen.format(java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT).withLocale(locale)),
+        )
+        LastSeenLabel.YESTERDAY -> stringResource(R.string.last_seen_yesterday)
+        LastSeenLabel.WEEKDAY -> stringResource(
+            R.string.last_seen_weekday,
+            seen.toLocalDate().dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, locale),
+        )
+        LastSeenLabel.DATE -> stringResource(
+            R.string.last_seen_date,
+            seen.toLocalDate().format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM).withLocale(locale)),
+        )
+    }
+    return stringResource(R.string.contact_subtitle, contact.username, label)
+}
 
 /** Decorative: the presence text next to it carries the meaning. */
 @Composable
