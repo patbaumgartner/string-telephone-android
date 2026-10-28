@@ -9,6 +9,15 @@ No public release has been published yet.
 
 ### Changed
 
+- Message notifications now offer a quick reply and "Mark as read" directly
+  in the shade (Phase 14). The reply field sends through the same repository
+  path as the composer — optimistic bubble, client idempotency key, delivery
+  ticks — without opening the app; a failed send surfaces as a follow-up
+  notification ("Message not sent — tap to open the conversation"). Marking
+  read from the shade is an explicit user act (the user pressed the button),
+  so it is allowed under ADR-0010's rule against *automatic* marking;
+  notification arrival, background sync and cursor catch-up still never mark
+  anything read on their own.
 - Contacts now show when an offline contact was last reachable (Phase 13).
   The server stamps a durable, minute-granular `last_seen_at` when a user's
   final realtime session disconnects or the account is disabled, clears it on

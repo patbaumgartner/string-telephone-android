@@ -357,10 +357,10 @@ class StringTelephoneRepository(
     /**
      * Marks the peer's messages as read on the server (ADR-0010).
      *
-     * Only the foreground chat screen calls this, and only while the messages
-     * are rendered. Notification handlers, background sync and cursor
-     * catch-up must not, so a message is only "read" when a human could
-     * actually see it.
+     * Called from the foreground chat screen while messages are rendered and
+     * from the notification's "Mark as read" action (Phase 14) — both are
+     * explicit user-visible actions. Notification arrival, background sync
+     * and cursor catch-up still never mark anything read on their own.
      */
     fun markConversationRead(peer: String, upToMessageId: String?) {
         scope.launch(sessionJob) {

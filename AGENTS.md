@@ -111,9 +111,11 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
   cursor sync; `ChatCache` is framework-free and unit-tested (ADR-0003).
 - Read receipts (ADR-0010): the server stores a read state per message and
   announces it with the `message-read` event; the app's `SendState` is
-  `PENDING / SENT / READ / FAILED`. Only the foreground chat screen may mark
-  a conversation read — never a notification handler, a background sync or a
-  cursor catch-up. A receipt means a human looked at the message.
+  `PENDING / SENT / READ / FAILED`. Only the foreground chat screen and the
+  notification's explicit "Mark as read" action may mark a conversation read —
+  never an automatic notification handler, a background sync or a cursor
+  catch-up. A receipt means a human looked at the message (the shade action
+  counts: the user pressed the button).
 - The server derives message authorship from the authenticated principal and
   ignores client-provided sender identity.
 - Server persistence is PostgreSQL 18 (ADR-0008): Spring Boot auto-configures
@@ -151,7 +153,8 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    `verify-call-ui-routes.mjs`, `verify-read-receipts.mjs`,
    `verify-typing.mjs`, `verify-reactions.mjs`, `verify-reply.mjs`,
    `verify-deletion.mjs`, `verify-voice.mjs`, `verify-video-calls.mjs`,
-   `verify-last-seen.mjs` and `verify-screenshots.mjs`
+   `verify-last-seen.mjs`, `verify-quick-reply.mjs` and
+   `verify-screenshots.mjs`
    run from the gate ledgers; the last nine are
    also appended to `scripts/run-session-verify.sh`
    (`verify-screenshots.mjs` needs the suite's `app/build/screenshots`).

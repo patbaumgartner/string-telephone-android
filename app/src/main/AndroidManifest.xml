@@ -56,5 +56,9 @@
         <receiver
             android:name=".notify.CallActionReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".notify.MessageActionReceiver"
+            android:exported="false" />
     </application>
 </manifest>
