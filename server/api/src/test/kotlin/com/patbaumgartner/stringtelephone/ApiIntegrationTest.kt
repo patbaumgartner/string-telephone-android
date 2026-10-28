@@ -153,6 +153,90 @@ class ApiIntegrationTest {
     }
 
     @Test
+    fun `last seen is stamped on final disconnect cleared on reconnect and carried by contacts and presence frames`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+
+        // Never connected: contacts omit last-seen entirely.
+        assertFalse(contact(alice, "bob").jsonObject.containsKey("lastSeenEpochMs"))
+        // Bob is SIP-unreachable, so once his stream closes the derived
+        // presence is offline (the FakePbx defaults endpoints to registered).
+        server.pbx.deviceStates["bob"] = "Unavailable"
+
+        val bobEvents = SocketListener()
+        val bobSocket = connect(bob, bobEvents)
+        // Connected now: still no last-seen.
+        assertFalse(contact(alice, "bob").jsonObject.containsKey("lastSeenEpochMs"))
+
+        // Alice listens for the offline push her contact list will reflect.
+        val aliceEvents = SocketListener()
+        val aliceSocket = connect(alice, aliceEvents)
+
+        bobSocket.sendClose(WebSocket.NORMAL_CLOSURE, "bye").join()
+        val lastSeen = assertLastSeenAppears(alice, "bob")
+        assertTrue(lastSeen > 0, "last-seen must be a positive epoch ms")
+
+        // The offline presence frame carries the same stamp (push, not just poll).
+        val offline = aliceEvents.nextPresence("bob", "offline")
+        assertEquals(lastSeen, offline.getValue("lastSeenAt").jsonPrimitive.long)
+
+        // Reconnecting clears it again.
+        val bobSocket2 = connect(bob, SocketListener())
+        waitUntilLastSeenVanishes(alice, "bob")
+        aliceSocket.abort()
+        bobSocket2.abort()
+    }
+
+    @Test
+    fun `read receipts fan out to both sides so the reader's other devices converge`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+
+        // Alice (author) and a second bob device both listen.
+        val aliceEvents = SocketListener()
+        val aliceSocket = connect(alice, aliceEvents)
+        val bob2Events = SocketListener()
+        val bob2Socket = connect(bob, bob2Events)
+        val bob1Socket = connect(bob, SocketListener()) // the device that will mark read
+
+        assertEquals(201, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"read me","clientKey":"multi-1"}""", alice).statusCode())
+        // The marking device must have received the message before marking.
+        val envelope = Json.parseToJsonElement(aliceEvents.next("new-message").getValue("payload").jsonPrimitive.content).jsonObject
+        val messageId = envelope.getValue("id").jsonPrimitive.content
+        bob2Events.next("new-message")
+
+        // Bob's first device marks read; both the author AND bob's second device get the frame.
+        assertEquals(200, server.post("/v1/conversations/alice/read", """{"upToMessageId":"$messageId"}""", bob).statusCode())
+        val authorFrame = Json.parseToJsonElement(aliceEvents.next("message-read").getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals(messageId, authorFrame.getValue("messageIds").jsonArray.single().jsonPrimitive.content)
+        val otherDeviceFrame = Json.parseToJsonElement(bob2Events.next("message-read").getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals(messageId, otherDeviceFrame.getValue("messageIds").jsonArray.single().jsonPrimitive.content)
+        aliceSocket.abort(); bob2Socket.abort()
+    }
+
+    private fun assertLastSeenAppears(token: String, username: String): Long {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (System.nanoTime() < deadline) {
+            val value = contact(token, username).jsonObject.getValue("lastSeenEpochMs").jsonPrimitive.longOrNull
+            if (value != null && value > 0) return value
+            Thread.sleep(100)
+        }
+        error("last-seen never appeared for $username")
+    }
+
+    private fun waitUntilLastSeenVanishes(token: String, username: String) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (System.nanoTime() < deadline) {
+            val value = contact(token, username).jsonObject["lastSeenEpochMs"]?.jsonPrimitive?.longOrNull
+            if (value == null) return
+            Thread.sleep(100)
+        }
+        error("last-seen never cleared for $username")
+    }
+
+    @Test
     fun `reset ends calls invalidates old API token and updates PBX digest and reenable works`() {
         server.login()
         val old = server.create("alice", "Alice")
@@ -342,13 +426,13 @@ class SocketListener : WebSocket.Listener {
         }
     }
 
-    /** Waits for a presence event matching [username] and [presence]; the periodic poll may repeat states. */
-    fun nextPresence(username: String, presence: String) {
+    /** Waits for a presence event matching [username] and [presence]; returns its payload. */
+    fun nextPresence(username: String, presence: String): JsonObject {
         while (true) {
             val payload = Json.parseToJsonElement(next("presence").getValue("payload").jsonPrimitive.content).jsonObject
             if (payload.getValue("username").jsonPrimitive.content == username &&
                 payload.getValue("presence").jsonPrimitive.content == presence
-            ) return
+            ) return payload
         }
     }
     override fun onOpen(webSocket: WebSocket) { webSocket.request(1) }

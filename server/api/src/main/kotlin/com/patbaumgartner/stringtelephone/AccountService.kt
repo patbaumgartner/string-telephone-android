@@ -82,10 +82,15 @@ class AccountService(
             if (updated == 0) throw ApiFailure(org.springframework.http.HttpStatus.NOT_FOUND, "No managed account")
             // `active` follows `enabled` in the same statement: relying on the
             // reconcile below to restore it left the account deactivated
-            // whenever the PBX was unreachable.
-            db.sql("UPDATE users SET active=?,revoked_at=? WHERE username=?")
+            // whenever the PBX was unreachable. Disabling is the user's last
+            // disconnection, so stamp last-seen in the same write (Phase 13).
+            db.sql(
+                "UPDATE users SET active=?,revoked_at=?,last_seen_at=CASE WHEN ? = 0 THEN ? ELSE NULL END WHERE username=?",
+            )
                 .param(if (enabled) 1 else 0)
                 .param(if (enabled) null else System.currentTimeMillis())
+                .param(if (enabled) 1 else 0)
+                .param(Users.truncateToMinute(System.currentTimeMillis()))
                 .param(username)
                 .update()
         }

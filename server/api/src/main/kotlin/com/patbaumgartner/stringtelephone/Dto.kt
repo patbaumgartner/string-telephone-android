@@ -11,6 +11,8 @@ data class ContactDto(
     val displayName: String,
     val presence: String,
     val presenceUpdatedAtEpochMs: Long?,
+    /** When the user was last reachable; null while online or never connected (Phase 13). */
+    val lastSeenEpochMs: Long? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -104,6 +106,8 @@ data class WsPresenceEvent(
     val username: String,
     val presence: String,
     val updatedAt: Long?,
+    /** When the user was last reachable; null while online or never connected (Phase 13). */
+    val lastSeenAt: Long? = null,
 )
 
 /** WebSocket event frames pushed on /v1/ws. */

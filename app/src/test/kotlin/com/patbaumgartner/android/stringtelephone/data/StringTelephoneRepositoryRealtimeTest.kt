@@ -238,6 +238,47 @@ class StringTelephoneRepositoryRealtimeTest {
         repo.stopRealtime()
     }
 
+    @Test
+    fun `presence frames carry last-seen into the matching contact`() = runBlocking {
+        val fake = FakeRealtimeStream()
+        val repo = repository(ChatCache(), fake)
+        repo.seedForPreviews(
+            MeResult("alice", "Alice"),
+            listOf(ContactDto("bob", "Bob", "offline")),
+        )
+        repo.startRealtime()
+        fake.emit(RealtimeEvent.Presence("bob", "offline", 7_000, lastSeenEpochMs = 6_000))
+        awaitUntil { repo.contacts.value.contacts.first { it.username == "bob" }.lastSeenEpochMs == 6_000L }
+        val bob = repo.contacts.value.contacts.first { it.username == "bob" }
+        assertEquals("offline", bob.presence)
+        assertEquals(6_000L, bob.lastSeenEpochMs)
+        repo.stopRealtime()
+    }
+
+    @Test
+    fun `a message-read frame from another device clears the unread badge and emits read-elsewhere`() = runBlocking {
+        val cache = ChatCache()
+        val fake = FakeRealtimeStream()
+        val repo = repository(cache, fake)
+        repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
+        repo.startRealtime()
+
+        // A message arrives on this device (unread, badge set).
+        fake.emit(RealtimeEvent.NewMessage("m1", "bob", "alice", "hello", 1_000, "k1"))
+        awaitUntil { repo.unread.value["bob"] == 1 }
+
+        // Another device of alice marked it read; the frame reaches this one too.
+        val readElsewhere = mutableListOf<String>()
+        val collector = launch(Dispatchers.Unconfined) { repo.readElsewhere.collect { readElsewhere += it } }
+        fake.emit(RealtimeEvent.MessageRead(listOf("m1"), 5_000))
+
+        awaitUntil { repo.unread.value.isEmpty() && readElsewhere == listOf("bob") }
+        assertEquals(SendState.READ, cache.history("bob").single().state)
+        assertEquals(5_000L, cache.history("bob").single().readAtEpochMs)
+        collector.cancel()
+        repo.stopRealtime()
+    }
+
     private suspend fun awaitUntil(condition: () -> Boolean) = withTimeout(5_000) {
         while (!condition()) delay(10)
     }

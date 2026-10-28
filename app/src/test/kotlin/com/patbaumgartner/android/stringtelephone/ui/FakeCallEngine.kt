@@ -281,6 +281,7 @@ object PreviewFactory {
         chatReply: Boolean = false,
         chatDeletion: Boolean = false,
         chatVoice: Boolean = false,
+        lastSeen: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
         val conversation: List<Triple<Boolean, String, String>> = when {
@@ -380,11 +381,27 @@ object PreviewFactory {
         )
         container.repository.seedForPreviews(
             me = com.patbaumgartner.android.stringtelephone.network.MeResult("alice", "Alice"),
-            contacts = listOf(
-                com.patbaumgartner.android.stringtelephone.core.ContactDto("bob", "Bob", "online"),
-                com.patbaumgartner.android.stringtelephone.core.ContactDto("carol", "Carol", "offline"),
-                com.patbaumgartner.android.stringtelephone.core.ContactDto("dave", "Dave", "online"),
-            ),
+            contacts = if (lastSeen) {
+                // Phase 13: the offline contact carries a last-seen stamp; a
+                // fixed minute so the rendered label is deterministic. Carol
+                // is "last seen today", dave shows the plain online label.
+                listOf(
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto("bob", "Bob", "online"),
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto(
+                        "carol",
+                        "Carol",
+                        "offline",
+                        lastSeenEpochMs = java.time.Instant.parse("2025-06-13T09:05:00Z").toEpochMilli(),
+                    ),
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto("dave", "Dave", "online"),
+                )
+            } else {
+                listOf(
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto("bob", "Bob", "online"),
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto("carol", "Carol", "offline"),
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto("dave", "Dave", "online"),
+                )
+            },
             unread = mapOf("carol" to 2),
         )
         val viewModel = AppViewModel(container)

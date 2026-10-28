@@ -88,6 +88,17 @@ class StringTelephoneRepository(
     )
     val incomingMessages: SharedFlow<IncomingMessage> = _incoming.asSharedFlow()
 
+    /**
+     * Peers whose messages were marked read by *another* device of this
+     * account (Phase 13): the session layer cancels that conversation's
+     * notification so the shade stays consistent across devices.
+     */
+    private val _readElsewhere = MutableSharedFlow<String>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val readElsewhere: SharedFlow<String> = _readElsewhere.asSharedFlow()
+
     /** The peer who is currently composing; cleared by a 5-second expiry. */
     private val _typingPeer = MutableStateFlow<String?>(null)
     val typingPeer: StateFlow<String?> = _typingPeer.asStateFlow()
@@ -224,7 +235,16 @@ class StringTelephoneRepository(
     }
 
     private fun onMessageRead(event: RealtimeEvent.MessageRead) {
-        chatCache.applyReadReceipt(event.messageIds.toSet(), event.readAtEpochMs)
+        // With several devices signed in, this frame also arrives on devices
+        // that did not perform the mark (the server fans out to both sides,
+        // Phase 13). Applying the receipt clears this device's unread badge
+        // and hands back the affected peers so the notification shade
+        // converges instead of nagging about messages another device showed.
+        val peers = chatCache.applyReadReceiptForPeers(event.messageIds.toSet(), event.readAtEpochMs)
+        if (peers.isNotEmpty()) {
+            _unread.update { counts -> counts - peers }
+            for (peer in peers) _readElsewhere.tryEmit(peer)
+        }
     }
 
     private fun onPresence(event: RealtimeEvent.Presence) {
@@ -232,7 +252,11 @@ class StringTelephoneRepository(
             state.copy(
                 contacts = state.contacts.map {
                     if (it.username == event.username) {
-                        it.copy(presence = event.presence, presenceUpdatedAtEpochMs = event.updatedAtEpochMs)
+                        it.copy(
+                            presence = event.presence,
+                            presenceUpdatedAtEpochMs = event.updatedAtEpochMs,
+                            lastSeenEpochMs = event.lastSeenEpochMs,
+                        )
                     } else {
                         it
                     }

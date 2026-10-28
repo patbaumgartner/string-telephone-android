@@ -34,12 +34,24 @@ class WsHub(
             return
         }
         session.attributes["username"] = user.username
-        if (sessions.open(user.username, session)) presence.publish(user.username)
+        if (sessions.open(user.username, session)) {
+            // First live session: the user is reachable again, so the stored
+            // last-seen no longer describes them (Phase 13).
+            users.clearLastSeen(user.username)
+            presence.publish(user.username)
+        }
     }
 
     override fun afterConnectionClosed(session: WebSocketSession, status: CloseStatus) {
         val username = session.attributes["username"] as? String ?: return
-        if (sessions.close(username, session)) presence.publish(username)
+        if (sessions.close(username, session)) {
+            // Last session gone: stamp when they were last reachable so
+            // contacts can show "last seen ..." (Phase 13). Disabled or
+            // revoked accounts keep their stamp; nobody may fetch it anyway.
+            val user = users.find(username)
+            if (user?.active == true) users.markLastSeen(username, System.currentTimeMillis())
+            presence.publish(username)
+        }
     }
 
     override fun handleTextMessage(session: WebSocketSession, message: TextMessage) {
@@ -103,12 +115,14 @@ class WsHub(
         sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.messageDeleted(message))
 
     /**
-     * Tells the author which messages the reader has read (ADR-0010). The
-     * author turns them into double ticks; the reader learns the receipt from
-     * the response to its own mark.
+     * Tells every device of both participants which messages the reader has
+     * read (ADR-0010, multi-device Phase 13). The author turns them into
+     * double ticks; the reader's *other* devices apply the receipt
+     * idempotently so unread badges converge instead of waiting for their
+     * own next mark response.
      */
-    fun broadcastMessageRead(peer: String, mark: ReadMark) =
-        sessions.send(peer, WsFrames.messageRead(mark))
+    fun broadcastMessageRead(reader: String, author: String, mark: ReadMark) =
+        sessions.sendTo(setOf(reader, author), WsFrames.messageRead(mark))
 }
 
 @Configuration(proxyBeanMethods = false)

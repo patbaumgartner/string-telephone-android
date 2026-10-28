@@ -59,6 +59,7 @@ class SessionController(
         scope.launch { engine.events.collect { onCallEvent(it) } }
         scope.launch { repository.signIn.collect { onSignInState(it) } }
         scope.launch { repository.incomingMessages.collect { onIncomingMessage(it) } }
+        scope.launch { repository.readElsewhere.collect { onReadElsewhere(it) } }
     }
 
     /** Verifies freshly entered credentials; a rejection clears them. */
@@ -198,6 +199,17 @@ class SessionController(
             recentMessages.remove(active)
             AppNotifier.cancelConversation(context, active)
         }
+    }
+
+    /**
+     * Another device of this account marked the conversation read (Phase
+     * 13): drop this device's notification and buffered lines so the shade
+     * matches what the user has already seen elsewhere.
+     */
+    private fun onReadElsewhere(peer: String) {
+        if (repository.isActiveConversation(peer)) return
+        recentMessages.remove(peer)
+        AppNotifier.cancelConversation(context, peer)
     }
 
     private fun showIncomingCall(peer: String, withVideo: Boolean = false) {

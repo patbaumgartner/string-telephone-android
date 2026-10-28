@@ -111,6 +111,12 @@ class ScreenshotTest {
         capture("16-call-video", ScreenshotRoute.CALL_VIDEO)
     }
 
+    /** Contacts with an offline "last seen" row (Phase 13). */
+    @Test
+    fun captureContactsLastSeen() {
+        capture("17-contacts-last-seen", ScreenshotRoute.CONTACTS_LAST_SEEN)
+    }
+
     @Test
     fun captureSettings() {
         capture("05-settings", ScreenshotRoute.SETTINGS)

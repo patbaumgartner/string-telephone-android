@@ -70,7 +70,12 @@ All other API-active identities with derived presence:
 - `"unknown"`: no realtime stream and the PBX could not be queried.
 
 `presenceUpdatedAtEpochMs` is when that state was observed (null when
-unknown). PBX state is cached for about five seconds.
+unknown). PBX state is cached for about five seconds. An offline contact
+also carries `lastSeenEpochMs`: the epoch millisecond at which their last
+realtime session disconnected (or the account was disabled), truncated to
+the minute. It is null (omitted) when the contact is online or has never
+connected — last seen means "was last reachable", never "last clicked",
+and it is derived from connection state only, never app activity.
 
 ```json
 {
@@ -78,7 +83,8 @@ unknown). PBX state is cached for about five seconds.
     "username":"bob",
     "displayName":"Bob",
     "presence":"online",
-    "presenceUpdatedAtEpochMs":1760000000000
+    "presenceUpdatedAtEpochMs":1760000000000,
+    "lastSeenEpochMs":1759901200000
   }]
 }
 ```
@@ -374,7 +380,8 @@ Upgrade `GET /v1/ws` over WSS with the active user token in the
 Invalid credentials close with `1008` immediately after upgrade.
 
 - Multiple sessions per user receive events; a second connection does not
-  disconnect the first.
+  disconnect the first. Events fan out to **all** of a user's sessions, so
+  with several devices signed in, every device sees every event.
 - Server text frames retain the Android envelope:
   `{"type":"new-message","payload":"<JSON string>"}`. Decode `payload` as
   a message record containing `id`, `sender`, `recipient`, `content`,
@@ -386,13 +393,20 @@ Invalid credentials close with `1008` immediately after upgrade.
   connected user when a user's derived presence changes: first/last stream
   opened or closed, or a SIP registration change seen by the periodic PBX
   check (about every 10 seconds). The payload is
-  `{"username":"bob","presence":"online","updatedAt":1760000000000}`.
-  Clients ignore event types they do not know.
+  `{"username":"bob","presence":"online","updatedAt":1760000000000,
+  "lastSeenAt":1759901200000}`. `lastSeenAt` is present only when the user
+  is offline: the millisecond their final realtime session disconnected
+  (minute-granular, null while online or never connected). Clients ignore
+  event types they do not know.
 - `{"type":"message-read","payload":"<JSON string>"}` goes to the author of the
-  messages that were read. The payload is
+  messages that were read **and to the reader's other sessions**, so every
+  device of an account converges on the same read state (Phase 13). The
+  payload is
   `{"messageIds":["uuid"],"readAt":1760000005000}` and lists the messages the
   reader has just read, in conversation order. The author shows them as read;
-  the reader already knows from the response to its own mark.
+  a reader device that did not perform the mark applies it idempotently —
+  clearing its unread badge and cancelling that conversation's notification.
+  Applying a receipt twice is harmless.
 - `{"type":"typing","payload":"<JSON string>"}` is an ephemeral fan-out
   (Phase 7): the client sends `{"typing":true}` or `{"typing":false}` over
   the socket; the server relays it to the sender's conversation partners as
