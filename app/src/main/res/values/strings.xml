@@ -146,6 +146,11 @@
     <string name="notification_keep_alive_title">Ready for calls and messages</string>
     <string name="notification_keep_alive_text">Keeps you reachable while String Telephone is closed.</string>
     <string name="notification_you">You</string>
+    <string name="notification_reply">Reply</string>
+    <string name="notification_mark_read">Mark as read</string>
+    <string name="notification_reply_hint">Reply…</string>
+    <string name="notification_send_failed_title">Message not sent</string>
+    <string name="notification_send_failed_text">Tap to open the conversation and try again.</string>
     <plurals name="cd_unread_messages">
         <item quantity="one">%1$d unread message</item>
         <item quantity="other">%1$d unread messages</item>

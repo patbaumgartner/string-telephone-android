@@ -55,8 +55,12 @@ the existing REST and WebSocket channels.
   unnecessary.
 - **Marking read.** `POST /v1/conversations/{peer}/read` with an optional
   `upToMessageId` marks all the peer's messages up to that ID as read. The
-  endpoint is called only from the foreground chat screen when messages are
-  actually rendered — never from notification handlers or background sync.
+  endpoint is called only when a human actually saw the conversation: from
+  the foreground chat screen while messages are rendered, or from the
+  notification's explicit "Mark as read" action (Phase 14) — the user acted
+  on the notification itself, which is a deliberate act, not an automatic
+  side effect. Notification arrival, background sync and cursor catch-up
+  still never mark anything read on their own.
 - **History.** `GET /v1/conversations/{peer}/messages` responses include
   `readAt` (null when unread) so a freshly syncing client reconstructs ticks
   without extra calls.

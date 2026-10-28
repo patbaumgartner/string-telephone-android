@@ -43,7 +43,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 11 | Voice messages | Large | Done (2026-10-26) | Phase 4 |
 | 12 | Video calls | Large | Done (2026-10-27) | — |
 | 13 | Last-seen & multi-device polish | Medium | Done (2026-10-28) | `V10__last_seen.sql` |
-| 14 | Quick reply from notification | Small | Planned | Phase 5 |
+| 14 | Quick reply from notification | Small | Done (2026-10-28) | — |
 | 15 | Conversation list: previews & search | Medium | Planned | Phase 3 |
 | 16 | Message search | Medium | Planned | Phase 3 |
 | 17 | Message editing | Medium | Planned | Phases 5+10 |
@@ -622,6 +622,7 @@ multi-device fan-out, CHANGELOG.
 ### Phase 14 — Quick reply from notification
 
 **Effort:** Small
+**Status:** Done (2026-10-28)
 Depends on: Phase 5 (read receipts share the marking path).
 
 Message notifications currently have no actions; tapping opens the app
@@ -640,6 +641,18 @@ Message notifications currently have no actions; tapping opens the app
 
 **Tests:** notification action unit tests (Robolectric), RemoteInput round-trip
 with the mocked repository.
+
+**Depends on:** Phase 5 (read receipts share the marking path).
+
+Shipped: `MessageActionReceiver` (RemoteInput extraction → repository send,
+"Mark as read" → `markConversationRead(peer, null)`, failure follow-up
+notification on the message channel, never starts an activity), conversation
+notification gains both actions (semantic actions, no UI), receiver registered
+non-exported in the manifest, five new strings, ADR-0010 amended (the shade
+action is an explicit user act). Tests: `MessageActionReceiverTest` (6
+Robolectric tests over the real repository and container). Oracle:
+`scripts/verify-quick-reply.mjs`, appended to `scripts/run-session-verify.sh`.
+Docs: ADR-0010 marking-read paragraph, feature-plan status, CHANGELOG.
 
 ---
 

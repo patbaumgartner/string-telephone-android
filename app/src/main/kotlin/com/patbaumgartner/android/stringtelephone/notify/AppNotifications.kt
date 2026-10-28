@@ -14,6 +14,7 @@ import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
+import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import com.patbaumgartner.android.stringtelephone.R
 import com.patbaumgartner.android.stringtelephone.ui.MainActivity
@@ -201,7 +202,8 @@ object AppNotifier {
     /**
      * Shows or updates the notification for one conversation. [messages] are
      * the recent unseen (content, epoch ms) pairs from [peer], oldest first;
-     * tapping opens that chat.
+     * tapping opens that chat. Also carries a quick-reply RemoteInput and a
+     * mark-as-read action (Phase 14).
      */
     fun notifyConversation(
         context: Context,
@@ -218,6 +220,30 @@ object AppNotifier {
         )
         for ((content, at) in messages) style.addMessage(content, at, sender)
         val latest = messages.last()
+
+        // Quick-reply: RemoteInput gives an inline text field in the notification
+        // shade; MessageActionReceiver extracts the result and sends it.
+        val replyRemoteInput = MessageActionReceiver.replyRemoteInput(context)
+        val quickReplyAction = NotificationCompat.Action.Builder(
+            R.drawable.ic_message,
+            context.getString(R.string.notification_reply),
+            MessageActionReceiver.quickReplyIntent(context, peer),
+        )
+            .addRemoteInput(replyRemoteInput)
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+            .setShowsUserInterface(false)
+            .build()
+
+        // Mark the conversation as read from the shade.
+        val markReadAction = NotificationCompat.Action.Builder(
+            R.drawable.ic_done,
+            context.getString(R.string.notification_mark_read),
+            MessageActionReceiver.markReadIntent(context, peer),
+        )
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+            .setShowsUserInterface(false)
+            .build()
+
         val notification = NotificationCompat.Builder(context, MESSAGE_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_message)
             .setColor(context.getColor(R.color.notification_accent))
@@ -231,6 +257,8 @@ object AppNotifier {
             .setAutoCancel(true)
             .setOnlyAlertOnce(false)
             .setContentIntent(activityIntent(context, MainActivity.ACTION_OPEN_CHAT, peer, peer.hashCode()))
+            .addAction(quickReplyAction)
+            .addAction(markReadAction)
             .build()
         post(context, peer, MESSAGE_NOTIFICATION_ID, notification)
     }
