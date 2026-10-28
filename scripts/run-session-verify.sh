@@ -29,6 +29,7 @@ node scripts/verify-voice.mjs
 node scripts/verify-video-calls.mjs
 node scripts/verify-last-seen.mjs
 node scripts/verify-quick-reply.mjs
+node scripts/verify-previews.mjs
 node scripts/verify-screenshots.mjs
 
 echo "SESSION-VERIFY-OK"

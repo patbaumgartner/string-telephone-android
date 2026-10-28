@@ -82,6 +82,10 @@ internal object StringTelephoneIcons {
     val Close: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_close)
 
+    /** Search bar of the conversation list (Phase 15). */
+    val Search: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_search)
+
     val Delete: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_delete)
 

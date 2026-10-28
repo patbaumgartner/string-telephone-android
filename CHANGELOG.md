@@ -9,6 +9,13 @@ No public release has been published yet.
 
 ### Changed
 
+- The conversation list shows what each chat's last message was and when it
+  arrived (Phase 15). Rows carry a one-line preview — text, "Photo",
+  "Voice message" or "Message deleted" (ADR-0011's preview rules) — with a
+  relative timestamp using the chat's day-chip buckets: clock time today,
+  weekday within the last week, otherwise the date. A search bar filters
+  conversations locally by display name or username. Conversations without
+  messages keep the presence/last-seen subtitle.
 - Message notifications now offer a quick reply and "Mark as read" directly
   in the shade (Phase 14). The reply field sends through the same repository
   path as the composer — optimistic bubble, client idempotency key, delivery

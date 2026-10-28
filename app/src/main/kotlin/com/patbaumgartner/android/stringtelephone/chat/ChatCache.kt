@@ -76,7 +76,11 @@ data class ChatMessage(
  */
 class ChatCache {
     private val byPeer = LinkedHashMap<String, MutableList<ChatMessage>>()
+
+    // Replay so a collector that subscribes after the last mutation still
+    // sees the affected peers (Phase 15 previews rely on this at startup).
     private val _changes = MutableSharedFlow<String>(
+        replay = 64,
         extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
@@ -88,6 +92,19 @@ class ChatCache {
 
     @Synchronized
     fun history(peer: String): List<ChatMessage> = byPeer[peer].orEmpty().toList()
+
+    /**
+     * The conversation preview (Phase 15): the last message regardless of
+     * state — "message deleted" for tombstones (ADR-0011), media and replies
+     * keep their own text. Null when nothing was exchanged yet. The UI maps
+     * this to a localised label; the cache stays framework-free.
+     */
+    @Synchronized
+    fun preview(peer: String): ChatMessage? = byPeer[peer]?.lastOrNull()
+
+    /** Peers with at least one cached message, insertion-ordered. */
+    @Synchronized
+    fun peers(): List<String> = byPeer.keys.toList()
 
     /** Adds [message] unless one with the same client key is cached; returns whether it was new. */
     @Synchronized
