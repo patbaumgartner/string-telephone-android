@@ -282,6 +282,7 @@ object PreviewFactory {
         chatDeletion: Boolean = false,
         chatVoice: Boolean = false,
         lastSeen: Boolean = false,
+        contactPreviews: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
         val conversation: List<Triple<Boolean, String, String>> = when {
@@ -350,6 +351,48 @@ object PreviewFactory {
                     mediaId = "preview-voice-1",
                     durationMs = 42_000,
                     waveform = VOICE_WAVEFORM,
+                ),
+            )
+        }
+        if (contactPreviews) {
+            // Phase 15: each conversation gets a newest message so the list
+            // rows show previews + timestamps. Fixed 2025 stamps keep the
+            // rendered DATE bucket deterministic on every run (same approach
+            // as the Phase 13 last-seen fixture); the today/weekday buckets
+            // are covered by unit tests instead.
+            cache.append(
+                "bob",
+                com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
+                    serverId = "preview-bob",
+                    clientKey = "preview-bob",
+                    fromMe = false,
+                    content = "See you at the usual place?",
+                    sentAtEpochMs = java.time.Instant.parse("2025-06-13T09:05:00Z").toEpochMilli(),
+                    state = com.patbaumgartner.android.stringtelephone.chat.SendState.READ,
+                ),
+            )
+            cache.append(
+                "carol",
+                com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
+                    serverId = "preview-carol",
+                    clientKey = "preview-carol",
+                    fromMe = false,
+                    content = "",
+                    sentAtEpochMs = java.time.Instant.parse("2025-06-13T09:07:00Z").toEpochMilli(),
+                    state = com.patbaumgartner.android.stringtelephone.chat.SendState.SENT,
+                    type = "IMAGE",
+                    mediaId = "preview-carol-1",
+                ),
+            )
+            cache.append(
+                "dave",
+                com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
+                    serverId = "preview-dave",
+                    clientKey = "preview-dave",
+                    fromMe = true,
+                    content = "Thanks again for yesterday!",
+                    sentAtEpochMs = java.time.Instant.parse("2025-06-01T18:30:00Z").toEpochMilli(),
+                    state = com.patbaumgartner.android.stringtelephone.chat.SendState.READ,
                 ),
             )
         }

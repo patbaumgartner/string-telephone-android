@@ -151,6 +151,11 @@
     <string name="notification_reply_hint">Reply…</string>
     <string name="notification_send_failed_title">Message not sent</string>
     <string name="notification_send_failed_text">Tap to open the conversation and try again.</string>
+    <string name="contacts_search_hint">Search conversations</string>
+    <string name="cd_clear_search">Clear search</string>
+    <string name="preview_deleted">Message deleted</string>
+    <string name="preview_image">Photo</string>
+    <string name="preview_voice">Voice message</string>
     <plurals name="cd_unread_messages">
         <item quantity="one">%1$d unread message</item>
         <item quantity="other">%1$d unread messages</item>

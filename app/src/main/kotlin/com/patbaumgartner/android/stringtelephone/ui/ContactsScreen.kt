@@ -17,12 +17,14 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,10 +56,15 @@ internal fun ContactsScreen(viewModel: AppViewModel, onCall: (String) -> Unit = 
     val contactsState by viewModel.contactsState().collectAsState()
     val account by viewModel.accountState().collectAsState()
     val unread by viewModel.unreadState().collectAsState()
+    val previews by viewModel.previewsState().collectAsState()
     var menuExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     val username = account.me?.username.orEmpty()
     val headerName = account.me?.displayName?.takeIf { it.isNotBlank() }
         ?: username.ifBlank { stringResource(R.string.app_name) }
+    val visibleContacts = remember(contactsState.contacts, searchQuery) {
+        viewModel.filterContacts(contactsState.contacts, searchQuery)
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
@@ -105,6 +112,11 @@ internal fun ContactsScreen(viewModel: AppViewModel, onCall: (String) -> Unit = 
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
         )
+        ContactSearchField(
+            query = searchQuery,
+            onQueryChange = { searchQuery = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp),
+        )
         if (viewModel.callRegistrationFailed) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
                 ErrorNotice(stringResource(R.string.call_registration_failed))
@@ -150,10 +162,11 @@ internal fun ContactsScreen(viewModel: AppViewModel, onCall: (String) -> Unit = 
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp),
             ) {
-                items(contactsState.contacts, key = { it.username }) { contact ->
-                    ContactRow(
+                items(visibleContacts, key = { it.username }) { contact ->
+                    ConversationRow(
                         contact = contact,
                         presence = presenceStatusOf(contact.presence),
+                        preview = previews[contact.username],
                         unreadCount = unread[contact.username] ?: 0,
                         onCall = { onCall(contact.username) },
                         onChat = { viewModel.openChat(contact.username) },
@@ -185,9 +198,34 @@ private fun IncomingCallAccessNotice(access: IncomingCallAccess) {
 }
 
 @Composable
-private fun ContactRow(
+private fun ContactSearchField(query: String, onQueryChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        singleLine = true,
+        placeholder = { Text(stringResource(R.string.contacts_search_hint)) },
+        leadingIcon = { Icon(StringTelephoneIcons.Search, contentDescription = null) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(StringTelephoneIcons.Close, contentDescription = stringResource(R.string.cd_clear_search))
+                }
+            }
+        },
+        shape = RoundedCornerShape(24.dp),
+        modifier = modifier,
+    )
+}
+
+/**
+ * A conversation-list row (Phase 15): name, unread badge, and either the
+ * last-message preview with its relative timestamp or the presence subtitle.
+ */
+@Composable
+private fun ConversationRow(
     contact: com.patbaumgartner.android.stringtelephone.core.ContactDto,
     presence: PresenceStatus,
+    preview: com.patbaumgartner.android.stringtelephone.chat.ChatMessage?,
     unreadCount: Int,
     onCall: () -> Unit,
     onChat: () -> Unit,
@@ -213,15 +251,32 @@ private fun ContactRow(
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                PresenceDot(presence)
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    presenceSubtitle(contact),
-                    color = StringTelephoneTheme.accents.textMuted,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (preview == null) {
+                    PresenceDot(presence)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        presenceSubtitle(contact),
+                        color = StringTelephoneTheme.accents.textMuted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    Text(
+                        previewSubtitle(preview),
+                        color = StringTelephoneTheme.accents.textMuted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        previewTimestamp(preview.sentAtEpochMs),
+                        color = StringTelephoneTheme.accents.textMuted,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
             }
         }
         Spacer(Modifier.width(8.dp))
@@ -239,6 +294,43 @@ private fun ContactRow(
             contentDescription = stringResource(R.string.cd_call),
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
+        )
+    }
+}
+
+/**
+ * The preview line under the name (Phase 15): tombstoned messages preview as
+ * "message deleted", media as a placeholder, replies as their own text —
+ * ADR-0011's preview rules.
+ */
+@Composable
+internal fun previewSubtitle(message: com.patbaumgartner.android.stringtelephone.chat.ChatMessage): String {
+    if (message.deleted) return stringResource(R.string.preview_deleted)
+    return when (message.type) {
+        "IMAGE" -> stringResource(R.string.preview_image)
+        "VOICE" -> stringResource(R.string.preview_voice)
+        else -> message.content
+    }
+}
+
+/**
+ * Relative timestamp for a conversation row (Phase 15): today shows the
+ * clock time, the last week the weekday, anything older the date — the same
+ * buckets as the chat's day chips.
+ */
+@Composable
+internal fun previewTimestamp(epochMs: Long): String {
+    val zone = java.time.ZoneId.systemDefault()
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val zoned = java.time.Instant.ofEpochMilli(epochMs).atZone(zone)
+    return when (previewTimeBucket(epochMs, System.currentTimeMillis(), zone)) {
+        PreviewTimeLabel.TODAY -> zoned.format(
+            java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT).withLocale(locale),
+        )
+        PreviewTimeLabel.YESTERDAY -> stringResource(R.string.chat_yesterday)
+        PreviewTimeLabel.WEEKDAY -> zoned.toLocalDate().dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, locale)
+        PreviewTimeLabel.DATE -> zoned.toLocalDate().format(
+            java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM).withLocale(locale),
         )
     }
 }

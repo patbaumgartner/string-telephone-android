@@ -112,10 +112,23 @@ class StringTelephoneRepository(
     private val drafts = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val historyErrors = java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<Boolean>>()
 
+    private val _previews = MutableStateFlow<Map<String, ChatMessage>>(emptyMap())
+
     init {
         scope.launch {
             chatCache.changes.collect { peer ->
                 chatFlows[peer]?.value = chatCache.history(peer)
+                // Phase 15: refresh this peer's preview alongside its history.
+                // A peer with no cached message (everything hidden locally) is
+                // removed so the row falls back to the presence subtitle.
+                val latest = chatCache.preview(peer)
+                _previews.update { current ->
+                    when {
+                        latest == null -> current - peer
+                        current[peer] == latest -> current
+                        else -> current + (peer to latest)
+                    }
+                }
             }
         }
     }
@@ -558,6 +571,20 @@ class StringTelephoneRepository(
     fun history(peer: String): List<ChatMessage> = chatCache.history(peer)
 
     /**
+     * Conversation previews (Phase 15): one [ChatMessage] per peer — the
+     * newest — refreshed on every cache change. Peers without messages are
+     * absent, so the UI falls back to the presence subtitle.
+     */
+    val previews: StateFlow<Map<String, ChatMessage>> = _previews.asStateFlow()
+
+    /** Filters contacts by name locally (Phase 15); case-insensitive contains. */
+    fun filterContacts(contacts: List<ContactDto>, query: String): List<ContactDto> =
+        if (query.isBlank()) contacts
+        else contacts.filter {
+            it.displayName.contains(query, ignoreCase = true) || it.username.contains(query, ignoreCase = true)
+        }
+
+    /**
      * Sends the ephemeral typing signal (Phase 7). Best effort over the live
      * stream: no retry, no persistence, and a dropped frame is invisible.
      */
@@ -582,6 +609,7 @@ class StringTelephoneRepository(
         _contacts.value = ContactsState()
         _signIn.value = SignInState()
         _unread.value = emptyMap()
+        _previews.value = emptyMap()
         _typingPeer.value = null
         typingExpiryJob?.cancel()
         typingExpiryJob = null

@@ -117,6 +117,12 @@ class ScreenshotTest {
         capture("17-contacts-last-seen", ScreenshotRoute.CONTACTS_LAST_SEEN)
     }
 
+    /** Contacts with message previews, timestamps and unread badges (Phase 15). */
+    @Test
+    fun captureContactsPreviews() {
+        capture("18-contacts-previews", ScreenshotRoute.CONTACTS_PREVIEWS)
+    }
+
     @Test
     fun captureSettings() {
         capture("05-settings", ScreenshotRoute.SETTINGS)

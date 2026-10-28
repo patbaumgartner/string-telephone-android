@@ -44,7 +44,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 12 | Video calls | Large | Done (2026-10-27) | — |
 | 13 | Last-seen & multi-device polish | Medium | Done (2026-10-28) | `V10__last_seen.sql` |
 | 14 | Quick reply from notification | Small | Done (2026-10-28) | — |
-| 15 | Conversation list: previews & search | Medium | Planned | Phase 3 |
+| 15 | Conversation list: previews & search | Medium | Done (2026-10-28) | — |
 | 16 | Message search | Medium | Planned | Phase 3 |
 | 17 | Message editing | Medium | Planned | Phases 5+10 |
 | 18 | Chat list management (pin/mute/archive) | Medium | Planned | — |
@@ -659,6 +659,7 @@ Docs: ADR-0010 marking-read paragraph, feature-plan status, CHANGELOG.
 ### Phase 15 — Conversation list: previews and search
 
 **Effort:** Medium
+**Status:** Done (2026-10-28)
 Depends on Phase 3 (PostgreSQL).
 
 The contacts screen today shows only a name and unread badge. WhatsApp/Signal
@@ -675,6 +676,23 @@ style rows carry a last-message snippet and timestamp.
 
 **Tests:** preview derivation unit tests; screenshot with unread badges and
 previews.
+
+**Depends on:** Phase 3 (PostgreSQL).
+
+Shipped: `ChatCache.preview`/`peers` accessors (framework-free, `changes`
+gains `replay = 64` so a late-subscribing collector sees the last mutation),
+repository `previews: StateFlow<Map<String, ChatMessage>>` mirroring the
+newest message per peer (removed when the last message is hidden locally,
+cleared on sign-out), `filterContacts` (case-insensitive display-name +
+username match), `ContactsScreen` rows showing preview + relative timestamp
+(`PreviewTimeLabel` reusing the day-chip buckets) with the presence/last-seen
+fallback for message-less contacts, search field with clear button,
+`ic_search` drawable. Tests: `ChatCachePreviewTest` (5),
+`StringTelephoneRepositoryPreviewTest` (6), `PreviewTimeTest` (7),
+`ScreenshotTest` 18-contacts-previews (light + dark; fixed June 2025 stamps
+so the DATE bucket renders deterministically). Oracle:
+`scripts/verify-previews.mjs`, appended to `scripts/run-session-verify.sh`.
+Docs: feature-plan status, CHANGELOG.
 
 ---
 

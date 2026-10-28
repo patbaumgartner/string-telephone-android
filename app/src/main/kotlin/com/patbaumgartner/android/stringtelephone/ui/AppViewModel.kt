@@ -269,6 +269,13 @@ class AppViewModel(
 
     fun contactsState(): StateFlow<ContactsState> = repository.contacts
 
+    /** Per-peer newest message for the conversation-list previews (Phase 15). */
+    fun previewsState(): StateFlow<Map<String, ChatMessage>> = repository.previews
+
+    /** Local contact filtering for the conversation list search (Phase 15). */
+    fun filterContacts(contacts: List<ContactDto>, query: String): List<ContactDto> =
+        repository.filterContacts(contacts, query)
+
     fun isSignedIn(): Boolean = container.credentialStore.hasCredentials()
 
     fun signedInUsername(): String? = container.credentialStore.username()
