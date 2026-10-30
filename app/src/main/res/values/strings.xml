@@ -176,6 +176,25 @@
         <item quantity="other">%1$d unread messages</item>
     </plurals>
     <string name="cd_call">Start a call</string>
+    <string name="cd_conversation_options">Conversation options</string>
+    <string name="cd_pinned">Pinned conversation</string>
+    <string name="cd_muted">Muted conversation</string>
+    <string name="conversation_pin">Pin to top</string>
+    <string name="conversation_unpin">Unpin</string>
+    <string name="conversation_mute">Mute</string>
+    <string name="conversation_unmute">Unmute</string>
+    <string name="conversation_archive">Archive</string>
+    <string name="conversation_unarchive">Unarchive</string>
+    <string name="cd_pin">Pin conversation to top</string>
+    <string name="cd_unpin">Unpin conversation</string>
+    <string name="cd_mute_conversation">Mute conversation</string>
+    <string name="cd_unmute_conversation">Unmute conversation</string>
+    <string name="cd_archive_conversation">Archive conversation</string>
+    <string name="cd_unarchive_conversation">Unarchive conversation</string>
+    <plurals name="archived_count">
+        <item quantity="one">Archived (%1$d)</item>
+        <item quantity="other">Archived (%1$d)</item>
+    </plurals>
     <string name="cd_video_call">Start a video call</string>
     <string name="cd_camera_on">Turn the camera on</string>
     <string name="cd_camera_off">Turn the camera off</string>

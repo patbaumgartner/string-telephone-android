@@ -292,6 +292,7 @@ object PreviewFactory {
         chatEdited: Boolean = false,
         chatVoice: Boolean = false,
         lastSeen: Boolean = false,
+        contactsManaged: Boolean = false,
         contactPreviews: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
@@ -436,7 +437,16 @@ object PreviewFactory {
         )
         container.repository.seedForPreviews(
             me = com.patbaumgartner.android.stringtelephone.network.MeResult("alice", "Alice"),
-            contacts = if (lastSeen) {
+            contacts = if (contactsManaged) {
+                // Phase 18: pin/mute/archive flags baked into the contact
+                // rows; the ordering logic splits the list client-side.
+                listOf(
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto("bob", "Bob", "online", pinned = true),
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto("carol", "Carol", "offline", muted = true),
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto("dave", "Dave", "online", archived = true),
+                    com.patbaumgartner.android.stringtelephone.core.ContactDto("erin", "Erin", "offline"),
+                )
+            } else if (lastSeen) {
                 // Phase 13: the offline contact carries a last-seen stamp; a
                 // fixed minute so the rendered label is deterministic. Carol
                 // is "last seen today", dave shows the plain online label.

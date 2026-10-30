@@ -1,5 +1,7 @@
 package com.patbaumgartner.android.stringtelephone.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,13 +23,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,6 +50,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.patbaumgartner.android.stringtelephone.R
 import com.patbaumgartner.android.stringtelephone.core.PresenceStatus
@@ -57,14 +64,12 @@ internal fun ContactsScreen(viewModel: AppViewModel, onCall: (String) -> Unit = 
     val account by viewModel.accountState().collectAsState()
     val unread by viewModel.unreadState().collectAsState()
     val previews by viewModel.previewsState().collectAsState()
+    val conversationStates by viewModel.conversationStates().collectAsState()
     var menuExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     val username = account.me?.username.orEmpty()
     val headerName = account.me?.displayName?.takeIf { it.isNotBlank() }
         ?: username.ifBlank { stringResource(R.string.app_name) }
-    val visibleContacts = remember(contactsState.contacts, searchQuery) {
-        viewModel.filterContacts(contactsState.contacts, searchQuery)
-    }
 
     Column(
         modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
@@ -159,19 +164,65 @@ internal fun ContactsScreen(viewModel: AppViewModel, onCall: (String) -> Unit = 
                 }
             }
         } else {
+            var optionsFor by remember { mutableStateOf<com.patbaumgartner.android.stringtelephone.core.ContactDto?>(null) }
+            val (visible, archived) = viewModel.orderedContacts(contactsState.contacts)
+            val filteredVisible = remember(visible, searchQuery) {
+                viewModel.filterContacts(visible, searchQuery)
+            }
+            val filteredArchived = remember(archived, searchQuery) {
+                viewModel.filterContacts(archived, searchQuery)
+            }
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp),
             ) {
-                items(visibleContacts, key = { it.username }) { contact ->
+                items(filteredVisible, key = { it.username }) { contact ->
                     ConversationRow(
                         contact = contact,
+                        state = conversationStates[contact.username] ?: com.patbaumgartner.android.stringtelephone.core.ConversationStateDto(),
                         presence = presenceStatusOf(contact.presence),
                         preview = previews[contact.username],
                         unreadCount = unread[contact.username] ?: 0,
                         onCall = { onCall(contact.username) },
                         onChat = { viewModel.openChat(contact.username) },
+                        onLongPress = { optionsFor = contact },
                     )
                 }
+                if (filteredArchived.isNotEmpty()) {
+                    item(key = "archived-header") {
+                        Text(
+                            pluralStringResource(
+                                R.plurals.archived_count,
+                                filteredArchived.size,
+                                filteredArchived.size,
+                            ),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = StringTelephoneTheme.accents.textMuted,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(filteredArchived, key = { "archived-" + it.username }) { contact ->
+                        ConversationRow(
+                            contact = contact,
+                            state = conversationStates[contact.username] ?: com.patbaumgartner.android.stringtelephone.core.ConversationStateDto(),
+                            presence = presenceStatusOf(contact.presence),
+                            preview = previews[contact.username],
+                            unreadCount = unread[contact.username] ?: 0,
+                            onCall = { onCall(contact.username) },
+                            onChat = { viewModel.openChat(contact.username) },
+                            onLongPress = { optionsFor = contact },
+                        )
+                    }
+                }
+            }
+            optionsFor?.let { contact ->
+                ConversationOptionsSheet(
+                    contact = contact,
+                    state = conversationStates[contact.username] ?: com.patbaumgartner.android.stringtelephone.core.ConversationStateDto(),
+                    onPin = { viewModel.updateConversationState(contact.username, pinned = it, muted = null, archived = null) },
+                    onMute = { viewModel.updateConversationState(contact.username, pinned = null, muted = it, archived = null) },
+                    onArchive = { viewModel.updateConversationState(contact.username, pinned = null, muted = null, archived = it) },
+                    onDismiss = { optionsFor = null },
+                )
             }
         }
     }
@@ -224,19 +275,39 @@ private fun ContactSearchField(query: String, onQueryChange: (String) -> Unit, m
 @Composable
 private fun ConversationRow(
     contact: com.patbaumgartner.android.stringtelephone.core.ContactDto,
+    state: com.patbaumgartner.android.stringtelephone.core.ConversationStateDto,
     presence: PresenceStatus,
     preview: com.patbaumgartner.android.stringtelephone.chat.ChatMessage?,
     unreadCount: Int,
     onCall: () -> Unit,
     onChat: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp)
+            .combinedClickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = onChat,
+                onLongClick = onLongPress,
+                onLongClickLabel = stringResource(R.string.cd_conversation_options),
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (state.pinned) {
+                    Icon(
+                        StringTelephoneIcons.PushPin,
+                        contentDescription = stringResource(R.string.cd_pinned),
+                        tint = StringTelephoneTheme.accents.brand,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
                 Text(
                     contact.displayName,
                     style = MaterialTheme.typography.titleMedium,
@@ -248,6 +319,15 @@ private fun ConversationRow(
                 if (unreadCount > 0) {
                     Spacer(Modifier.width(8.dp))
                     UnreadBadge(unreadCount)
+                }
+                if (state.muted) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        StringTelephoneIcons.NotificationsOff,
+                        contentDescription = stringResource(R.string.cd_muted),
+                        tint = StringTelephoneTheme.accents.textMuted,
+                        modifier = Modifier.size(14.dp),
+                    )
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -335,9 +415,86 @@ internal fun previewTimestamp(epochMs: Long): String {
     }
 }
 
+/**
+ * Long-press options sheet for a conversation row (Phase 18): Pin, Mute,
+ * Archive — each a toggle reflecting the synced state.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun UnreadBadge(count: Int) {
-    val description = pluralStringResource(R.plurals.cd_unread_messages, count, count)
+private fun ConversationOptionsSheet(
+    contact: com.patbaumgartner.android.stringtelephone.core.ContactDto,
+    state: com.patbaumgartner.android.stringtelephone.core.ConversationStateDto,
+    onPin: (Boolean) -> Unit,
+    onMute: (Boolean) -> Unit,
+    onArchive: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(modifier = Modifier.padding(bottom = 24.dp)) {
+            Text(
+                contact.displayName,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(start = 20.dp, bottom = 12.dp),
+            )
+            OptionsSheetToggle(
+                label = stringResource(if (state.pinned) R.string.conversation_unpin else R.string.conversation_pin),
+                description = stringResource(if (state.pinned) R.string.cd_unpin else R.string.cd_pin),
+                icon = StringTelephoneIcons.PushPin,
+                checked = state.pinned,
+                onChecked = { onPin(it) },
+            )
+            OptionsSheetToggle(
+                label = stringResource(if (state.muted) R.string.conversation_unmute else R.string.conversation_mute),
+                description = stringResource(if (state.muted) R.string.cd_unmute_conversation else R.string.cd_mute_conversation),
+                icon = StringTelephoneIcons.NotificationsOff,
+                checked = state.muted,
+                onChecked = { onMute(it) },
+            )
+            OptionsSheetToggle(
+                label = stringResource(if (state.archived) R.string.conversation_unarchive else R.string.conversation_archive),
+                description = stringResource(if (state.archived) R.string.cd_unarchive_conversation else R.string.cd_archive_conversation),
+                icon = StringTelephoneIcons.Unarchive,
+                checked = state.archived,
+                onChecked = { onArchive(it) },
+            )
+        }
+    }
+}
+
+/** One toggle row of the conversation options sheet (Phase 18). */
+@Composable
+private fun OptionsSheetToggle(
+    label: String,
+    description: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    checked: Boolean,
+    onChecked: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = StringTelephoneTheme.accents.brand,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.width(14.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChecked, modifier = Modifier.semantics { contentDescription = description })
+    }
+}
+
+@Composable
+private fun UnreadBadge(count: Int) {    val description = pluralStringResource(R.plurals.cd_unread_messages, count, count)
     Badge(
         containerColor = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,

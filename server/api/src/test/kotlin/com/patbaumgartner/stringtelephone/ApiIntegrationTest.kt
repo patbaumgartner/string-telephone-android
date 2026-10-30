@@ -540,6 +540,75 @@ class ApiIntegrationTest {
             .map { it.jsonObject }.single { it.getValue("id").jsonPrimitive.content == id }
 
     @Test
+    fun `conversation state pins mutes archives and caps pins per user`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val peers = listOf("bob", "carol", "dave", "erin", "frank", "grace")
+        for (peer in peers) server.create(peer, peer.replaceFirstChar { it.uppercase() })
+
+        // Absent state reads as all-false.
+        val empty = Json.parseToJsonElement(server.get("/v1/conversations/bob/state", alice).body()).jsonObject
+        assertEquals(false, empty.getValue("pinned").jsonPrimitive.boolean)
+        assertEquals(false, empty.getValue("muted").jsonPrimitive.boolean)
+        assertEquals(false, empty.getValue("archived").jsonPrimitive.boolean)
+
+        // One update flips one flag; the others stay.
+        val pinned = Json.parseToJsonElement(
+            server.put("/v1/conversations/bob/state", """{"pinned":true}""", alice).body(),
+        ).jsonObject
+        assertEquals(true, pinned.getValue("pinned").jsonPrimitive.boolean)
+        assertEquals(false, pinned.getValue("muted").jsonPrimitive.boolean)
+        assertEquals(false, pinned.getValue("archived").jsonPrimitive.boolean)
+
+        // Contacts carry the caller's state for the list to filter.
+        val contactRow = Json.parseToJsonElement(server.get("/v1/contacts", alice).body()).jsonObject
+            .getValue("contacts").jsonArray.map { it.jsonObject }
+            .single { it.getValue("username").jsonPrimitive.content == "bob" }
+        assertEquals(true, contactRow.getValue("pinned").jsonPrimitive.boolean)
+
+        // A partial update keeps the earlier flags.
+        assertEquals(true, Json.parseToJsonElement(
+            server.put("/v1/conversations/bob/state", """{"muted":true}""", alice).body(),
+        ).jsonObject.getValue("pinned").jsonPrimitive.boolean)
+
+        // The pin cap (5) rejects a sixth pin with 400; unpinning frees a slot.
+        for (peer in listOf("carol", "dave", "erin", "frank")) {
+            assertEquals(200, server.put("/v1/conversations/$peer/state", """{"pinned":true}""", alice).statusCode())
+        }
+        assertEquals(400, server.put("/v1/conversations/grace/state", """{"pinned":true}""", alice).statusCode())
+        assertEquals(200, server.put("/v1/conversations/bob/state", """{"pinned":false}""", alice).statusCode())
+        assertEquals(200, server.put("/v1/conversations/grace/state", """{"pinned":true}""", alice).statusCode())
+
+        // Managing yourself or a stranger fails cleanly.
+        assertEquals(400, server.put("/v1/conversations/alice/state", """{"pinned":true}""", alice).statusCode())
+        assertEquals(404, server.put("/v1/conversations/stranger/state", """{"pinned":true}""", alice).statusCode())
+    }
+
+    @Test
+    fun `an incoming message un-archives the conversation for the recipient`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+
+        // Alice archives her conversation with bob.
+        assertEquals(200, server.put("/v1/conversations/bob/state", """{"archived":true}""", alice).statusCode())
+        assertTrue(Json.parseToJsonElement(server.get("/v1/conversations/bob/state", alice).body())
+            .jsonObject.getValue("archived").jsonPrimitive.boolean)
+
+        // Bob sends: alice's archived flag clears (WhatsApp behaviour).
+        assertEquals(201, server.post("/v1/conversations/alice/messages", """{"recipient":"alice","content":"wake up","clientKey":"ua-1"}""", bob).statusCode())
+        assertFalse(Json.parseToJsonElement(server.get("/v1/conversations/bob/state", alice).body())
+            .jsonObject.getValue("archived").jsonPrimitive.boolean)
+
+        // Muting survives the un-archive: only the archived flag moves.
+        assertEquals(200, server.put("/v1/conversations/bob/state", """{"muted":true,"archived":true}""", alice).statusCode())
+        assertEquals(201, server.post("/v1/conversations/alice/messages", """{"recipient":"alice","content":"ping","clientKey":"ua-2"}""", bob).statusCode())
+        val state = Json.parseToJsonElement(server.get("/v1/conversations/bob/state", alice).body()).jsonObject
+        assertFalse(state.getValue("archived").jsonPrimitive.boolean)
+        assertTrue(state.getValue("muted").jsonPrimitive.boolean)
+    }
+
+    @Test
     fun `PBX outage is explicit pending creation retains one time credentials and retry reconciles desired state`() {
         server.login()
         server.pbx.available = false

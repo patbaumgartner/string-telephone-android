@@ -17,6 +17,7 @@ import com.patbaumgartner.android.stringtelephone.chat.ChatMessage
 import com.patbaumgartner.android.stringtelephone.chat.ImageDownscale
 import com.patbaumgartner.android.stringtelephone.core.CallState
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
+import com.patbaumgartner.android.stringtelephone.core.ConversationStateDto
 import com.patbaumgartner.android.stringtelephone.core.ServerUrlValidation
 import com.patbaumgartner.android.stringtelephone.core.validateServerUrl
 import com.patbaumgartner.android.stringtelephone.data.AccountState
@@ -326,6 +327,13 @@ class AppViewModel(
     fun filterContacts(contacts: List<ContactDto>, query: String): List<ContactDto> =
         repository.filterContacts(contacts, query)
 
+    /**
+     * Phase 18 list rules: pinned float to the top, archived move to the
+     * "Archived" section. Returns (visible, archived).
+     */
+    fun orderedContacts(contacts: List<ContactDto>): Pair<List<ContactDto>, List<ContactDto>> =
+        repository.orderedContacts(contacts, conversationStates().value)
+
     fun isSignedIn(): Boolean = container.credentialStore.hasCredentials()
 
     fun signedInUsername(): String? = container.credentialStore.username()
@@ -397,6 +405,17 @@ class AppViewModel(
     }
 
     fun unreadState(): StateFlow<Map<String, Int>> = repository.unread
+
+    /**
+     * The signed-in user's pin/mute/archive state per peer (Phase 18),
+     * synced from the server through the contacts refresh.
+     */
+    fun conversationStates(): StateFlow<Map<String, ConversationStateDto>> = repository.conversationStates
+
+    /** Applies one flag change (Phase 18); null leaves a flag untouched. */
+    fun updateConversationState(peer: String, pinned: Boolean?, muted: Boolean?, archived: Boolean?) {
+        repository.updateConversationState(peer, pinned, muted, archived)
+    }
 
     /** The username of the peer currently composing, or null when the indicator is hidden. */
     fun typingPeerState(): StateFlow<String?> = repository.typingPeer

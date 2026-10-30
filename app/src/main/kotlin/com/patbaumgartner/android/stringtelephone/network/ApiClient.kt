@@ -2,12 +2,14 @@ package com.patbaumgartner.android.stringtelephone.network
 
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
 import com.patbaumgartner.android.stringtelephone.core.ContactsDto
+import com.patbaumgartner.android.stringtelephone.core.ConversationStateDto
 import com.patbaumgartner.android.stringtelephone.core.MarkReadRequest
 import com.patbaumgartner.android.stringtelephone.core.MarkReadResponseDto
 import com.patbaumgartner.android.stringtelephone.core.MeDto
 import com.patbaumgartner.android.stringtelephone.core.MessageDto
 import com.patbaumgartner.android.stringtelephone.core.MessagesPageDto
 import com.patbaumgartner.android.stringtelephone.core.SendMessageRequest
+import com.patbaumgartner.android.stringtelephone.core.UpdateConversationStateRequest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -130,6 +132,51 @@ class CompanionApiClient(
             if (r.code == 401 || r.code == 403) throw ApiException.Auth
             if (!r.isSuccessful) throw ApiException.Unexpected(r.code)
             json.decodeFromString(ContactsDto.serializer(), r.body.string()).contacts
+        }
+    }
+
+    /**
+     * Reads the signed-in user's pin/mute/archive state for one conversation
+     * (Phase 18); absent state comes back all-false.
+     */
+    fun conversationState(peer: String): ConversationStateDto = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$peer/state")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        response.use { r ->
+            if (r.code == 401 || r.code == 403) throw ApiException.Auth
+            if (r.code == 404) throw ApiException.Protocol("no such user")
+            if (!r.isSuccessful) throw ApiException.Unexpected(r.code)
+            json.decodeFromString(ConversationStateDto.serializer(), r.body.string())
+        }
+    }
+
+    /**
+     * Updates any subset of pin/mute/archive for one conversation (Phase 18);
+     * the response is the full state after the change.
+     */
+    fun updateConversationState(peer: String, pinned: Boolean?, muted: Boolean?, archived: Boolean?): ConversationStateDto = request {
+        val payload = json.encodeToString(
+            UpdateConversationStateRequest.serializer(),
+            UpdateConversationStateRequest(pinned, muted, archived),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$peer/state")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .put(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            if (r.code == 401 || r.code == 403) throw ApiException.Auth
+            if (r.code == 404) throw ApiException.Protocol("no such user")
+            if (r.code == 400) throw ApiException.Protocol("state update rejected")
+            if (!r.isSuccessful) throw ApiException.Unexpected(r.code)
+            json.decodeFromString(ConversationStateDto.serializer(), r.body.string())
         }
     }
 

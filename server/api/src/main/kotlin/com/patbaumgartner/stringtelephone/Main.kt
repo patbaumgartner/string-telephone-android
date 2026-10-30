@@ -49,11 +49,21 @@ class StringTelephoneServer {
     fun presence(pbx: PbxGateway, sessions: WsSessions, users: Users) = Presence(pbx, sessions, users)
 
     @Bean
-    fun messages(jdbcClient: JdbcClient, hub: WsHub) = Messages(jdbcClient, hub::broadcastNewMessage)
+    fun messages(jdbcClient: JdbcClient, hub: WsHub, conversationStates: ConversationStates) =
+        Messages(jdbcClient, onNewMessage = { stored: MessageRecord ->
+            // A new incoming message un-archives the conversation for the
+            // recipient (Phase 18, WhatsApp behaviour) so every device
+            // converges without a client-side round trip.
+            hub.broadcastNewMessage(stored)
+            conversationStates.unarchive(stored.recipient, stored.sender)
+        })
 
     @Bean
     fun reactions(jdbcClient: JdbcClient, messages: Messages, hub: WsHub) =
         Reactions(jdbcClient, messages, hub)
+
+    @Bean
+    fun conversationStates(jdbcClient: JdbcClient) = ConversationStates(jdbcClient)
 
     @Bean
     fun media(jdbcClient: JdbcClient, store: MediaStore) = MediaService(jdbcClient, store)

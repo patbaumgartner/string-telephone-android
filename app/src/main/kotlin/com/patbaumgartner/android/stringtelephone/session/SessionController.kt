@@ -180,6 +180,9 @@ class SessionController(
 
     private fun onIncomingMessage(message: IncomingMessage) {
         if (repository.isActiveConversation(message.peer)) return
+        // Muted conversations (Phase 18) keep their unread badge but raise
+        // no notification, mirroring WhatsApp's mute semantics.
+        if (repository.isMuted(message.peer)) return
         val lines = recentMessages.getOrPut(message.peer) { ArrayDeque() }
         lines.addLast(message)
         while (lines.size > MAX_NOTIFICATION_LINES) lines.removeFirst()
