@@ -249,11 +249,50 @@ class ApiController(
         }
         return messageDto(tombstone!!)
     }
+
+    // ── Editing (Phase 17) ──────────────────────────────────────────────────
+
+    /**
+     * Re-stores the content of one message (Phase 17). Only the author may
+     * edit, there is no time window (consistent with deletion's no-window
+     * decision), and editing a tombstoned message is a `409` — deletes take
+     * precedence. Editing a non-text message (image/voice) is a `409` too:
+     * they carry no editable text. The response is the full updated record;
+     * a `message-edited` event informs both participants' devices.
+     */
+    @PutMapping("/v1/conversations/{peer}/messages/{messageId}")
+    fun editMessage(
+        request: HttpServletRequest,
+        @PathVariable peer: String,
+        @PathVariable messageId: String,
+        @RequestBody body: EditMessageRequest,
+    ): MessageDto {
+        val me = principal(request)
+        val message = messages.findById(messageId)
+            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        if (message.sender != me.username) {
+            throw ApiFailure(HttpStatus.FORBIDDEN, "only the author may edit")
+        }
+        val peerOfMessage = if (message.sender == me.username) message.recipient else message.sender
+        if (peerOfMessage != peer) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "message not in this conversation")
+        }
+        if (message.deleted) {
+            throw ApiFailure(HttpStatus.CONFLICT, "message is deleted")
+        }
+        if (message.type != "TEXT") {
+            throw ApiFailure(HttpStatus.CONFLICT, "only text messages can be edited")
+        }
+        val edited = messages.edit(messageId, me.username, body.content)
+            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        hub.broadcastMessageEdited(edited)
+        return messageDto(edited)
+    }
 }
 
 private fun messageDto(record: MessageRecord, reactions: List<ReactionDto> = emptyList()) =
     MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt, record.type, record.mediaId, record.width, record.height,
-        if (reactions.isEmpty()) null else reactions, record.replyTo, record.deletedAt, record.deletedBy, record.durationMs, record.waveform)
+        if (reactions.isEmpty()) null else reactions, record.replyTo, record.deletedAt, record.deletedBy, record.durationMs, record.waveform, record.editedAt)
 
 /**
  * Normalizes the client's waveform sample list (Phase 11): keeps numeric

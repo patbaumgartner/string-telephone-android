@@ -17,7 +17,7 @@ object WsFrames {
 
     fun newMessage(message: MessageRecord): String =
         Json.encodeToString(WsMessageDto("new-message", Json.encodeToString(
-            WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo, message.deletedAt, message.deletedBy, message.durationMs, message.waveform),
+            WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo, message.deletedAt, message.deletedBy, message.durationMs, message.waveform, message.editedAt),
         )))
 
     /** Read receipt (ADR-0010): the reader opened these messages in the conversation. */
@@ -60,6 +60,22 @@ object WsFrames {
                 peer = if (message.sender == message.deletedBy) message.recipient else message.sender,
                 deletedBy = message.deletedBy ?: "",
                 deletedAt = message.deletedAt ?: 0L,
+            ),
+        )))
+
+    /**
+     * Edited content (Phase 17). Both participants receive the frame; the
+     * payload carries the new content so the peer's devices re-render the
+     * bubble without a history refresh, mirroring `message-deleted`. Only
+     * the author may edit, so the peer is always the recipient.
+     */
+    fun messageEdited(message: MessageRecord): String =
+        Json.encodeToString(WsMessageDto("message-edited", Json.encodeToString(
+            WsMessageEditedEvent(
+                messageId = message.id,
+                peer = message.recipient,
+                content = message.content,
+                editedAt = message.editedAt ?: 0L,
             ),
         )))
 }

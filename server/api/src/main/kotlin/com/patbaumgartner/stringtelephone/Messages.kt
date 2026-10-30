@@ -24,6 +24,8 @@ data class MessageRecord(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
     val waveform: String? = null,
+    /** Epoch ms at which the author last re-stored the content (Phase 17); null when never edited. */
+    val editedAt: Long? = null,
 ) {
     /** True when the message is a tombstone; the content is cleared server-side. */
     val deleted: Boolean get() = deletedAt != null
@@ -43,7 +45,7 @@ class Messages(
 
         /** Every persisted column, in [fromRow] order. */
         private const val SELECT_COLUMNS =
-            "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to, deleted_at, deleted_by, duration_ms, waveform"
+            "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to, deleted_at, deleted_by, duration_ms, waveform, edited_at"
     }
 
     private fun fromRow(rs: java.sql.ResultSet): MessageRecord = MessageRecord(
@@ -63,6 +65,7 @@ class Messages(
         rs.getString("deleted_by"),
         rs.getInt("duration_ms").let { if (rs.wasNull()) null else it },
         rs.getString("waveform"),
+        rs.getLong("edited_at").let { if (rs.wasNull()) null else it },
     )
 
     // A single INSERT ... ON CONFLICT DO NOTHING is atomic by itself; the
@@ -264,5 +267,25 @@ class Messages(
         var statement = db.sql(sql).params(peer, user, user, peer, query)
         if (before != null) statement = statement.param(before.first).param(before.first).param(before.second)
         return statement.param(effectiveLimit).query { rs, _ -> fromRow(rs) }.list()
+    }
+
+    /**
+     * Re-stores the content of one message (Phase 17). Only the author may
+     * edit and only a message still in the conversation: the update matches
+     * the exact sender/recipient pair and stamps `edited_at`. Tombstones are
+     * rejected by the `deleted_at IS NULL` guard, so deletes take
+     * precedence. The read receipt is deliberately preserved (ADR-0010: a
+     * receipt means a human looked; an edit never un-reads a message).
+     */
+    fun edit(messageId: String, author: String, content: String): MessageRecord? {
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        require(content.isNotEmpty()) { "content must not be empty" }
+        require(bytes.size <= MAX_CONTENT_BYTES) { "content too large" }
+        val now = System.currentTimeMillis()
+        db.sql(
+            "UPDATE messages SET content = ?, edited_at = ? " +
+                "WHERE id = ? AND sender = ? AND deleted_at IS NULL",
+        ).params(content, now, messageId, author).update()
+        return findById(messageId)
     }
 }

@@ -120,6 +120,7 @@ internal fun ChatScreen(
     val contactsState by viewModel.contactsState().collectAsState()
     val typingPeer by viewModel.typingPeerState().collectAsState()
     val replyingTo by viewModel.replyingTo.collectAsState()
+    val editingMessage by viewModel.editingMessage.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
     val searching by viewModel.searching.collectAsState()
@@ -270,6 +271,14 @@ internal fun ChatScreen(
                     onDismiss = { viewModel.clearReplyTo() },
                 )
             }
+            // Edit banner above the composer (Phase 17): shows the message
+            // being changed; dismissing restores the preserved draft.
+            editingMessage?.let { editing ->
+                EditMessageBanner(
+                    content = editing.content,
+                    onDismiss = { viewModel.cancelEditing() },
+                )
+            }
             Composer(
                 value = viewModel.chatInput,
                 onValueChange = { viewModel.onChatInputChanged(peer, it) },
@@ -319,6 +328,10 @@ internal fun ChatScreen(
             },
             onDeleteForBoth = {
                 viewModel.deleteMessage(peer, message)
+                replySheetMessage = null
+            },
+            onEdit = {
+                viewModel.startEditing(peer, message)
                 replySheetMessage = null
             },
             onDismiss = { replySheetMessage = null },
@@ -567,9 +580,14 @@ private fun ChatBubble(
         SendState.FAILED -> stringResource(R.string.chat_failed_to_send)
     }
     val sender = stringResource(if (message.fromMe) R.string.chat_from_you else R.string.chat_from_them)
-    val description = listOf(sender, message.content, time, status.takeIf { message.fromMe })
-        .filterNotNull()
-        .joinToString(", ")
+    val editedHint = if (message.editedAtEpochMs != null) stringResource(R.string.chat_edited) else null
+    val description = listOfNotNull(
+        sender,
+        message.content.takeIf { !message.deleted },
+        time,
+        editedHint,
+        status.takeIf { message.fromMe },
+    ).joinToString(", ")
     // Reactions need a server id (ADR-0011): a pending/failed message is not
     // on the server yet, so its bubble keeps only the retry gesture.
     val canReact = viewModel != null && message.serverId != null
@@ -657,6 +675,14 @@ private fun ChatBubble(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(time, style = MaterialTheme.typography.labelSmall, color = colors.meta)
+                        if (message.editedAtEpochMs != null) {
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                stringResource(R.string.chat_edited),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.meta,
+                            )
+                        }
                         if (message.fromMe) {
                             Spacer(Modifier.width(3.dp))
                             Icon(
@@ -1396,6 +1422,54 @@ private fun ReactionPickerDialog(
 }
 
 /**
+ * Edit banner above the composer (Phase 17): mirrors the reply banner —
+ * brand bar, "Editing" label, the message's current content, dismiss.
+ */
+@Composable
+private fun EditMessageBanner(
+    content: String,
+    onDismiss: () -> Unit,
+) {
+    val preview = if (content.length > 60) content.take(57) + "…" else content
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(40.dp)
+                .background(StringTelephoneTheme.accents.brand, RoundedCornerShape(2.dp)),
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                stringResource(R.string.chat_editing),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = StringTelephoneTheme.accents.brand,
+            )
+            Text(
+                preview,
+                style = MaterialTheme.typography.bodySmall,
+                color = StringTelephoneTheme.chat.meta,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+            Icon(
+                StringTelephoneIcons.Close,
+                contentDescription = stringResource(R.string.cd_cancel_edit),
+                tint = StringTelephoneTheme.chat.meta,
+            )
+        }
+    }
+}
+
+/**
  * The reply target shown above the composer when [quoted] is set
  * (ADR-0011, Phase 9). A small surface with author name, content preview
  * and a dismiss button.
@@ -1521,6 +1595,7 @@ private fun ReplyOptionsSheet(
     onReact: () -> Unit,
     onDeleteForMe: () -> Unit,
     onDeleteForBoth: () -> Unit,
+    onEdit: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -1530,6 +1605,40 @@ private fun ReplyOptionsSheet(
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            if (message.canEdit) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    Surface(
+                        onClick = onEdit,
+                        shape = RoundedCornerShape(12.dp),
+                        color = StringTelephoneTheme.chat.incoming.copy(alpha = 0.7f),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(vertical = 16.dp),
+                        ) {
+                            Icon(
+                                StringTelephoneIcons.Edit,
+                                contentDescription = null,
+                                tint = StringTelephoneTheme.accents.brand,
+                                modifier = Modifier.size(28.dp),
+                            )
+                            androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+                            Text(
+                                stringResource(R.string.chat_edit),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = StringTelephoneTheme.chat.onBubble,
+                            )
+                        }
+                    }
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.height(12.dp))
+            }
             Text(
                 stringResource(R.string.reply_to),
                 style = MaterialTheme.typography.titleSmall,

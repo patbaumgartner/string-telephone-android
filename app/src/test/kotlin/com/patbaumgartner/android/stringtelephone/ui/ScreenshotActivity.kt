@@ -74,6 +74,7 @@ class ScreenshotActivity : ComponentActivity() {
                 chatReply = route == ScreenshotRoute.CHAT_REPLY.ordinal,
                 chatDeletion = route == ScreenshotRoute.CHAT_DELETION.ordinal,
                 chatVoice = route == ScreenshotRoute.CHAT_VOICE.ordinal,
+                chatEdited = route == ScreenshotRoute.CHAT_EDITED.ordinal,
                 lastSeen = route == ScreenshotRoute.CONTACTS_LAST_SEEN.ordinal,
                 contactPreviews = route == ScreenshotRoute.CONTACTS_PREVIEWS.ordinal,
             ).apply {
@@ -98,6 +99,7 @@ class ScreenshotActivity : ComponentActivity() {
                         ScreenshotRoute.CHAT_REPLY.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CHAT_DELETION.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CHAT_VOICE.ordinal -> ChatScreen(peer, viewModel)
+                        ScreenshotRoute.CHAT_EDITED.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CALL.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
                         ScreenshotRoute.CALL_VIDEO.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
                         else -> SettingsScreen(viewModel)
@@ -115,4 +117,4 @@ class ScreenshotActivity : ComponentActivity() {
     }
 }
 
-enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION, CHAT_VOICE, CALL_VIDEO, CONTACTS_LAST_SEEN, CONTACTS_PREVIEWS }
+enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION, CHAT_VOICE, CHAT_EDITED, CALL_VIDEO, CONTACTS_LAST_SEEN, CONTACTS_PREVIEWS }

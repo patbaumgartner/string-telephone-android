@@ -155,6 +155,26 @@ remain stable — sync can never resurrect the text.
 - A tombstoned message still satisfies reply references; the client renders
   the quote from its cached copy (ADR-0011).
 
+#### Edit a message
+
+`PUT /v1/conversations/{peer}/messages/{messageId}` re-stores the content of
+one message (Phase 17). Only the author may edit (the server derives the
+editor from the authenticated principal); there is no time window,
+consistent with the deletion decision above.
+
+- Body is `{"content":"new text"}`; the same 8 KiB content cap as sends
+  applies, and a blank body is a `400`.
+- `403` when the caller is not the author, `404` unknown message or a
+  message outside the caller's conversation with `{peer}`, `409` when the
+  message is tombstoned (deletes take precedence) or not a text message.
+- Response `200` is the updated message record including `editedAt`.
+- The read receipt is preserved: an edit never un-reads a message (ADR-0010
+  — a receipt means a human looked at the message).
+- A `message-edited` frame is pushed to both participants
+  (see [Realtime events](#realtime-events-websocket)).
+- Edited text bubbles show an "edited" hint next to the time; the bubble's
+  content description announces it.
+
 #### Image messages
 
 Send `{"type":"IMAGE","recipient":"bob","mediaId":"<id>","clientKey":"..."}`.
@@ -306,6 +326,25 @@ Response `200` — the full reaction list for the message after the change:
 Both participants also receive a `message-reaction` event on the realtime
 stream.
 
+### `PUT /v1/conversations/{peer}/messages/{messageId}`
+Re-stores the content of one message (Phase 17, ADR-0011 pattern: no time
+window, deletes take precedence). Only the author may edit; editing a
+tombstoned message or a non-text message is a `409`. The read receipt is
+preserved (an edit never un-reads a message, ADR-0010). A `message-edited`
+WS event fans to both participants so every device re-renders the bubble
+without a history refresh.
+
+```json
+PUT /v1/conversations/bob/messages/<id>
+{"content": "hello bob"}
+
+200  {"id":"<id>","content":"hello bob","editedAt":1760000001000,…}
+400  (blank/too-large content)
+403  (not the author)
+404  (no such message)
+409  (tombstoned or non-text)
+```
+
 ### `DELETE /v1/conversations/{peer}/messages/{messageId}/reactions`
 
 Removes the caller's reaction. Idempotent: removing when no reaction exists
@@ -452,6 +491,15 @@ Invalid credentials close with `1008` immediately after upgrade.
   deleted the message. Events accelerate but REST history remains
   authoritative: after a reconnect the tombstone also appears in history
   responses (`deletedAt`/`deletedBy` on the message).
+- `{"type":"message-edited","payload":"<JSON string>"}` (Phase 17) is a
+  durable fan-out of an edit. Both conversation participants receive it;
+  the client re-renders the bubble with the new content and the "edited"
+  hint immediately without a history refresh. The payload is
+  `{"messageId":"uuid","peer":"bob","content":"hello","editedAt":1760000001000}`;
+  `peer` is always the recipient (only the author edits), `editedAt` is the
+  edit epoch millisecond. The read receipt is untouched, and events
+  accelerate but REST history remains authoritative (`editedAt` also
+  appears on the message in history responses).
 - Client frames do not create messages. Use the HTTP send endpoint.
 - Disable/reset closes all user streams with `1008`.
 

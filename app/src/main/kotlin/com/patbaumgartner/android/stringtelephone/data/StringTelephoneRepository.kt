@@ -220,6 +220,7 @@ class StringTelephoneRepository(
             is RealtimeEvent.Typing -> onTyping(event)
             is RealtimeEvent.MessageReaction -> onMessageReaction(event)
             is RealtimeEvent.MessageDeleted -> onMessageDeleted(event)
+            is RealtimeEvent.MessageEdited -> onMessageEdited(event)
             is RealtimeEvent.Unknown -> Unit
         }
     }
@@ -230,6 +231,11 @@ class StringTelephoneRepository(
 
     private fun onMessageDeleted(event: RealtimeEvent.MessageDeleted) {
         chatCache.applyDeleted(event.messageId, event.deletedAtEpochMs, event.deletedBy)
+    }
+
+    /** Applies an edit (Phase 17) to the cached bubble: new content + hint timestamp. */
+    private fun onMessageEdited(event: RealtimeEvent.MessageEdited) {
+        chatCache.applyEdited(event.messageId, event.content, event.editedAtEpochMs)
     }
 
     /** Resets the 5-second UI expiry whenever a new typing signal arrives. */
@@ -566,6 +572,28 @@ class StringTelephoneRepository(
      */
     fun deleteForMe(peer: String, message: ChatMessage) {
         chatCache.hideLocally(peer, message.clientKey)
+    }
+
+    /**
+     * Edits a text message the user authored (Phase 17): optimistic content
+     * swap in the cache, then the PUT. A failure rolls the content back —
+     * history reload reconciles, mirroring the delete path.
+     */
+    fun editMessage(peer: String, message: ChatMessage, newContent: String) {
+        val serverId = message.serverId ?: return
+        chatCache.applyEdited(serverId, newContent, System.currentTimeMillis())
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: return@launch
+            try {
+                withContext(Dispatchers.IO) { client.editMessage(peer, serverId, newContent) }
+                ensureActive()
+            } catch (_: ApiException) {
+                ensureActive()
+                // Roll the optimistic edit back; history load reconciles.
+                chatCache.applyEdited(serverId, message.content, 0L)
+                loadHistory(peer, _account.value.me?.username ?: return@launch)
+            }
+        }
     }
 
     fun history(peer: String): List<ChatMessage> = chatCache.history(peer)

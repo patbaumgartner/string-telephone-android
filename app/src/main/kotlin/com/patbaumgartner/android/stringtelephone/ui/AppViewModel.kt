@@ -97,6 +97,14 @@ class AppViewModel(
     private val _replyingTo = MutableStateFlow<ChatMessage?>(null)
     val replyingTo: StateFlow<ChatMessage?> = _replyingTo.asStateFlow()
 
+    /**
+     * The message being edited (Phase 17); null when no edit is in progress.
+     * The compose box switches to edit mode: prefilled with the original
+     * content, sending applies the edit instead of a new message.
+     */
+    private val _editingMessage = MutableStateFlow<ChatMessage?>(null)
+    val editingMessage: StateFlow<ChatMessage?> = _editingMessage.asStateFlow()
+
     fun messagesFor(peer: String): StateFlow<List<ChatMessage>> = repository.chatFlow(peer)
 
     // ── In-chat search (Phase 16) ────────────────────────────────────────────
@@ -334,7 +342,39 @@ class AppViewModel(
 
     /** Sets the message being replied to; shown as a quoted banner (ADR-0011, Phase 9). */
     fun setReplyingTo(message: ChatMessage?) {
+        if (message != null) _editingMessage.value = null
         _replyingTo.value = message
+    }
+
+    /**
+     * Enters edit mode (Phase 17): the compose box is prefilled with the
+     * message's current content; sending applies the edit. Starting an edit
+     * cancels an in-progress reply, mirroring the other direction.
+     */
+    fun startEditing(message: ChatMessage) {
+        _replyingTo.value = null
+        _editingMessage.value = message
+        peerOfEditingDraft = null
+        chatInput = message.content
+    }
+
+    /**
+     * Enters edit mode for a message in [peer]'s conversation (Phase 17).
+     * Remembers the peer so cancelling restores that conversation's draft.
+     */
+    fun startEditing(peer: String, message: ChatMessage) {
+        peerOfEditingDraft = peer
+        startEditing(message)
+    }
+
+    /** Peer whose draft the compose box restores after an edit; set by [startEditing]. */
+    private var peerOfEditingDraft: String? = null
+
+    /** Leaves edit mode without applying anything; the preserved draft returns. */
+    fun cancelEditing() {
+        _editingMessage.value = null
+        peerOfEditingDraft?.let { peer -> chatInput = repository.chatDraftFlow(peer).value }
+        peerOfEditingDraft = null
     }
 
     /** Clears the current reply target (ADR-0011, Phase 9). */
@@ -347,6 +387,7 @@ class AppViewModel(
         repository.deleteMessage(peer, message)
         // A pending reply to a deleted message makes no sense; drop the banner.
         if (_replyingTo.value?.clientKey == message.clientKey) _replyingTo.value = null
+        if (_editingMessage.value?.clientKey == message.clientKey) _editingMessage.value = null
     }
 
     /** Hides a message on this device only (ADR-0011, Phase 10). */
@@ -374,6 +415,10 @@ class AppViewModel(
 
     fun onChatInputChanged(peer: String, value: String) {
         chatInput = value
+        // While editing (Phase 17) the compose box holds the edit text, not
+        // the draft: the draft stays preserved, and no typing signal goes to
+        // the peer — an edit is not a new composition.
+        if (_editingMessage.value != null) return
         repository.saveChatDraft(peer, value)
         // Debounce: fire only after 500 ms of no typing.
         typingDebounceJob?.cancel()
@@ -475,6 +520,18 @@ class AppViewModel(
     fun sendCurrent(peer: String) {
         val content = chatInput.trim()
         if (content.isEmpty()) return
+        // Edit mode (Phase 17): apply the edit to the pending message instead
+        // of sending a new one. Leaving edit mode restores the previous draft.
+        val editing = _editingMessage.value
+        if (editing != null) {
+            val previousDraft = repository.chatDraftFlow(peer).value
+            _editingMessage.value = null
+            chatInput = previousDraft
+            if (content != editing.content) {
+                repository.editMessage(peer, editing, content)
+            }
+            return
+        }
         chatInput = ""
         val replyToId = _replyingTo.value?.serverId
         _replyingTo.value = null

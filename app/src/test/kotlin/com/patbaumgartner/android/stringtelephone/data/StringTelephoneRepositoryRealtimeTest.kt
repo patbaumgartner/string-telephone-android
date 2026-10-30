@@ -239,6 +239,26 @@ class StringTelephoneRepositoryRealtimeTest {
     }
 
     @Test
+    fun `an edit frame replaces the content and stamps the edited hint`() = runBlocking {
+        val cache = ChatCache()
+        val fake = FakeRealtimeStream()
+        val repo = repository(cache, fake)
+        repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
+        cache.append("bob", ChatMessage("m1", "k1", false, "helo", 1, SendState.SENT, readAtEpochMs = 5L))
+
+        repo.startRealtime()
+        fake.emit(RealtimeEvent.MessageEdited("m1", "alice", "hello", 99))
+        awaitUntil { cache.history("bob").single().editedAtEpochMs == 99L }
+        val edited = cache.history("bob").single()
+        assertEquals("hello", edited.content)
+        assertEquals(99L, edited.editedAtEpochMs)
+        assertTrue(edited.canEdit == false, "the peer's edit must not make the message editable here")
+        // The read receipt survives the edit (ADR-0010).
+        assertEquals(5L, edited.readAtEpochMs)
+        repo.stopRealtime()
+    }
+
+    @Test
     fun `presence frames carry last-seen into the matching contact`() = runBlocking {
         val fake = FakeRealtimeStream()
         val repo = repository(ChatCache(), fake)

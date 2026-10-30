@@ -272,6 +272,15 @@ object PreviewFactory {
     /** Which preview message is a tombstone, with its deletion stamp. */
     private val DELETIONS: Map<Int, Pair<Long, String>> = mapOf(2 to Pair(1_750_000_000_000L, "alice"))
 
+    private val EDITED_CHAT = listOf(
+        Triple(false, "Are we still on for lunch tomorrow?", "2025-06-13T09:30:00Z"),
+        Triple(true, "Yes! 12:30 at the ramen place", "2025-06-13T09:31:00Z"),
+        Triple(false, "Perfect, see you then", "2025-06-13T09:32:00Z"),
+    )
+
+    /** Which preview message is edited, with its edit stamp (Phase 17). */
+    private val EDITS: Map<Int, Long> = mapOf(1 to 1_750_000_060_000L)
+
     fun viewModel(
         context: Context,
         callEngine: CallEngine = FakeCallEngine(),
@@ -280,6 +289,7 @@ object PreviewFactory {
         chatReactions: Boolean = false,
         chatReply: Boolean = false,
         chatDeletion: Boolean = false,
+        chatEdited: Boolean = false,
         chatVoice: Boolean = false,
         lastSeen: Boolean = false,
         contactPreviews: Boolean = false,
@@ -288,6 +298,7 @@ object PreviewFactory {
         val conversation: List<Triple<Boolean, String, String>> = when {
             chatVoice -> VOICE_CHAT
             chatDeletion -> DELETION_CHAT
+            chatEdited -> EDITED_CHAT
             chatReply -> REPLY_CHAT
             chatReactions -> REACTIONS_CHAT
             chatImage -> IMAGE_CHAT
@@ -296,7 +307,7 @@ object PreviewFactory {
         }
         conversation.forEachIndexed { index, (fromMe, content, at) ->
             val state = when {
-                chatImage || chatReactions || chatReply || chatDeletion || chatVoice -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
+                chatImage || chatReactions || chatReply || chatDeletion || chatVoice || chatEdited -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
                 deliveryStates -> DELIVERY_STATES[index]
                 index == conversation.lastIndex -> com.patbaumgartner.android.stringtelephone.chat.SendState.PENDING
                 index == conversation.lastIndex - 1 -> com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED
@@ -317,6 +328,7 @@ object PreviewFactory {
                     replyToId = if (chatReply) REPLIES[index] else null,
                     deletedAtEpochMs = tombstone?.first,
                     deletedBy = tombstone?.second,
+                    editedAtEpochMs = if (chatEdited) EDITS[index] else null,
                 ),
             )
         }

@@ -40,9 +40,19 @@ data class ChatMessage(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
     val waveform: String? = null,
+    /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
+    val editedAtEpochMs: Long? = null,
 ) {
     /** True when deleted for both sides; the bubble renders a placeholder. */
     val deleted: Boolean get() = deletedAtEpochMs != null
+
+    /**
+     * True when the user may edit this message (Phase 17): only the author,
+     * only text, never a tombstone. The server re-checks everything; this
+     * only gates the UI affordance.
+     */
+    val canEdit: Boolean
+        get() = fromMe && type == "TEXT" && !deleted
 
     companion object {
         fun fromServer(m: com.patbaumgartner.android.stringtelephone.network.MessageResult, myUsername: String): ChatMessage = ChatMessage(
@@ -63,6 +73,7 @@ data class ChatMessage(
             deletedBy = m.deletedBy,
             durationMs = m.durationMs,
             waveform = m.waveform,
+            editedAtEpochMs = m.editedAt,
         )
     }
 }
@@ -256,6 +267,27 @@ class ChatCache {
                 val current = entry.value[index]
                 if (current.deleted) return entry.key
                 entry.value[index] = current.copy(deletedAtEpochMs = deletedAtEpochMs, deletedBy = deletedBy)
+                emit(entry.key)
+                return entry.key
+            }
+        }
+        return null
+    }
+
+    /**
+     * Applies an edit (Phase 17) to the message with the given [serverId]:
+     * new content plus the `edited_at` timestamp. The read receipt and any
+     * reactions stay untouched. Returns the peer to re-emit on, or null if
+     * the message is not cached or already deleted.
+     */
+    @Synchronized
+    fun applyEdited(serverId: String, content: String, editedAtEpochMs: Long): String? {
+        for (entry in byPeer) {
+            val index = entry.value.indexOfFirst { it.serverId == serverId }
+            if (index >= 0) {
+                val current = entry.value[index]
+                if (current.deleted) return entry.key
+                entry.value[index] = current.copy(content = content, editedAtEpochMs = editedAtEpochMs)
                 emit(entry.key)
                 return entry.key
             }

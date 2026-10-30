@@ -76,6 +76,21 @@ class RunningServer(extra: Map<String, String> = emptyMap(), val http: HttpClien
         return http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
 
+    fun put(path: String, body: String, bearer: String? = null): HttpResponse<String> {
+        val builder = HttpRequest.newBuilder(URI("$base$path")).timeout(Duration.ofSeconds(15))
+            .header("Content-Type", "application/json")
+            .PUT(HttpRequest.BodyPublishers.ofString(body))
+        bearer?.let { builder.header("Authorization", "Bearer $it") }
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+    }
+
+    fun delete(path: String, bearer: String? = null): HttpResponse<String> {
+        val builder = HttpRequest.newBuilder(URI("$base$path")).timeout(Duration.ofSeconds(15))
+            .DELETE()
+        bearer?.let { builder.header("Authorization", "Bearer $it") }
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+    }
+
     /** Multipart upload with raw bytes (used for media uploads); returns the raw body bytes. */
     fun postMultipart(path: String, peer: String, fileName: String, contentType: String, bytes: ByteArray, bearer: String): HttpResponse<ByteArray> {
         val boundary = "----stit" + System.nanoTime()

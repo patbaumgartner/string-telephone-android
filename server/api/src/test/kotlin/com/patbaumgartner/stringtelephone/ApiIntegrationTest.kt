@@ -219,7 +219,8 @@ class ApiIntegrationTest {
     private fun assertLastSeenAppears(token: String, username: String): Long {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
         while (System.nanoTime() < deadline) {
-            val value = contact(token, username).jsonObject.getValue("lastSeenEpochMs").jsonPrimitive.longOrNull
+            // The key is absent until the disconnect is stamped; poll, don't throw.
+            val value = contact(token, username).jsonObject["lastSeenEpochMs"]?.jsonPrimitive?.longOrNull
             if (value != null && value > 0) return value
             Thread.sleep(100)
         }
@@ -413,6 +414,102 @@ class ApiIntegrationTest {
             .map { it.jsonObject.getValue("id").jsonPrimitive.content }
         assertEquals(3, ids.size)
         assertEquals(3, ids.toSet().size, "no message may appear on both pages")
+    }
+
+    @Test
+    fun `editing is author-only updates content and fans out a message-edited event`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+
+        val sent = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"helo bob","clientKey":"e-1"}""", alice)
+        assertEquals(201, sent.statusCode(), sent.body())
+        val id = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
+
+        // Bob (not the author) may not edit.
+        assertEquals(403, server.put("/v1/conversations/alice/messages/$id", """{"content":"hacked"}""", bob).statusCode())
+
+        // The author edits; the response is the updated record.
+        val edited = server.put("/v1/conversations/bob/messages/$id", """{"content":"hello bob"}""", alice)
+        assertEquals(200, edited.statusCode(), edited.body())
+        val record = Json.parseToJsonElement(edited.body()).jsonObject
+        assertEquals("hello bob", record.getValue("content").jsonPrimitive.content)
+        val editedAt = record.getValue("editedAt").jsonPrimitive.long
+        assertTrue(editedAt > 0, "editedAt must be stamped")
+
+        // History reflects the edit.
+        val history = Json.parseToJsonElement(server.get("/v1/conversations/bob/messages", alice).body()).jsonObject
+        val row = history.getValue("messages").jsonArray
+            .map { it.jsonObject }
+            .single { it.getValue("id").jsonPrimitive.content == id }
+        assertEquals("hello bob", row.getValue("content").jsonPrimitive.content)
+        assertEquals(editedAt, row.getValue("editedAt").jsonPrimitive.long)
+
+        // Both participants receive the message-edited event with the new content.
+        val aliceEvents = SocketListener()
+        val aliceSocket = connect(alice, aliceEvents)
+        val bobEvents = SocketListener()
+        val bobSocket = connect(bob, bobEvents)
+        assertEquals(200, server.put("/v1/conversations/bob/messages/$id", """{"content":"hello bob, again"}""", alice).statusCode())
+        for (listener in listOf(aliceEvents, bobEvents)) {
+            val envelope = listener.next("message-edited")
+            val payload = Json.parseToJsonElement(envelope.getValue("payload").jsonPrimitive.content).jsonObject
+            assertEquals(id, payload.getValue("messageId").jsonPrimitive.content)
+            assertEquals("hello bob, again", payload.getValue("content").jsonPrimitive.content)
+            assertEquals("bob", payload.getValue("peer").jsonPrimitive.content)
+        }
+        aliceSocket.abort()
+        bobSocket.abort()
+
+        // An empty edit is rejected like an empty send.
+        assertEquals(400, server.put("/v1/conversations/bob/messages/$id", """{"content":""}""", alice).statusCode())
+    }
+
+    @Test
+    fun `editing a tombstoned message conflicts and deleting after editing wins`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        server.create("bob", "Bob")
+
+        val sent = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"to be removed","clientKey":"e-2"}""", alice)
+        assertEquals(201, sent.statusCode())
+        val id = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
+
+        // Edit first, then delete: the tombstone wins and carries no content.
+        assertEquals(200, server.put("/v1/conversations/bob/messages/$id", """{"content":"still there?"}""", alice).statusCode())
+        assertEquals(200, server.delete("/v1/conversations/bob/messages/$id", alice).statusCode())
+
+        // Editing a tombstone is a 409: deletes take precedence.
+        assertEquals(409, server.put("/v1/conversations/bob/messages/$id", """{"content":"revive"}""", alice).statusCode())
+
+        // The tombstone has no content and no revived editedAt bump.
+        val row = Json.parseToJsonElement(server.get("/v1/conversations/bob/messages", alice).body()).jsonObject
+            .getValue("messages").jsonArray.map { it.jsonObject }
+            .single { it.getValue("id").jsonPrimitive.content == id }
+        assertEquals("", row.getValue("content").jsonPrimitive.content)
+        assertNotNull(row.getValue("deletedAt").jsonPrimitive.longOrNull)
+    }
+
+    @Test
+    fun `an edit preserves an existing read receipt instead of un-reading the message`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+
+        val sent = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"read me then edit me","clientKey":"e-3"}""", alice)
+        assertEquals(201, sent.statusCode())
+        val id = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
+
+        // Bob reads the message.
+        assertEquals(200, server.post("/v1/conversations/alice/read", """{"upToMessageId":"$id"}""", bob).statusCode())
+
+        // Alice edits: the read receipt must survive the edit (ADR-0010).
+        assertEquals(200, server.put("/v1/conversations/bob/messages/$id", """{"content":"edited after read"}""", alice).statusCode())
+        val row = Json.parseToJsonElement(server.get("/v1/conversations/bob/messages", alice).body()).jsonObject
+            .getValue("messages").jsonArray.map { it.jsonObject }
+            .single { it.getValue("id").jsonPrimitive.content == id }
+        assertNotNull(row.getValue("readAt").jsonPrimitive.longOrNull, "an edit must not un-read a read message")
+        assertEquals("edited after read", row.getValue("content").jsonPrimitive.content)
     }
 
     @Test
