@@ -13,6 +13,10 @@ data class ContactDto(
     val presenceUpdatedAtEpochMs: Long?,
     /** When the user was last reachable; null while online or never connected (Phase 13). */
     val lastSeenEpochMs: Long? = null,
+    /** The caller's pin/mute/archive state for this conversation (Phase 18). */
+    val pinned: Boolean = false,
+    val muted: Boolean = false,
+    val archived: Boolean = false,
 )
 
 @kotlinx.serialization.Serializable
@@ -181,6 +185,17 @@ data class WsMessageDeletedEvent(
 @kotlinx.serialization.Serializable
 data class EditMessageRequest(
     @field:jakarta.validation.constraints.NotBlank val content: String,
+)
+
+/**
+ * The caller's pin/mute/archive state for one conversation (Phase 18).
+ * Returned by GET/PUT `/v1/conversations/{peer}/state`.
+ */
+@kotlinx.serialization.Serializable
+data class ConversationStateDto(
+    val pinned: Boolean,
+    val muted: Boolean,
+    val archived: Boolean,
 )
 
 /** Edit event pushed on /v1/ws as `{"type":"message-edited"}` (Phase 17). */

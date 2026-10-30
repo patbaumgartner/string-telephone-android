@@ -13,10 +13,30 @@ data class ContactDto(
     val presenceUpdatedAtEpochMs: Long? = null,
     /** When the user was last reachable; null while online or never connected (Phase 13). */
     val lastSeenEpochMs: Long? = null,
+    /** The signed-in user's pin/mute/archive state for this conversation (Phase 18). */
+    val pinned: Boolean = false,
+    val muted: Boolean = false,
+    val archived: Boolean = false,
 )
 
 @Serializable
 data class ContactsDto(val contacts: List<ContactDto>)
+
+/** Reads or updates the caller's pin/mute/archive state for one conversation (Phase 18). */
+@Serializable
+data class ConversationStateDto(
+    val pinned: Boolean = false,
+    val muted: Boolean = false,
+    val archived: Boolean = false,
+)
+
+/** PUT body of `/v1/conversations/{peer}/state`; null leaves the flag unchanged. */
+@Serializable
+data class UpdateConversationStateRequest(
+    val pinned: Boolean? = null,
+    val muted: Boolean? = null,
+    val archived: Boolean? = null,
+)
 
 @Serializable
 data class MessageDto(

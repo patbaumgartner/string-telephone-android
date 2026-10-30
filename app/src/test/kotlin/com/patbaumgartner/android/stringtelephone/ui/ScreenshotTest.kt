@@ -134,6 +134,17 @@ class ScreenshotTest {
         capture("18-contacts-previews", ScreenshotRoute.CONTACTS_PREVIEWS)
     }
 
+    /** Pin/mute/archive state on the conversation list (Phase 18). */
+    @Test
+    fun captureContactsManaged() {
+        capture("19-contacts-managed", ScreenshotRoute.CONTACTS_MANAGED)
+    }
+
+    @org.junit.Test
+    fun captureDarkContactsManaged() {
+        capture("dark-contacts-managed", ScreenshotRoute.CONTACTS_MANAGED, dark = true)
+    }
+
     @Test
     fun captureSettings() {
         capture("05-settings", ScreenshotRoute.SETTINGS)

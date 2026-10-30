@@ -154,8 +154,9 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    `verify-typing.mjs`, `verify-reactions.mjs`, `verify-reply.mjs`,
    `verify-deletion.mjs`, `verify-voice.mjs`, `verify-video-calls.mjs`,
    `verify-last-seen.mjs`, `verify-quick-reply.mjs`, `verify-previews.mjs`,
-   `verify-search.mjs`, `verify-edit.mjs` and `verify-screenshots.mjs`
-   run from the gate ledgers; the last ten are
+   `verify-search.mjs`, `verify-edit.mjs`, `verify-conversation-state.mjs`
+   and `verify-screenshots.mjs`
+   run from the gate ledgers; the last eleven are
    also appended to `scripts/run-session-verify.sh`
    (`verify-screenshots.mjs` needs the suite's `app/build/screenshots`).
 3. Live prototype: `scripts/test-prototype.sh` (Docker) proves REGISTER,

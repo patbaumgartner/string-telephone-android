@@ -4,6 +4,7 @@ import com.patbaumgartner.android.stringtelephone.chat.ChatCache
 import com.patbaumgartner.android.stringtelephone.chat.ChatMessage
 import com.patbaumgartner.android.stringtelephone.chat.SendState
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
+import com.patbaumgartner.android.stringtelephone.core.ConversationStateDto
 import com.patbaumgartner.android.stringtelephone.core.RealtimeEvent
 import com.patbaumgartner.android.stringtelephone.core.newMessageClientKey
 import com.patbaumgartner.android.stringtelephone.network.ApiException
@@ -82,6 +83,14 @@ class StringTelephoneRepository(
     /** Unread incoming messages per peer; a peer's count resets when its chat is shown. */
     val unread: StateFlow<Map<String, Int>> = _unread.asStateFlow()
 
+    // ── Conversation state (Phase 18: pin/mute/archive) ─────────────────────
+
+    /** Pin/mute/archive per peer, as the server reports it; all devices agree. */
+    private val _conversationStates = MutableStateFlow<Map<String, ConversationStateDto>>(emptyMap())
+
+    /** The signed-in user's conversation state per peer (Phase 18). */
+    val conversationStates: StateFlow<Map<String, ConversationStateDto>> = _conversationStates.asStateFlow()
+
     private val _incoming = MutableSharedFlow<IncomingMessage>(
         extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -156,6 +165,10 @@ class StringTelephoneRepository(
         _account.value = AccountState(me = me)
         _contacts.value = ContactsState(contacts = contacts)
         _unread.value = unread
+        // Phase 18: the contact rows carry the pin/mute/archive state.
+        _conversationStates.value = contacts.associate {
+            it.username to ConversationStateDto(it.pinned, it.muted, it.archived)
+        }
     }
 
     fun signInAndLoad(expectedUsername: String? = null) {
@@ -307,6 +320,16 @@ class StringTelephoneRepository(
         )
         val added = chatCache.append(peer, message)
         if (!added || message.fromMe) return
+        // A new incoming message un-archives the conversation (Phase 18,
+        // WhatsApp behaviour) so it reappears in the main list. The server
+        // does the same on its side; this keeps an offline device in sync.
+        if (_conversationStates.value[peer]?.archived == true) {
+            _conversationStates.value = _conversationStates.value + (peer to ConversationStateDto(
+                pinned = _conversationStates.value[peer]?.pinned ?: false,
+                muted = _conversationStates.value[peer]?.muted ?: false,
+                archived = false,
+            ))
+        }
         if (peer != activeConversation) {
             _unread.update { it + (peer to (it[peer] ?: 0) + 1) }
         }
@@ -329,6 +352,42 @@ class StringTelephoneRepository(
         _unread.update { it - peer }
     }
 
+    /**
+     * Updates the signed-in user's pin/mute/archive state for [peer]
+     * (Phase 18). Optimistic: the local map moves first so the list reorders
+     * instantly; a failure rolls back to the previous flags and re-throws so
+     * the caller can surface it.
+     */
+    fun updateConversationState(peer: String, pinned: Boolean?, muted: Boolean?, archived: Boolean?) {
+        val previous = _conversationStates.value[peer] ?: ConversationStateDto()
+        val optimistic = ConversationStateDto(
+            pinned = pinned ?: previous.pinned,
+            muted = muted ?: previous.muted,
+            archived = archived ?: previous.archived,
+        )
+        _conversationStates.value = _conversationStates.value + (peer to optimistic)
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: return@launch
+            try {
+                val saved = withContext(Dispatchers.IO) { client.updateConversationState(peer, pinned, muted, archived) }
+                ensureActive()
+                _conversationStates.value = _conversationStates.value + (peer to saved)
+            } catch (e: ApiException) {
+                ensureActive()
+                _conversationStates.value = _conversationStates.value + (peer to previous)
+                throw e
+            }
+        }
+    }
+
+    /** True when [peer] is muted (Phase 18): notifications suppressed, badges stay. */
+    fun isMuted(peer: String): Boolean = _conversationStates.value[peer]?.muted ?: false
+
+    /** Applies a server-side state snapshot (e.g. from contacts refresh). */
+    fun seedConversationStates(states: Map<String, ConversationStateDto>) {
+        _conversationStates.value = states
+    }
+
     fun reportSignInError(error: SignInError) {
         _signIn.value = SignInState(error = error)
     }
@@ -341,6 +400,11 @@ class StringTelephoneRepository(
                 val list = withContext(Dispatchers.IO) { client.contacts() }
                 ensureActive()
                 _contacts.value = ContactsState(contacts = list)
+                // The contact rows carry the caller's pin/mute/archive state
+                // (Phase 18), so one request syncs both.
+                _conversationStates.value = list.associate {
+                    it.username to ConversationStateDto(it.pinned, it.muted, it.archived)
+                }
             } catch (e: ApiException) {
                 ensureActive()
                 _contacts.value = _contacts.value.copy(loading = false, error = e.message)
@@ -645,6 +709,30 @@ class StringTelephoneRepository(
         else contacts.filter {
             it.displayName.contains(query, ignoreCase = true) || it.username.contains(query, ignoreCase = true)
         }
+
+    /**
+     * Applies the Phase 18 list rules to one contact list (framework-free,
+     * unit-tested):
+     *  - pinned conversations float to the top, newest activity first
+     *    (the server list already arrives newest-activity-first);
+     *  - archived conversations are dropped — the caller renders them in
+     *    the separate "Archived" section via [archivedContacts].
+     *
+     * Within each group the relative order is preserved.
+     */
+    fun orderedContacts(
+        contacts: List<ContactDto>,
+        states: Map<String, ConversationStateDto>,
+    ): Pair<List<ContactDto>, List<ContactDto>> {
+        val stateOf = { contact: ContactDto ->
+            states[contact.username] ?: ConversationStateDto(contact.pinned, contact.muted, contact.archived)
+        }
+        val archived = contacts.filter { stateOf(it).archived }
+        val visible = contacts.filter { !stateOf(it).archived }
+        val pinned = visible.filter { stateOf(it).pinned }
+        val rest = visible.filter { !stateOf(it).pinned }
+        return Pair(pinned + rest, archived)
+    }
 
     /**
      * Sends the ephemeral typing signal (Phase 7). Best effort over the live

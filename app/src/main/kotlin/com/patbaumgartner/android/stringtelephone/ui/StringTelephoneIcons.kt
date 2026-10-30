@@ -93,6 +93,18 @@ internal object StringTelephoneIcons {
     val Edit: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_edit)
 
+    /** Pin marker of a pinned conversation row (Phase 18). */
+    val PushPin: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_push_pin)
+
+    /** Mute marker of a muted conversation row (Phase 18). */
+    val NotificationsOff: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_notifications_off)
+
+    /** Archive action of the conversation options sheet (Phase 18). */
+    val Unarchive: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_unarchive)
+
     /** Placeholder while a chat image loads (Phase 6). */
     val Image: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_image)

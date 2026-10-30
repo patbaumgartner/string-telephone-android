@@ -9,6 +9,12 @@ No public release has been published yet.
 
 ### Changed
 
+- Conversations can be pinned, muted and archived (Phase 18). Long-press a
+  conversation row to open the options sheet. Pinned chats float to the
+  top (up to five), muted chats keep their unread badge but raise no
+  notification, and archived chats move behind an "Archived" entry — a new
+  incoming message brings an archived chat back. The state is stored on
+  the server, so every device agrees.
 - Sent text messages can now be edited (Phase 17). Long-press one of your
   own messages and pick "Edit"; the compose box switches to edit mode and
   sending applies the change. Edited bubbles show an "edited" hint next to

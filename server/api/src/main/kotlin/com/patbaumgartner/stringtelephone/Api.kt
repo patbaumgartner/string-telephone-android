@@ -20,6 +20,7 @@ class ApiController(
     private val hub: WsHub,
     private val media: MediaService,
     private val reactions: Reactions,
+    private val conversationStates: ConversationStates,
 ) {
     @GetMapping("/health")
     fun health() = mapOf("status" to "ok")
@@ -57,10 +58,56 @@ class ApiController(
         val me = principal(request)
         val contacts = users.list().filter { it.active && it.username != me.username }
         val states = presence.all(contacts.map { it.username })
+        val conversationState = conversationStates.all(me.username).associateBy { it.peer }
         return ContactsDto(contacts.map {
             val state = states.getValue(it.username)
-            ContactDto(it.username, it.displayName, state.presence, state.observedAtEpochMs, state.lastSeenAtEpochMs)
+            val own = conversationState[it.username]
+            ContactDto(
+                it.username, it.displayName, state.presence, state.observedAtEpochMs, state.lastSeenAtEpochMs,
+                own?.pinned ?: false, own?.muted ?: false, own?.archived ?: false,
+            )
         })
+    }
+
+    // ── Conversation state (Phase 18: pin/mute/archive) ─────────────────────
+
+    /**
+     * Reads the caller's state for one conversation. Absent state is all
+     * defaults (`false`), so a fresh conversation needs no row.
+     */
+    @GetMapping("/v1/conversations/{peer}/state")
+    fun conversationState(request: HttpServletRequest, @PathVariable peer: String): ConversationStateDto {
+        val me = principal(request)
+        if (users.find(peer) == null) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
+        val record = conversationStates.find(me.username, peer)
+        return ConversationStateDto(
+            record?.pinned ?: false,
+            record?.muted ?: false,
+            record?.archived ?: false,
+        )
+    }
+
+    /**
+     * Updates the caller's state for one conversation (Phase 18): pin,
+     * mute, archive — any subset, one endpoint. The server derives the user
+     * from the authenticated principal; the peer must exist. Pinning beyond
+     * [ConversationStates.MAX_PINNED] is a `400`.
+     */
+    @PutMapping("/v1/conversations/{peer}/state")
+    fun updateConversationState(
+        request: HttpServletRequest,
+        @PathVariable peer: String,
+        @RequestBody body: ConversationStateUpdate,
+    ): ConversationStateDto {
+        val me = principal(request)
+        if (peer == me.username) throw ApiFailure(HttpStatus.BAD_REQUEST, "cannot manage yourself")
+        if (users.find(peer)?.active != true) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
+        val record = try {
+            conversationStates.update(me.username, peer, body)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "too many pinned conversations")
+        }
+        return ConversationStateDto(record.pinned, record.muted, record.archived)
     }
 
     @GetMapping("/v1/conversations/{peer}/messages")

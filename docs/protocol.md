@@ -84,9 +84,42 @@ and it is derived from connection state only, never app activity.
     "displayName":"Bob",
     "presence":"online",
     "presenceUpdatedAtEpochMs":1760000000000,
-    "lastSeenEpochMs":1759901200000
+    "lastSeenEpochMs":1759901200000,
+    "pinned":false,
+    "muted":false,
+    "archived":false
   }]
 }
+```
+
+Each row also carries the caller's own conversation state for that peer
+(Phase 18): `pinned`, `muted`, `archived` — false when the pair has no
+stored state, so a fresh account needs no extra round trip.
+
+### Conversation state: `GET`/`PUT /v1/conversations/{peer}/state`
+
+Per-user pin/mute/archive (Phase 18), stored server-side so all devices of
+an account agree. GET returns the state (absent state reads as all-false);
+PUT updates any subset — `null` leaves a flag unchanged — and returns the
+full state after the change.
+
+- `pinned` sorts the conversation into the pinned top group of the chat
+  list; at most 5 conversations can be pinned per user, a sixth pin is a
+  `400`.
+- `muted` suppresses notification fan-out to the user's devices (the app
+  skips the shade for muted peers); unread badges are unaffected.
+- `archived` hides the conversation behind the "Archived" list section. A
+  new incoming message un-archives it for the recipient (WhatsApp
+  behaviour) — applied server-side on the send path, and the app mirrors
+  it locally so an offline device converges too.
+- `404` unknown peer, `400` managing yourself; both endpoints derive the
+  user from the authenticated principal, never from a body field.
+
+```json
+PUT /v1/conversations/bob/state
+{"pinned":true}
+
+200 {"pinned":true,"muted":false,"archived":false}
 ```
 
 ### `POST /v1/conversations/{peer}/messages`

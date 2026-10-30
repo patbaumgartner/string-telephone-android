@@ -100,7 +100,7 @@ check('ViewModel — filterContacts delegates to the repository', viewModel.incl
 // ── UI: rows, timestamps, search ─────────────────────────────────────────────
 
 check('ContactsScreen — rows use ConversationRow with preview', contacts.includes('ConversationRow(') && contacts.includes('preview = previews[contact.username]'));
-check('ContactsScreen — list renders the filtered contacts', contacts.includes('items(visibleContacts, key = { it.username })'));
+check('ContactsScreen — list renders the filtered contacts', contacts.includes('items(filteredVisible, key = { it.username })') || contacts.includes('items(visibleContacts, key = { it.username })'));
 check('ContactsScreen — no messages falls back to the presence subtitle', contacts.includes('if (preview == null)'));
 check('ContactsScreen — preview text follows ADR-0011 rules', contacts.includes('message.deleted) return stringResource(R.string.preview_deleted)') && contacts.includes('"IMAGE" -> stringResource(R.string.preview_image)') && contacts.includes('"VOICE" -> stringResource(R.string.preview_voice)'));
 check('ContactsScreen — timestamps use the PreviewTimeLabel buckets', contacts.includes('previewTimeBucket(epochMs, System.currentTimeMillis(), zone)') && contacts.includes('PreviewTimeLabel.YESTERDAY -> stringResource(R.string.chat_yesterday)'));

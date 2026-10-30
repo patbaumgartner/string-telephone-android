@@ -47,7 +47,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 15 | Conversation list: previews & search | Medium | Done (2026-10-28) | — |
 | 16 | Message search | Medium | Done (2026-10-28) | `V11__message_search.sql` |
 | 17 | Message editing | Medium | Done (2026-10-30) | `V12__message_editing.sql` |
-| 18 | Chat list management (pin/mute/archive) | Medium | Planned | — |
+| 18 | Chat list management (pin/mute/archive) | Medium | Done (2026-10-30) | `V13__conversation_state.sql` |
 | 19 | Group chats | Large | Planned | Phase 3 |
 
 Deferred indefinitely: end-to-end encryption, push notifications. The group-chat
@@ -770,6 +770,7 @@ Screenshot: `16-chat-edited.png` + dark variant.
 ### Phase 18 — Chat list management (pin/mute/archive)
 
 **Effort:** Medium
+**Status:** Done (2026-10-30)
 
 Conversation-level state, stored per user (the server stores it on the user's
 record so all devices agree):
@@ -784,6 +785,21 @@ record so all devices agree):
 
 **Tests:** state-transition unit tests; list-ordering tests; screenshot with
 pinned/muted/archived states.
+
+Shipped: V13 migration (`user_conversation_state`, PK username+peer,
+all flags default false), `ConversationStates` store (lazy upsert, pin cap
+5 via 400, `unarchive` used by the send-path fan-out so an incoming
+message un-archives for the recipient), `GET`/`PUT
+/v1/conversations/{peer}/state`, contacts rows enriched with the caller's
+own `pinned`/`muted`/`archived`, core `ConversationStateDto` +
+`UpdateConversationStateRequest` + extended `ContactDto`, ApiClient
+`conversationState`/`updateConversationState`, repository state map synced
+from contacts, optimistic update with rollback, client-side un-archive on
+incoming, `orderedContacts` (pinned top preserving order, archived out),
+ViewModel exposure, contacts UI: long-press options sheet (pin/mute/
+archive toggles), pin + mute indicators on rows, "Archived" section,
+mute gate in SessionController (no shade for muted peers, badges stay).
+Screenshot: `19-contacts-managed.png` + dark variant.
 
 ---
 
