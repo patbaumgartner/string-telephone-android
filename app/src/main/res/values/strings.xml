@@ -151,11 +151,21 @@
     <string name="notification_reply_hint">Reply…</string>
     <string name="notification_send_failed_title">Message not sent</string>
     <string name="notification_send_failed_text">Tap to open the conversation and try again.</string>
-    <string name="contacts_search_hint">Search conversations</string>
-    <string name="cd_clear_search">Clear search</string>
     <string name="preview_deleted">Message deleted</string>
     <string name="preview_image">Photo</string>
     <string name="preview_voice">Voice message</string>
+    <string name="contacts_search_hint">Search conversations</string>
+    <string name="cd_open_search">Search in this conversation</string>
+    <string name="cd_close_search">Close search</string>
+    <string name="cd_clear_search">Clear search</string>
+    <string name="chat_search_hint">Search in this chat</string>
+    <string name="chat_searching">Searching…</string>
+    <string name="chat_search_no_results">No matches</string>
+    <string name="chat_search_from_me">You</string>
+    <plurals name="chat_search_results">
+        <item quantity="one">%1$d result</item>
+        <item quantity="other">%1$d results</item>
+    </plurals>
     <plurals name="cd_unread_messages">
         <item quantity="one">%1$d unread message</item>
         <item quantity="other">%1$d unread messages</item>

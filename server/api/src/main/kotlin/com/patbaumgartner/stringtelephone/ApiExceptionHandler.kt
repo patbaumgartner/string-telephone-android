@@ -32,12 +32,22 @@ class ApiExceptionHandler {
     fun rateLimited(error: RateLimited): ResponseEntity<ProblemDetail> =
         problem(HttpStatus.TOO_MANY_REQUESTS, error.message ?: "Too many attempts")
 
+    /** A missing mandatory query parameter (e.g. search `q`) is client error, not a crash. */
+    @ExceptionHandler(
+        org.springframework.web.bind.MissingServletRequestParameterException::class,
+        org.springframework.web.method.annotation.MethodArgumentTypeMismatchException::class,
+    )
+    fun badParameter(error: Exception): ResponseEntity<ProblemDetail> =
+        problem(HttpStatus.BAD_REQUEST, "invalid or missing parameter")
+
     /** Unhandled errors: log with a trace, answer without one. */
     @ExceptionHandler(Exception::class)
     fun unexpected(error: Exception): ResponseEntity<ProblemDetail> {
         log.error("Unhandled request failure", error)
         return problem(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error")
     }
+
+    /** Unhandled errors: log with a trace, answer without one. */
 
     private fun problem(status: HttpStatus, detail: String): ResponseEntity<ProblemDetail> {
         val body = ProblemDetail.forStatusAndDetail(status, detail)

@@ -84,6 +84,34 @@ class ApiController(
         )
     }
 
+    /**
+     * Full-text search within one conversation (Phase 16). The scoping is
+     * identical to the history endpoint, so a caller only ever searches
+     * their own conversations; pagination and cursor semantics match too.
+     */
+    @GetMapping("/v1/conversations/{peer}/search")
+    fun search(
+        request: HttpServletRequest,
+        @PathVariable peer: String,
+        @RequestParam q: String,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "50") limit: Int,
+    ): MessagesPageDto {
+        val me = principal(request)
+        if (users.find(peer) == null) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
+        if (q.isBlank()) throw ApiFailure(HttpStatus.BAD_REQUEST, "empty query")
+        val before = cursor?.let {
+            decodeMessageCursor(it) ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "invalid cursor")
+        }
+        val rows = messages.search(me.username, peer, q, before, limit)
+        val messageIds = rows.map { it.id }
+        val reactionsMap = if (messageIds.isNotEmpty()) reactions.listForMessages(messageIds) else emptyMap()
+        return MessagesPageDto(
+            rows.map { messageDto(it, reactionsMap[it.id].orEmpty()) },
+            rows.lastOrNull()?.let { encodeMessageCursor(it.createdAt, it.id) },
+        )
+    }
+
     @PostMapping("/v1/conversations/{peer}/messages")
     fun send(request: HttpServletRequest, @PathVariable peer: String, @RequestBody body: SendMessageRequest): ResponseEntity<MessageDto> {
         val me = principal(request)

@@ -9,6 +9,13 @@ No public release has been published yet.
 
 ### Changed
 
+- Chats now have full-text search (Phase 16). A magnifier in the chat header
+  opens a search bar; results list the matching messages newest-first and a
+  tap jumps to the message in the timeline. Matching is case-insensitive
+  (PostgreSQL `simple` tsvector, diacritics kept as typed), quoted phrases
+  and `OR`/minus syntax work, tombstones never match, and the scope is
+  always the authenticated pair's conversation — enforced server-side, with
+  the same cursor pagination as history.
 - The conversation list shows what each chat's last message was and when it
   arrived (Phase 15). Rows carry a one-line preview — text, "Photo",
   "Voice message" or "Message deleted" (ADR-0011's preview rules) — with a

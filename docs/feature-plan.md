@@ -45,7 +45,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 13 | Last-seen & multi-device polish | Medium | Done (2026-10-28) | `V10__last_seen.sql` |
 | 14 | Quick reply from notification | Small | Done (2026-10-28) | — |
 | 15 | Conversation list: previews & search | Medium | Done (2026-10-28) | — |
-| 16 | Message search | Medium | Planned | Phase 3 |
+| 16 | Message search | Medium | Done (2026-10-28) | `V11__message_search.sql` |
 | 17 | Message editing | Medium | Planned | Phases 5+10 |
 | 18 | Chat list management (pin/mute/archive) | Medium | Planned | — |
 | 19 | Group chats | Large | Planned | Phase 3 |
@@ -699,6 +699,7 @@ Docs: feature-plan status, CHANGELOG.
 ### Phase 16 — Message search
 
 **Effort:** Medium
+**Status:** Done (2026-10-28)
 Depends on Phase 3 (PostgreSQL full-text search).
 
 - Server: `GET /v1/search?peer=&q=` over the messages table using PostgreSQL
@@ -711,6 +712,22 @@ Depends on Phase 3 (PostgreSQL full-text search).
 
 **Tests:** server search endpoint tests (match, no-match, other-user access
 denied); app scroll-to-result logic unit tests.
+
+**Depends on:** Phase 3 (PostgreSQL full-text search).
+
+Shipped: V11 migration (generated `search_text` tsvector over `content`,
+`simple` config — case-folded, diacritics kept; GIN index), `Messages.search`
+(scoped like history, `websearch_to_tsquery`, history-cursor pagination,
+blank-query guard), `GET /v1/conversations/{peer}/search` endpoint,
+exception handler maps missing/malformed params to `400` instead of `500`,
+ApiClient `search`, repository one-shot paginated search, ViewModel
+search state (cancel-previous, close resets), chat header search toggle +
+`ChatSearchBar` + `ChatSearchResults`, `timelineIndexOf` scroll-to-result
+via `LazyListState.animateScrollToItem`. Search text normalisation (open
+decision 4) resolved: `simple`, documented in the V11 migration and
+protocol.md. Tests: server 43 (+2 integration: scope/no-match/blank/404 and
+cursor pagination), app 190 (+3 `ChatTimelineIndexTest`). Docs: protocol
+search section, feature-plan status, CHANGELOG.
 
 ---
 

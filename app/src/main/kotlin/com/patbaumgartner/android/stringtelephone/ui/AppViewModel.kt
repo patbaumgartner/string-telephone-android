@@ -38,6 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -95,6 +96,47 @@ class AppViewModel(
      */
     private val _replyingTo = MutableStateFlow<ChatMessage?>(null)
     val replyingTo: StateFlow<ChatMessage?> = _replyingTo.asStateFlow()
+
+    fun messagesFor(peer: String): StateFlow<List<ChatMessage>> = repository.chatFlow(peer)
+
+    // ── In-chat search (Phase 16) ────────────────────────────────────────────
+
+    private val _searchResults = MutableStateFlow<List<ChatMessage>>(emptyList())
+
+    /** Newest-first search results for the open chat; empty until a search ran. */
+    val searchResults: StateFlow<List<ChatMessage>> = _searchResults.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _searching = MutableStateFlow(false)
+    val searching: StateFlow<Boolean> = _searching.asStateFlow()
+
+    private var searchJob: Job? = null
+
+    /** Runs an in-chat search (Phase 16); a newer query cancels the older one. */
+    fun searchInChat(peer: String, query: String) {
+        _searchQuery.value = query
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            _searchResults.value = emptyList()
+            _searching.value = false
+            return
+        }
+        _searching.value = true
+        searchJob = viewModelScope.launch {
+            _searchResults.value = repository.search(peer, query)
+            _searching.value = false
+        }
+    }
+
+    /** Closes the in-chat search; query and results reset (Phase 16). */
+    fun closeSearch() {
+        searchJob?.cancel()
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+        _searching.value = false
+    }
 
     /** Why the last outgoing call failed; the call screen explains it before returning. */
     var callFailure by mutableStateOf<CallFailure?>(null)
@@ -325,8 +367,6 @@ class AppViewModel(
             ?.displayName
             ?.takeIf { it.isNotBlank() }
             ?: username
-
-    fun messagesFor(peer: String): StateFlow<List<ChatMessage>> = repository.chatFlow(peer)
 
     fun historyErrorFor(peer: String): StateFlow<Boolean> = repository.historyErrorFlow(peer)
 

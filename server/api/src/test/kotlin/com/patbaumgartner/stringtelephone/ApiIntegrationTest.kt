@@ -342,6 +342,80 @@ class ApiIntegrationTest {
     }
 
     @Test
+    fun `message search finds matches only inside the authenticated conversation`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        val carol = server.create("carol", "Carol").getValue("apiToken").jsonPrimitive.content
+
+        // Alice ↔ Bob conversation: the only place "pineapple" appears.
+        assertEquals(201, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"pineapple pizza tonight?","clientKey":"s-1"}""", alice).statusCode())
+        assertEquals(201, server.post("/v1/conversations/alice/messages", """{"recipient":"alice","content":"always, bring pineapple","clientKey":"s-2"}""", bob).statusCode())
+        // Alice ↔ Carol: the same words must NOT leak into carol's search scope.
+        assertEquals(201, server.post("/v1/conversations/carol/messages", """{"recipient":"carol","content":"the weather is nice","clientKey":"s-3"}""", alice).statusCode())
+
+        // Case-insensitive match across both directions of the pair.
+        val found = Json.parseToJsonElement(
+            server.get("/v1/conversations/bob/search?q=PINEAPPLE", alice).body(),
+        ).jsonObject.getValue("messages").jsonArray
+        assertEquals(2, found.size, "both directions of the pair must match, case-insensitively")
+
+        // No match: empty page.
+        val none = Json.parseToJsonElement(
+            server.get("/v1/conversations/bob/search?q=kiwi", alice).body(),
+        ).jsonObject
+        assertEquals(0, none.getValue("messages").jsonArray.size)
+
+        // Carol searching her own conversation with alice finds nothing of Bob's.
+        val carolsView = Json.parseToJsonElement(
+            server.get("/v1/conversations/alice/search?q=pineapple", carol).body(),
+        ).jsonObject
+        assertEquals(0, carolsView.getValue("messages").jsonArray.size, "another pair's conversation must not leak")
+
+        // A word that only exists in alice ↔ carol stays there.
+        val weather = Json.parseToJsonElement(
+            server.get("/v1/conversations/carol/search?q=weather", alice).body(),
+        ).jsonObject.getValue("messages").jsonArray
+        assertEquals(1, weather.size)
+
+        // Blank queries are rejected; unknown peers 404.
+        assertEquals(400, server.get("/v1/conversations/bob/search?q=%20", alice).statusCode())
+        assertEquals(404, server.get("/v1/conversations/stranger/search?q=x", alice).statusCode())
+
+        // Tombstones carry no content and never match.
+        assertEquals(400, server.get("/v1/conversations/bob/search", alice).statusCode(), "missing q must be a bad request")
+    }
+
+    @Test
+    fun `message search pagination walks the whole conversation with cursors`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        server.create("bob", "Bob")
+
+        repeat(3) { index ->
+            assertEquals(201, server.post(
+                "/v1/conversations/bob/messages",
+                """{"recipient":"bob","content":"needle number $index","clientKey":"p-$index"}""",
+                alice,
+            ).statusCode())
+        }
+
+        val firstPage = Json.parseToJsonElement(
+            server.get("/v1/conversations/bob/search?q=needle&limit=2", alice).body(),
+        ).jsonObject
+        assertEquals(2, firstPage.getValue("messages").jsonArray.size)
+        val cursor = firstPage.getValue("nextCursor").jsonPrimitive.content
+
+        val secondPage = Json.parseToJsonElement(
+            server.get("/v1/conversations/bob/search?q=needle&limit=2&cursor=$cursor", alice).body(),
+        ).jsonObject
+        val ids = (firstPage.getValue("messages").jsonArray + secondPage.getValue("messages").jsonArray)
+            .map { it.jsonObject.getValue("id").jsonPrimitive.content }
+        assertEquals(3, ids.size)
+        assertEquals(3, ids.toSet().size, "no message may appear on both pages")
+    }
+
+    @Test
     fun `a read mark without a message id reads the whole conversation and the server owns the identity`() {
         server.login()
         val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content

@@ -35,6 +35,15 @@ internal fun chatTimeline(messages: List<ChatMessage>, zone: ZoneId): List<ChatR
     return rows
 }
 
+/**
+ * The timeline row index of a message (Phase 16): search results reference a
+ * message id; the LazyColumn needs its [ChatRow.Bubble] index to scroll
+ * there. Returns null when the message is not in the loaded timeline (not
+ * cached — history pagination may not have reached it).
+ */
+internal fun timelineIndexOf(rows: List<ChatRow>, clientKey: String): Int =
+    rows.indexOfFirst { it is ChatRow.Bubble && it.message.clientKey == clientKey }
+
 internal enum class DayLabel { TODAY, YESTERDAY, WEEKDAY, DATE }
 
 /** Recent days read as words, the last week as weekdays, anything older as a date. */

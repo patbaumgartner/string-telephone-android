@@ -227,4 +227,42 @@ class Messages(
         ).params(now, deletedBy, messageId).update()
         return findById(messageId)
     }
+
+    /**
+     * Full-text search over one conversation (Phase 16). Both directions of
+     * the pair's messages are searched, matching [page]'s scoping; a caller
+     * who is not part of the pair can never see results. Uses the generated
+     * `search_text` tsvector (V11, `simple` config: case-folded, diacritics
+     * kept). Tombstones have no content and never match. Pagination follows
+     * the history cursor exactly (created_at, id descending).
+     */
+    fun search(
+        user: String,
+        peer: String,
+        query: String,
+        before: Pair<Long, String>?,
+        limit: Int,
+    ): List<MessageRecord> {
+        require(query.isNotBlank()) { "query must not be blank" }
+        val effectiveLimit = limit.coerceIn(1, MAX_PAGE)
+        // websearch_to_tsquery parses the user's words the way a search box
+        // behaves elsewhere: quoted phrases, OR, minus-exclusions, no syntax
+        // errors possible (a malformed query yields no matches, not an error).
+        val columns = SELECT_COLUMNS
+        val sql = if (before == null) {
+            "SELECT $columns FROM messages " +
+                "WHERE ((sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?)) " +
+                "AND search_text @@ websearch_to_tsquery('simple', ?) " +
+                "ORDER BY created_at DESC, id DESC LIMIT ?"
+        } else {
+            "SELECT $columns FROM messages " +
+                "WHERE ((sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?)) " +
+                "AND search_text @@ websearch_to_tsquery('simple', ?) " +
+                "AND (created_at < ? OR (created_at = ? AND id < ?)) " +
+                "ORDER BY created_at DESC, id DESC LIMIT ?"
+        }
+        var statement = db.sql(sql).params(peer, user, user, peer, query)
+        if (before != null) statement = statement.param(before.first).param(before.first).param(before.second)
+        return statement.param(effectiveLimit).query { rs, _ -> fromRow(rs) }.list()
+    }
 }
