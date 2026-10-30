@@ -9,6 +9,12 @@ No public release has been published yet.
 
 ### Changed
 
+- Sent text messages can now be edited (Phase 17). Long-press one of your
+  own messages and pick "Edit"; the compose box switches to edit mode and
+  sending applies the change. Edited bubbles show an "edited" hint next to
+  the time (announced to screen readers), the peer's devices update
+  immediately via a `message-edited` event, read receipts survive an edit,
+  and deleting still wins — a deleted message cannot be re-edited.
 - Chats now have full-text search (Phase 16). A magnifier in the chat header
   opens a search bar; results list the matching messages newest-first and a
   tap jumps to the message in the timeline. Matching is case-insensitive

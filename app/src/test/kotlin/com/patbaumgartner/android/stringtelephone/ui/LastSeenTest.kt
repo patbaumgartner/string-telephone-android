@@ -1,6 +1,5 @@
 package com.patbaumgartner.android.stringtelephone.ui
 
-import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -37,11 +36,14 @@ class LastSeenTest {
 
     @Test
     fun `bucket boundaries follow the local calendar day not a fixed window`() {
-        // Just before and just after local midnight on the zone boundary.
-        val today = LocalDate.now(zone)
-        val yesterdayMidnight = today.minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        // Just before and just after local midnight relative to the fixture's
+        // "now" (2026-10-28T16:00Z) — LocalDate.now() here would drift every
+        // day the suite runs and fail on the second day, as caught in
+        // practice on 2026-10-30.
+        val fixtureToday = java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+        val yesterdayMidnight = fixtureToday.minusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
         assertEquals(LastSeenLabel.YESTERDAY, lastSeenBucket(yesterdayMidnight, now, zone))
-        val todayMidnight = today.atStartOfDay(zone).toInstant().toEpochMilli()
+        val todayMidnight = fixtureToday.atStartOfDay(zone).toInstant().toEpochMilli()
         assertEquals(LastSeenLabel.TODAY, lastSeenBucket(todayMidnight, now, zone))
     }
 }

@@ -48,6 +48,8 @@ data class MessageDto(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
     val waveform: String? = null,
+    /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
+    val editedAt: Long? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -133,6 +135,8 @@ data class WsNewMessageEvent(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
     val waveform: String? = null,
+    /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
+    val editedAt: Long? = null,
 )
 
 /** Read-receipt event pushed on /v1/ws as `{"type":"message-read"}` (ADR-0010). */
@@ -171,4 +175,19 @@ data class WsMessageDeletedEvent(
     val peer: String,   // the conversation peer of the deleter
     val deletedBy: String,
     val deletedAt: Long,
+)
+
+/** Re-stores the content of one message (Phase 17). */
+@kotlinx.serialization.Serializable
+data class EditMessageRequest(
+    @field:jakarta.validation.constraints.NotBlank val content: String,
+)
+
+/** Edit event pushed on /v1/ws as `{"type":"message-edited"}` (Phase 17). */
+@kotlinx.serialization.Serializable
+data class WsMessageEditedEvent(
+    val messageId: String,
+    val peer: String,   // the conversation peer of the message (other than the author)
+    val content: String,
+    val editedAt: Long,
 )

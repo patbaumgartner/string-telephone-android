@@ -55,6 +55,18 @@ class RealtimeEventTest {
     }
 
     @Test
+    fun `parses a message-edited envelope into an event`() {
+        val frame = """
+            {"type":"message-edited","payload":"{\"messageId\":\"m1\",\"peer\":\"alice\",\"content\":\"hello\",\"editedAt\":99}"}
+        """.trimIndent()
+        val event = assertIs<RealtimeEvent.MessageEdited>(parseRealtimeEvent(frame))
+        assertEquals("m1", event.messageId)
+        assertEquals("alice", event.peer)
+        assertEquals("hello", event.content)
+        assertEquals(99, event.editedAtEpochMs)
+    }
+
+    @Test
     fun `parses a presence envelope`() {
         val frame = """{"type":"presence","payload":"{\"username\":\"bob\",\"presence\":\"online\",\"updatedAt\":7}"}"""
         assertEquals(RealtimeEvent.Presence("bob", "online", 7), parseRealtimeEvent(frame))

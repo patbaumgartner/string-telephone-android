@@ -48,6 +48,8 @@ data class MessageDto(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
     val waveform: String? = null,
+    /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
+    val editedAt: Long? = null,
 )
 
 /** One emoji reaction: who reacted and when (ADR-0011, Phase 8). */
@@ -75,6 +77,10 @@ data class SendMessageRequest(
 
 @Serializable
 data class MessagesPageDto(val messages: List<MessageDto>, val nextCursor: String?)
+
+/** Re-stores the content of one message (Phase 17). */
+@Serializable
+data class EditMessageRequest(val content: String)
 
 @Serializable
 data class MediaRecordDto(
@@ -126,6 +132,8 @@ data class WsNewMessageDto(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
     val waveform: String? = null,
+    /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
+    val editedAt: Long? = null,
 )
 
 @Serializable
@@ -161,6 +169,15 @@ data class WsMessageDeletedDto(
     val peer: String,
     val deletedBy: String,
     val deletedAt: Long,
+)
+
+/** Edit event payload (Phase 17): the new content plus the edit timestamp. */
+@Serializable
+data class WsMessageEditedDto(
+    val messageId: String,
+    val peer: String,
+    val content: String,
+    val editedAt: Long,
 )
 
 /** Decoded realtime frame; unknown types are reported, malformed frames dropped. */
@@ -229,6 +246,18 @@ sealed interface RealtimeEvent {
         val deletedAtEpochMs: Long,
     ) : RealtimeEvent
 
+    /**
+     * Edited message (Phase 17): the author re-stored the content. The
+     * payload carries the new content so devices re-render the bubble
+     * without a history refresh.
+     */
+    data class MessageEdited(
+        val messageId: String,
+        val peer: String,
+        val content: String,
+        val editedAtEpochMs: Long,
+    ) : RealtimeEvent
+
     data class Unknown(val type: String) : RealtimeEvent
 }
 
@@ -288,6 +317,15 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 peer = event.peer,
                 deletedBy = event.deletedBy,
                 deletedAtEpochMs = event.deletedAt,
+            )
+        }.getOrNull()
+        "message-edited" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsMessageEditedDto.serializer(), envelope.payload)
+            RealtimeEvent.MessageEdited(
+                messageId = event.messageId,
+                peer = event.peer,
+                content = event.content,
+                editedAtEpochMs = event.editedAt,
             )
         }.getOrNull()
         else -> RealtimeEvent.Unknown(envelope.type)

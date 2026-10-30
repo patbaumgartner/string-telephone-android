@@ -115,6 +115,14 @@ class WsHub(
         sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.messageDeleted(message))
 
     /**
+     * Fan-out for an edited message (Phase 17): both participants receive
+     * the frame, so every device re-renders the bubble with the new content
+     * and the "edited" hint immediately, without a history refresh.
+     */
+    fun broadcastMessageEdited(message: MessageRecord) =
+        sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.messageEdited(message))
+
+    /**
      * Tells every device of both participants which messages the reader has
      * read (ADR-0010, multi-device Phase 13). The author turns them into
      * double ticks; the reader's *other* devices apply the receipt

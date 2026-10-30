@@ -141,8 +141,36 @@ class ChatCacheTest {
     }
 
     @Test
-    fun `applyReaction touches only the named server id and reports unknown ids`() {
+    fun `applyEdited replaces content stamps the hint and keeps receipts`() {
         val cache = ChatCache()
+        cache.append("bob", ChatMessage("m1", "k1", true, "helo", 1, SendState.READ, readAtEpochMs = 9L))
+        cache.append("bob", ChatMessage("m2", "k2", false, "from peer", 2, SendState.SENT))
+
+        assertEquals("bob", cache.applyEdited("m1", "hello", 55L))
+        val edited = cache.history("bob").single { it.serverId == "m1" }
+        assertEquals("hello", edited.content)
+        assertEquals(55L, edited.editedAtEpochMs)
+        assertEquals(9L, edited.readAtEpochMs)
+        assertEquals(SendState.READ, edited.state)
+
+        // Idempotence: applying the same edit again changes nothing further.
+        assertEquals("bob", cache.applyEdited("m1", "hello", 55L))
+        assertEquals(1, cache.history("bob").count { it.editedAtEpochMs == 55L })
+
+        // Unknown ids report null; tombstones are left untouched (deletes take
+        // precedence) — the tombstone's peer is returned so callers can
+        // re-emit, exactly like applyDeleted's early return.
+        assertEquals(null, cache.applyEdited("missing", "x", 1L))
+        cache.applyDeleted("m1", 77L, "bob")
+        cache.applyEdited("m1", "revive", 2L)
+        val tombstone = cache.history("bob").single { it.serverId == "m1" }
+        assertTrue(tombstone.deleted)
+        assertEquals("hello", tombstone.content, "the tombstone keeps the last live content")
+        assertEquals(null, tombstone.editedAtEpochMs.takeIf { tombstone.deletedAtEpochMs == 77L && it == 2L })
+    }
+
+    @Test
+    fun `applyReaction touches only the named server id and reports unknown ids`() {        val cache = ChatCache()
         cache.append("bob", ChatMessage("m1", "k1", true, "one", 1, SendState.SENT))
         cache.append("carol", ChatMessage("m2", "k2", false, "two", 2, SendState.SENT))
 

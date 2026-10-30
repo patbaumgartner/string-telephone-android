@@ -89,6 +89,10 @@ internal object StringTelephoneIcons {
     val Delete: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_delete)
 
+    /** Edit action of the long-press sheet (Phase 17). */
+    val Edit: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_edit)
+
     /** Placeholder while a chat image loads (Phase 6). */
     val Image: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_image)

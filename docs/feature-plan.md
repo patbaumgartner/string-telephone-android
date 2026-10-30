@@ -46,7 +46,7 @@ Phases land in this order. Each is small enough for one focused review.
 | 14 | Quick reply from notification | Small | Done (2026-10-28) | — |
 | 15 | Conversation list: previews & search | Medium | Done (2026-10-28) | — |
 | 16 | Message search | Medium | Done (2026-10-28) | `V11__message_search.sql` |
-| 17 | Message editing | Medium | Planned | Phases 5+10 |
+| 17 | Message editing | Medium | Done (2026-10-30) | `V12__message_editing.sql` |
 | 18 | Chat list management (pin/mute/archive) | Medium | Planned | — |
 | 19 | Group chats | Large | Planned | Phase 3 |
 
@@ -734,6 +734,7 @@ search section, feature-plan status, CHANGELOG.
 ### Phase 17 — Message editing
 
 **Effort:** Medium
+**Status:** Done (2026-10-30)
 Depends on: Phase 5 (message state plumbing) and Phase 10 (tombstones share
 the edit-state sync path).
 
@@ -748,6 +749,21 @@ the edit-state sync path).
 
 **Tests:** edit + sync round-trip, edit-then-read interaction, screenshot of
 the edited hint.
+
+Shipped: V12 migration (`edited_at` BIGINT, null when never edited),
+`Messages.edit` (author-guarded UPDATE that preserves the read receipt and
+refuses tombstones), `PUT /v1/conversations/{peer}/messages/{id}` endpoint
+(author-only `403`, tombstone/non-text `409`, blank `400`, unknown `404`),
+`message-edited` WS frame fanned to both participants, core `MessageDto`/
+`WsMessageEditedDto`/`RealtimeEvent.MessageEdited` plumbing, `ApiClient
+.editMessage`, repository edit (optimistic content swap with rollback +
+history reload on failure) and realtime edit handler, `ChatMessage
+.editedAtEpochMs`/`canEdit`, `ChatCache.applyEdited`, ViewModel edit mode
+(`startEditing`/`cancelEditing`, send-applies-edit, draft preserved,
+no typing signal while editing), edit banner above the composer, Edit
+action in the long-press sheet (author/text-only/non-deleted), "edited"
+hint next to the time with a content-description announcement.
+Screenshot: `16-chat-edited.png` + dark variant.
 
 ---
 

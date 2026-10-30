@@ -82,6 +82,17 @@ class ScreenshotTest {
         capture("12-chat-reactions", ScreenshotRoute.CHAT_REACTIONS)
     }
 
+    /** The "edited" hint next to the time of an edited bubble (Phase 17). */
+    @Test
+    fun captureChatEdited() {
+        capture("16-chat-edited", ScreenshotRoute.CHAT_EDITED)
+    }
+
+    @org.junit.Test
+    fun captureDarkChatEdited() {
+        capture("dark-chat-edited", ScreenshotRoute.CHAT_EDITED, dark = true)
+    }
+
     /** A reply quoting a received message (Phase 9, ADR-0011). */
     @Test
     fun captureChatReply() {

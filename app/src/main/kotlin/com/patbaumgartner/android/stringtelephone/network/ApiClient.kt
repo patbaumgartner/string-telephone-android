@@ -53,6 +53,8 @@ data class MessageResult(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
     val waveform: String? = null,
+    /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
+    val editedAt: Long? = null,
 )
 
 data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
@@ -60,7 +62,7 @@ data class MessagesPage(val messages: List<MessageResult>, val nextCursor: Strin
 /** Maps a wire message onto the app-side result, keeping every field in sync in one place. */
 private fun toMessageResult(m: MessageDto) = MessageResult(
     m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId,
-    m.width, m.height, m.reactions ?: emptyList(), m.replyToId, m.deletedAt, m.deletedBy, m.durationMs, m.waveform,
+    m.width, m.height, m.reactions ?: emptyList(), m.replyToId, m.deletedAt, m.deletedBy, m.durationMs, m.waveform, m.editedAt,
 )
 
 class CompanionApiClient(
@@ -351,6 +353,36 @@ class CompanionApiClient(
                 r.code == 404 -> throw ApiException.Protocol("no such message")
                 !r.isSuccessful -> throw ApiException.Unexpected(r.code)
                 else -> json.decodeFromString(MessageDto.serializer(), body).let { m ->
+                    toMessageResult(m)
+                }
+            }
+        }
+    }
+
+    /**
+     * Re-stores the content of one message (Phase 17): PUT with the new
+     * text. The server enforces author-only, no time window, and 409 for
+     * tombstones; the response is the updated record.
+     */
+    fun editMessage(peer: String, messageId: String, content: String): MessageResult = request {
+        val payload = json.encodeToString(
+            com.patbaumgartner.android.stringtelephone.core.EditMessageRequest.serializer(),
+            com.patbaumgartner.android.stringtelephone.core.EditMessageRequest(content),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/conversations/$peer/messages/$messageId")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .put(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such message")
+                r.code == 409 -> throw ApiException.Protocol("message cannot be edited")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(MessageDto.serializer(), r.body.string()).let { m ->
                     toMessageResult(m)
                 }
             }

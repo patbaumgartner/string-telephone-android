@@ -117,6 +117,11 @@
     <string name="chat_react">React</string>
     <string name="chat_reaction_mine">your reaction</string>
     <string name="chat_reply">Reply</string>
+    <string name="chat_edit">Edit</string>
+    <string name="chat_editing">Editing</string>
+    <string name="chat_edited">edited</string>
+    <string name="cd_cancel_edit">Cancel editing</string>
+    <string name="cd_edit">Edit message</string>
     <string name="photo">Photo</string>
     <string name="reply">Reply</string>
     <string name="react">React</string>
