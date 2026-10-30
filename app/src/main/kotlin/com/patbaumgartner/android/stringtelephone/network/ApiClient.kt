@@ -256,6 +256,36 @@ class CompanionApiClient(
     }
 
     /**
+     * Full-text search within one conversation (Phase 16). Same page shape
+     * as [messages]; the server scopes to the authenticated pair, matches
+     * case-insensitively (simple tsvector config) and paginates oldest-first
+     * pages going back in time via [cursor].
+     */
+    fun search(peer: String, query: String, cursor: String?, limit: Int = 50): MessagesPage = request {
+        val url = buildString {
+            append("$baseUrl/v1/conversations/$peer/search?limit=$limit&q=")
+                .append(java.net.URLEncoder.encode(query, "UTF-8"))
+            if (cursor != null) append("&cursor=").append(java.net.URLEncoder.encode(cursor, "UTF-8"))
+        }
+        val response = http.newCall(Request.Builder().url(url).header("Authorization", "Bearer ${tokenProvider()}").get().build()).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("unknown peer")
+                r.code == 400 -> throw ApiException.Protocol("invalid query or cursor")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> {
+                    val page = json.decodeFromString(MessagesPageDto.serializer(), r.body.string())
+                    return@request MessagesPage(
+                        messages = page.messages.map { toMessageResult(it) },
+                        nextCursor = page.nextCursor,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
      * Adds or replaces the caller's reaction on a message (ADR-0011, Phase 8).
      * The response carries the full reaction list for the message after the
      * change, so the caller can update the chips without a history refresh.

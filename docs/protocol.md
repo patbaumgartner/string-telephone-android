@@ -194,7 +194,31 @@ unknown), `waveform` (comma-separated integer amplitudes `0`–`100`, at most 64
 samples, absent for text/image). The same
 fields appear in history responses and in the `new-message` event payload.
 
-### `GET /v1/conversations/{peer}/messages`
+The cursor is URL-safe Base64 of `"<createdAtEpochMs>:<messageId>"`.
+Pagination uses both timestamp and message ID so records sharing a timestamp
+are not skipped. `nextCursor` is null for an empty page; otherwise it identifies
+the last record. Clients deduplicate by message ID.
+
+### `GET /v1/conversations/{peer}/search?q=`
+
+Full-text search within the authenticated pair's conversation (Phase 16),
+newest first. The response shape is identical to the history endpoint
+(`MessagesPageDto` with `nextCursor`), so clients reuse the same cursor
+codec. `limit` behaves the same (default 50, clamped to 1-200); a blank `q`
+is a `400`; an unknown peer is `404`; a caller outside the pair finds
+nothing (the scoping predicate is the same as history's).
+
+Matching is case-insensitive full-text over the message content via a
+generated `search_text` tsvector (V11, PostgreSQL `simple` configuration:
+case-folded, whitespace-normalised, diacritics kept as typed). The query is
+parsed with `websearch_to_tsquery`, so quoted phrases, `OR` and
+minus-exclusions work and a malformed query yields no matches rather than an
+error. Tombstoned messages have no content and never match. A missing `q`
+returns `400`.
+
+```
+GET /v1/conversations/bob/search?q=pineapple
+```
 
 Returns conversation history in both directions, newest first.
 `limit` defaults to 50 and is clamped to 1-200. Optional `cursor` is the

@@ -571,6 +571,40 @@ class StringTelephoneRepository(
     fun history(peer: String): List<ChatMessage> = chatCache.history(peer)
 
     /**
+     * Full-text search in one conversation (Phase 16). Results come back
+     * newest-first from the server; the UI shows them newest-first and jumps
+     * to the tapped message in the timeline. The query must be non-blank;
+     * the scope is the authenticated pair, enforced server-side.
+     */
+    /**
+     * Full-text search in one conversation (Phase 16). Results come back
+     * newest-first from the server; the UI shows them newest-first and jumps
+     * to the tapped message in the timeline. The query must be non-blank;
+     * the scope is the authenticated pair, enforced server-side. All pages
+     * are fetched before returning — search results are a one-shot list,
+     * not an incremental stream.
+     */
+    /**
+     * Full-text search in one conversation (Phase 16). Results come back
+     * newest-first from the server; the UI shows them newest-first and jumps
+     * to the tapped message in the timeline. The query must be non-blank;
+     * the scope is the authenticated pair, enforced server-side. All pages
+     * are fetched before returning — search results are a one-shot list,
+     * not an incremental stream.
+     */
+    suspend fun search(peer: String, query: String): List<ChatMessage> {
+        val client = apiProvider() ?: return emptyList()
+        val all = ArrayList<ChatMessage>()
+        var cursor: String? = null
+        while (true) {
+            val page = runCatching { withContext(Dispatchers.IO) { client.search(peer, query, cursor) } }.getOrNull() ?: break
+            for (m in page.messages) all += ChatMessage.fromServer(m, _account.value.me?.username ?: "")
+            cursor = page.nextCursor ?: break
+        }
+        return all
+    }
+
+    /**
      * Conversation previews (Phase 15): one [ChatMessage] per peer — the
      * newest — refreshed on every cache change. Peers without messages are
      * absent, so the UI falls back to the presence subtitle.

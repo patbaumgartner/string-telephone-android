@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -43,6 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -54,11 +56,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -71,6 +75,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -98,6 +103,7 @@ import java.time.format.FormatStyle
 import java.time.format.TextStyle
 import java.util.Date
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 val LocalViewModel = androidx.compose.runtime.compositionLocalOf<AppViewModel?> { null }
 
@@ -114,8 +120,13 @@ internal fun ChatScreen(
     val contactsState by viewModel.contactsState().collectAsState()
     val typingPeer by viewModel.typingPeerState().collectAsState()
     val replyingTo by viewModel.replyingTo.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    val searching by viewModel.searching.collectAsState()
+    var searchOpen by remember { mutableStateOf(false) }
     val rows = remember(messages) { chatTimeline(messages, ZoneId.systemDefault()) }
     val listState = rememberLazyListState()
+    val jumpScope = rememberCoroutineScope()
     var emojiPickerVisible by remember { mutableStateOf(false) }
     var replySheetMessage by remember { mutableStateOf<ChatMessage?>(null) }
     var pendingReactionMessage by remember { mutableStateOf<ChatMessage?>(null) }
@@ -155,10 +166,47 @@ internal fun ChatScreen(
             contact = contactsState.contacts.firstOrNull { it.username == peer },
             displayName = viewModel.displayNameOf(peer, contactsState.contacts),
             isTyping = typingPeer == peer,
-            onBack = viewModel::backToContacts,
+            searchOpen = searchOpen,
+            onToggleSearch = {
+                searchOpen = !searchOpen
+                if (!searchOpen) viewModel.closeSearch()
+            },
+            onBack = {
+                if (searchOpen) {
+                    searchOpen = false
+                    viewModel.closeSearch()
+                }
+                viewModel.backToContacts()
+            },
             onCall = { onCall(peer) },
             onVideoCall = { onVideoCall(peer) },
         )
+        if (searchOpen) {
+            ChatSearchBar(
+                query = searchQuery,
+                searching = searching,
+                resultCount = searchResults.size,
+                onQueryChange = { viewModel.searchInChat(peer, it) },
+                onClose = {
+                    searchOpen = false
+                    viewModel.closeSearch()
+                },
+            )
+            if (searchResults.isNotEmpty()) {
+                ChatSearchResults(
+                    results = searchResults,
+                    peerDisplayName = viewModel.displayNameOf(peer, contactsState.contacts),
+                    onJump = { message ->
+                        val index = timelineIndexOf(rows, message.clientKey)
+                        if (index >= 0) {
+                            searchOpen = false
+                            viewModel.closeSearch()
+                            jumpScope.launch { listState.animateScrollToItem(index) }
+                        }
+                    },
+                )
+            }
+        }
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -284,6 +332,8 @@ private fun ChatHeader(
     contact: ContactDto?,
     displayName: String,
     isTyping: Boolean = false,
+    searchOpen: Boolean = false,
+    onToggleSearch: () -> Unit = {},
     onBack: () -> Unit,
     onCall: () -> Unit,
     onVideoCall: () -> Unit,
@@ -342,10 +392,114 @@ private fun ChatHeader(
                     tint = StringTelephoneTheme.accents.brand,
                 )
             }
+            IconButton(onClick = onToggleSearch) {
+                Icon(
+                    StringTelephoneIcons.Search,
+                    contentDescription = stringResource(
+                        if (searchOpen) R.string.cd_close_search else R.string.cd_open_search,
+                    ),
+                    tint = StringTelephoneTheme.accents.brand,
+                )
+            }
         }
     }
 }
 
+/**
+ * The in-chat search field (Phase 16): a query box with the running result
+ * count; clearing the text empties the results but keeps the mode open.
+ */
+@Composable
+private fun ChatSearchBar(
+    query: String,
+    searching: Boolean,
+    resultCount: Int,
+    onQueryChange: (String) -> Unit,
+    onClose: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            placeholder = { Text(stringResource(R.string.chat_search_hint)) },
+            leadingIcon = { Icon(StringTelephoneIcons.Search, contentDescription = null) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(StringTelephoneIcons.Close, contentDescription = stringResource(R.string.cd_clear_search))
+                    }
+                }
+            },
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (query.isNotBlank()) {
+            val status = when {
+                searching -> stringResource(R.string.chat_searching)
+                resultCount == 0 -> stringResource(R.string.chat_search_no_results)
+                else -> pluralStringResource(R.plurals.chat_search_results, resultCount, resultCount)
+            }
+            Text(
+                status,
+                style = MaterialTheme.typography.labelSmall,
+                color = StringTelephoneTheme.accents.textMuted,
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Search results (Phase 16): newest first, tap jumps to the message in the
+ * timeline. Results not in the loaded history are still listed but disabled.
+ */
+@Composable
+private fun ChatSearchResults(
+    results: List<ChatMessage>,
+    peerDisplayName: String,
+    onJump: (ChatMessage) -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) {
+            items(results, key = { it.clientKey }) { message ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onJump(message) }
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (message.fromMe) stringResource(R.string.chat_search_from_me) else peerDisplayName,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = StringTelephoneTheme.accents.textMuted,
+                        )
+                        Text(
+                            previewSubtitle(message),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(
+                        StringTelephoneIcons.ArrowBack,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp).rotate(180f),
+                        tint = StringTelephoneTheme.accents.textMuted,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Scrolls the timeline to a search result (Phase 16). When the timeline
+ * contains older messages than the loaded history, jump to the newest end
+ * first; the index exists only if the message is already loaded.
+ */
 /** Decorative initial; the name next to it is what screen readers announce. */
 @Composable
 private fun Avatar(name: String) {
