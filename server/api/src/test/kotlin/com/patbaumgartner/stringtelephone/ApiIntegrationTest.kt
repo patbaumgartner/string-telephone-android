@@ -217,7 +217,9 @@ class ApiIntegrationTest {
     }
 
     private fun assertLastSeenAppears(token: String, username: String): Long {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        // 15s window: CI runners stamp and serve under heavy parallel load;
+        // a 5s window once misclassified delivered state as missing (Phase 19 CI).
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
         while (System.nanoTime() < deadline) {
             // The key is absent until the disconnect is stamped; poll, don't throw.
             val value = contact(token, username).jsonObject["lastSeenEpochMs"]?.jsonPrimitive?.longOrNull
@@ -228,7 +230,7 @@ class ApiIntegrationTest {
     }
 
     private fun waitUntilLastSeenVanishes(token: String, username: String) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
         while (System.nanoTime() < deadline) {
             val value = contact(token, username).jsonObject["lastSeenEpochMs"]?.jsonPrimitive?.longOrNull
             if (value == null) return
@@ -875,11 +877,11 @@ class SocketListener : WebSocket.Listener {
     private val text = StringBuilder()
 
     /** Next envelope of [type]; other event types (e.g. presence) are skipped.
-     *  The window is generous (15s, like the harness HTTP timeout): CI runners
-     *  fan these frames out under heavy parallel load, and a 5s window once
-     *  misclassified a delivered frame as a timeout (Phase 19 CI). */
+     *  The window is generous (30s): CI runners fan these frames out under
+     *  heavy parallel load, and a 5s window once misclassified delivered
+     *  frames as timeouts (Phase 19 CI, two different tests). */
     fun next(type: String): JsonObject {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
         while (true) {
             val remaining = deadline - System.nanoTime()
             val frame = assertNotNull(messages.poll(remaining.coerceAtLeast(0), TimeUnit.NANOSECONDS), "no $type event")
