@@ -874,9 +874,12 @@ class SocketListener : WebSocket.Listener {
     val closed = LinkedBlockingQueue<Int>()
     private val text = StringBuilder()
 
-    /** Next envelope of [type]; other event types (e.g. presence) are skipped. */
+    /** Next envelope of [type]; other event types (e.g. presence) are skipped.
+     *  The window is generous (15s, like the harness HTTP timeout): CI runners
+     *  fan these frames out under heavy parallel load, and a 5s window once
+     *  misclassified a delivered frame as a timeout (Phase 19 CI). */
     fun next(type: String): JsonObject {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
         while (true) {
             val remaining = deadline - System.nanoTime()
             val frame = assertNotNull(messages.poll(remaining.coerceAtLeast(0), TimeUnit.NANOSECONDS), "no $type event")
