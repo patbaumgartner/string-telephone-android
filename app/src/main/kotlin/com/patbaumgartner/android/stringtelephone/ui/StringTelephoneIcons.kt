@@ -24,6 +24,9 @@ internal object StringTelephoneIcons {
     val MoreHoriz: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_more_horiz)
 
+    val Group: ImageVector
+        @Composable get() = ImageVector.vectorResource(R.drawable.ic_group)
+
     val MicOff: ImageVector
         @Composable get() = ImageVector.vectorResource(R.drawable.ic_mic_off)
 

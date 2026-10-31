@@ -1,14 +1,21 @@
 package com.patbaumgartner.android.stringtelephone.network
 
+import com.patbaumgartner.android.stringtelephone.core.AddGroupMemberRequest
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
 import com.patbaumgartner.android.stringtelephone.core.ContactsDto
 import com.patbaumgartner.android.stringtelephone.core.ConversationStateDto
+import com.patbaumgartner.android.stringtelephone.core.CreateGroupRequest
+import com.patbaumgartner.android.stringtelephone.core.GroupDto
+import com.patbaumgartner.android.stringtelephone.core.GroupMessagesPageDto
 import com.patbaumgartner.android.stringtelephone.core.MarkReadRequest
 import com.patbaumgartner.android.stringtelephone.core.MarkReadResponseDto
 import com.patbaumgartner.android.stringtelephone.core.MeDto
 import com.patbaumgartner.android.stringtelephone.core.MessageDto
 import com.patbaumgartner.android.stringtelephone.core.MessagesPageDto
+import com.patbaumgartner.android.stringtelephone.core.RenameGroupRequest
+import com.patbaumgartner.android.stringtelephone.core.SendGroupMessageRequest
 import com.patbaumgartner.android.stringtelephone.core.SendMessageRequest
+import com.patbaumgartner.android.stringtelephone.core.SetReactionRequest
 import com.patbaumgartner.android.stringtelephone.core.UpdateConversationStateRequest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -57,6 +64,10 @@ data class MessageResult(
     val waveform: String? = null,
     /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
     val editedAt: Long? = null,
+    /** Group conversation this message belongs to (Phase 19); null for pairwise. */
+    val groupId: String? = null,
+    /** How many members read this group message (Phase 19); null for pairwise. */
+    val readCount: Int? = null,
 )
 
 data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
@@ -65,6 +76,7 @@ data class MessagesPage(val messages: List<MessageResult>, val nextCursor: Strin
 private fun toMessageResult(m: MessageDto) = MessageResult(
     m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId,
     m.width, m.height, m.reactions ?: emptyList(), m.replyToId, m.deletedAt, m.deletedBy, m.durationMs, m.waveform, m.editedAt,
+    m.groupId, m.readCount,
 )
 
 class CompanionApiClient(
@@ -466,6 +478,290 @@ class CompanionApiClient(
                 r.code == 400 -> throw ApiException.Protocol("invalid read mark")
                 !r.isSuccessful -> throw ApiException.Unexpected(r.code)
                 else -> json.decodeFromString(MarkReadResponseDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    // ── Group chats (Phase 19, ADR-0012) ────────────────────────────────────
+
+    /** Lists the groups the signed-in user belongs to. */
+    fun groups(): List<GroupDto> = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        response.use { r ->
+            if (r.code == 401 || r.code == 403) throw ApiException.Auth
+            if (!r.isSuccessful) throw ApiException.Unexpected(r.code)
+            val page = json.decodeFromString(
+                kotlinx.serialization.builtins.ListSerializer(GroupDto.serializer()),
+                r.body.string(),
+            )
+            page
+        }
+    }
+
+    /** Creates a group; the creator becomes its ADMIN. */
+    fun createGroup(name: String, members: List<String>): GroupDto = request {
+        val payload = json.encodeToString(
+            CreateGroupRequest.serializer(),
+            CreateGroupRequest(name, members),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 400 -> throw ApiException.Protocol("invalid group name")
+                r.code == 404 -> throw ApiException.Protocol("unknown member")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(GroupDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /** Group details incl. members; non-members get 404 (mapped to Protocol). */
+    fun groupDetails(groupId: String): GroupDto = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such group")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(GroupDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /** Renames a group (ADMIN only). */
+    fun renameGroup(groupId: String, name: String): GroupDto = request {
+        val payload = json.encodeToString(RenameGroupRequest.serializer(), RenameGroupRequest(name))
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .put(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such group")
+                r.code == 400 -> throw ApiException.Protocol("invalid group name")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(GroupDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /** Adds one member (ADMIN only). */
+    fun addGroupMember(groupId: String, username: String): GroupDto = request {
+        val payload = json.encodeToString(AddGroupMemberRequest.serializer(), AddGroupMemberRequest(username))
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/members")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such user")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(GroupDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /** Removes one member (ADMIN removes others; a MEMBER removes themselves = leave). */
+    fun removeGroupMember(groupId: String, username: String): GroupDto = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/members/$username")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .delete()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such group")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(GroupDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /** Disbands the group (ADMIN only); membership and messages cascade server-side. */
+    fun disbandGroup(groupId: String) = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .delete()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such group")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> Unit
+            }
+        }
+    }
+
+    /** Sends one group text message; authorship comes from the server principal. */
+    fun sendGroupMessage(groupId: String, content: String, clientKey: String, replyToId: String? = null): MessageResult = request {
+        val payload = json.encodeToString(
+            SendGroupMessageRequest.serializer(),
+            SendGroupMessageRequest(content, clientKey, replyToId),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/messages")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when (r.code) {
+                401, 403 -> throw ApiException.Auth
+                404 -> throw ApiException.Protocol("no such group")
+                413 -> throw ApiException.Protocol("content too large")
+                400 -> throw ApiException.Protocol("invalid message")
+                in 200..299 -> {
+                    val m = json.decodeFromString(MessageDto.serializer(), r.body.string())
+                    return@request toMessageResult(m)
+                }
+                else -> throw ApiException.Unexpected(r.code)
+            }
+        }
+    }
+
+    /** Group message history; cursor semantics identical to pairwise. */
+    fun groupMessages(groupId: String, cursor: String?, limit: Int = 50): MessagesPage = request {
+        val cursorQuery = if (cursor != null) "?cursor=${java.net.URLEncoder.encode(cursor, "UTF-8")}&limit=$limit" else "?limit=$limit"
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/messages$cursorQuery")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such group")
+                r.code == 400 -> throw ApiException.Protocol("invalid cursor")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> {
+                    val page = json.decodeFromString(GroupMessagesPageDto.serializer(), r.body.string())
+                    MessagesPage(page.messages.map { toMessageResult(it) }, page.nextCursor)
+                }
+            }
+        }
+    }
+
+    /**
+     * Marks group messages read (Phase 19). Foreground chat screen only —
+     * the same rule as the pairwise mark (ADR-0010).
+     */
+    fun markGroupRead(groupId: String, upToMessageId: String? = null): MarkReadResponseDto = request {
+        val payload = json.encodeToString(
+            MarkReadRequest.serializer(),
+            MarkReadRequest(upToMessageId),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/read")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such group")
+                r.code == 400 -> throw ApiException.Protocol("invalid read mark")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(MarkReadResponseDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /** Adds or replaces the caller's reaction on a group message (Phase 19). */
+    fun setGroupReaction(groupId: String, messageId: String, emoji: String): List<com.patbaumgartner.android.stringtelephone.core.ReactionDto> = request {
+        val payload = json.encodeToString(SetReactionRequest.serializer(), SetReactionRequest(emoji))
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/messages/$messageId/reactions")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .put(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such message")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> decodeReactions(r.body.string())
+            }
+        }
+    }
+
+    /** Removes the caller's reaction on a group message (Phase 19). */
+    fun removeGroupReaction(groupId: String, messageId: String) = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/messages/$messageId/reactions")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .delete()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such message")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> decodeReactions(r.body.string())
+            }
+        }
+    }
+
+    /** Deletes a group message for all members (author or admin). */
+    fun deleteGroupMessage(groupId: String, messageId: String): MessageResult = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/messages/$messageId")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .delete()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such message")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> {
+                    val m = json.decodeFromString(MessageDto.serializer(), r.body.string())
+                    return@request toMessageResult(m)
+                }
             }
         }
     }

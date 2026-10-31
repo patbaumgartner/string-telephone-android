@@ -101,7 +101,7 @@ class StringTelephoneRepositoryReadReceiptTest {
         }
         val cache = ChatCache()
         val repo = repository(cache, http)
-        cache.append("bob", ChatMessage("m1", "k1", false, "hi", 5, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", false, "", "hi", 5, SendState.SENT))
 
         repo.markConversationRead("bob", "m1")
         awaitUntil { http.calls.any { it.path.endsWith("/read") } }
@@ -121,7 +121,7 @@ class StringTelephoneRepositoryReadReceiptTest {
         val cache = ChatCache()
         val repo = repository(cache, http, stream)
         repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
-        cache.append("bob", ChatMessage("m1", "k1", true, "hi", 5, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "hi", 5, SendState.SENT))
 
         repo.startRealtime()
         stream.emit(RealtimeEvent.MessageRead(listOf("m1"), 42))
@@ -136,7 +136,7 @@ class StringTelephoneRepositoryReadReceiptTest {
         val http = FakeHttp { 500 to """{"error":"boom"}""" }
         val cache = ChatCache()
         val repo = repository(cache, http)
-        cache.append("bob", ChatMessage("m1", "k1", false, "hi", 5, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", false, "", "hi", 5, SendState.SENT))
 
         repo.markConversationRead("bob", "m1")
         awaitUntil { http.calls.isNotEmpty() }

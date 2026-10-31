@@ -20,6 +20,54 @@ object WsFrames {
             WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo, message.deletedAt, message.deletedBy, message.durationMs, message.waveform, message.editedAt),
         )))
 
+    /**
+     * Group message fan-out (Phase 19): pushed to every member when a group
+     * message is stored. Mirrors `new-message` with a `groupId` field;
+     * `recipient` stays empty in the payload (ADR-0012 constraint 3 — the
+     * event names its conversation explicitly).
+     */
+    fun groupNewMessage(message: MessageRecord): String =
+        Json.encodeToString(WsMessageDto("group-message", Json.encodeToString(
+            WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo, message.deletedAt, message.deletedBy, message.durationMs, message.waveform, message.editedAt, message.groupId),
+        )))
+
+    /** Per-member group read fan-out (Phase 19): each member sees only their own reads. */
+    fun groupMessageRead(groupId: String, reader: String, mark: ReadMark): String =
+        Json.encodeToString(WsMessageDto("group-message-read", Json.encodeToString(
+            WsGroupMessageReadEvent(groupId, reader, mark.messageIds, mark.readAt),
+        )))
+
+    /** Group reaction change (Phase 19): mirrors `message-reaction` with a `groupId`. */
+    fun groupReaction(message: MessageRecord, author: String, emoji: String, added: Boolean): String =
+        Json.encodeToString(WsMessageDto("group-reaction", Json.encodeToString(
+            WsReactionEvent(
+                messageId = message.id,
+                peer = "",
+                authorUsername = author,
+                emoji = emoji,
+                action = if (added) "added" else "removed",
+                groupId = message.groupId,
+            ),
+        )))
+
+    /** Group deletion tombstone (Phase 19): mirrors `message-deleted` with a `groupId`. */
+    fun groupMessageDeleted(message: MessageRecord): String =
+        Json.encodeToString(WsMessageDto("group-deleted", Json.encodeToString(
+            WsMessageDeletedEvent(
+                messageId = message.id,
+                peer = "",
+                deletedBy = message.deletedBy ?: "",
+                deletedAt = message.deletedAt ?: 0L,
+                groupId = message.groupId,
+            ),
+        )))
+
+    /** Group typing variant (Phase 19): the composer started or stopped in a group. */
+    fun groupTyping(groupId: String, from: String, typing: Boolean): String =
+        Json.encodeToString(WsMessageDto("typing", Json.encodeToString(
+            WsTypingEvent(from, typing, groupId),
+        )))
+
     /** Read receipt (ADR-0010): the reader opened these messages in the conversation. */
     fun messageRead(mark: ReadMark): String =
         Json.encodeToString(WsMessageDto("message-read", Json.encodeToString(

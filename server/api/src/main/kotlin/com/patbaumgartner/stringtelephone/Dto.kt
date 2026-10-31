@@ -54,6 +54,13 @@ data class MessageDto(
     val waveform: String? = null,
     /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
     val editedAt: Long? = null,
+    /** Group conversation this message belongs to (Phase 19); null for pairwise. */
+    val groupId: String? = null,
+    /**
+     * How many group members have read this message (Phase 19); null for
+     * pairwise messages, where the read receipt is a timestamp instead.
+     */
+    val readCount: Int? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -75,6 +82,18 @@ data class SendMessageRequest(
 /** Marks the peer's messages read; `upToMessageId` bounds the mark to one point in the history. */
 @kotlinx.serialization.Serializable
 data class MarkReadRequest(val upToMessageId: String? = null)
+
+/**
+ * Sends one group message (Phase 19): no recipient — authorship comes from
+ * the principal and visibility from the group membership.
+ */
+@kotlinx.serialization.Serializable
+data class SendGroupMessageRequest(
+    val content: String,
+    val clientKey: String,
+    /** Message this one replies to; must belong to the same group (ADR-0011). */
+    val replyToId: String? = null,
+)
 
 @kotlinx.serialization.Serializable
 data class MarkReadResponse(val messageIds: List<String>, val readAt: Long)
@@ -141,6 +160,8 @@ data class WsNewMessageEvent(
     val waveform: String? = null,
     /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
     val editedAt: Long? = null,
+    /** Group conversation this message belongs to (Phase 19); null for pairwise. */
+    val groupId: String? = null,
 )
 
 /** Read-receipt event pushed on /v1/ws as `{"type":"message-read"}` (ADR-0010). */
@@ -156,7 +177,7 @@ data class WsClientTypingPayload(val typing: Boolean)
 
 /** Outgoing typing signal to the peer: {"type":"typing","payload":{"peer":"alice","typing":true}}. */
 @kotlinx.serialization.Serializable
-data class WsTypingEvent(val peer: String, val typing: Boolean)
+data class WsTypingEvent(val peer: String, val typing: Boolean, val groupId: String? = null)
 
 /** Incoming add/replace reaction: POST /v1/conversations/{peer}/messages/{id}/reactions */
 @kotlinx.serialization.Serializable
@@ -166,19 +187,31 @@ data class AddReactionRequest(val emoji: String)
 @kotlinx.serialization.Serializable
 data class WsReactionEvent(
     val messageId: String,
-    val peer: String,   // the conversation peer of the message (other than the author)
+    val peer: String,   // the conversation peer of the message (other than the author); "" for group events
     val authorUsername: String,
     val emoji: String,
     val action: String, // "added" or "removed"
+    val groupId: String? = null, // set for group fan-out (Phase 19)
 )
 
 /** Deletion event pushed on /v1/ws as `{"type":"message-deleted"}` (ADR-0011, Phase 10). */
 @kotlinx.serialization.Serializable
 data class WsMessageDeletedEvent(
     val messageId: String,
-    val peer: String,   // the conversation peer of the deleter
+    val peer: String,   // the conversation peer of the deleter; "" for group events
     val deletedBy: String,
     val deletedAt: Long,
+    val groupId: String? = null, // set for group fan-out (Phase 19)
+)
+
+/** Per-member group read fan-out (Phase 19): `{"type":"group-message-read"}`. */
+@kotlinx.serialization.Serializable
+data class WsGroupMessageReadEvent(
+    val groupId: String,
+    /** Who read the messages; every member's devices converge the same counter. */
+    val reader: String,
+    val messageIds: List<String>,
+    val readAt: Long,
 )
 
 /** Re-stores the content of one message (Phase 17). */
@@ -186,6 +219,57 @@ data class WsMessageDeletedEvent(
 data class EditMessageRequest(
     @field:jakarta.validation.constraints.NotBlank val content: String,
 )
+
+// ── Group chats (Phase 19, ADR-0012) ────────────────────────────────────────
+
+/** Creates a group: name plus initial members; the creator becomes ADMIN. */
+@kotlinx.serialization.Serializable
+data class CreateGroupRequest(
+    @field:jakarta.validation.constraints.NotBlank val name: String,
+    val members: List<String> = emptyList(),
+)
+
+/** Renames a group (ADMIN only). */
+@kotlinx.serialization.Serializable
+data class RenameGroupRequest(
+    @field:jakarta.validation.constraints.NotBlank val name: String,
+)
+
+/** Adds one member (ADMIN only). */
+@kotlinx.serialization.Serializable
+data class AddGroupMemberRequest(
+    @field:jakarta.validation.constraints.NotBlank val username: String,
+)
+
+/** One group as the REST surface returns it, with its member list. */
+@kotlinx.serialization.Serializable
+data class GroupDto(
+    val id: String,
+    val name: String,
+    val creator: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val members: List<GroupMemberDto>,
+)
+
+@kotlinx.serialization.Serializable
+data class GroupMemberDto(
+    val username: String,
+    val role: String,
+    val joinedAt: Long,
+)
+
+/** Group message page — same shape as the pairwise `MessagesPageDto`. */
+@kotlinx.serialization.Serializable
+data class GroupMessagesPageDto(val messages: List<MessageDto>, val nextCursor: String?)
+
+/** Marks group messages read up to a message id (Phase 19). */
+@kotlinx.serialization.Serializable
+data class MarkGroupReadRequest(val upToMessageId: String? = null)
+
+/** Group typing signal from a client: {"type":"typing","payload":{"groupId":"...","typing":true}}. */
+@kotlinx.serialization.Serializable
+data class WsClientGroupTypingPayload(val groupId: String, val typing: Boolean)
 
 /**
  * The caller's pin/mute/archive state for one conversation (Phase 18).

@@ -806,7 +806,7 @@ Screenshot: `19-contacts-managed.png` + dark variant.
 ### Phase 19 — Group chats
 
 **Effort:** Large
-**Status:** Planned
+**Status:** Done (2026-10-31)
 **Depends on:** Phase 3 (PostgreSQL — membership and group message schema)
 
 Implements the group-chat feature as scoped by
@@ -894,6 +894,46 @@ verification; read-receipt per-member correctness; confbridge lifecycle in
 the live prototype (`scripts/test-protocol.sh`); screenshot of group list
 and group chat screens.
 
+Shipped: V14 migration (`V14__group_chats.sql`: `groups`, `group_members` with role CHECK,
+`messages.group_id`, per-kind partial unique indexes for idempotency,
+`group_message_reads` per-member reads), `Groups` store (creator-ADMIN
+creation, 32-member cap, idempotent add, admin-removes-others / member-
+leaves / admin-disbands rules), group REST endpoints (create → 201, list,
+details, rename, add/remove member, leave, disband, send → 413 on
+empty/oversize, cursor history with `readCount`, per-member read mark, group
+reactions, author-or-admin delete; non-members get 404 everywhere, pairwise
+endpoints reject group rows), `WsHub` group fan-outs (`group-message`,
+`group-message-read` naming the `reader`, `group-reaction`, `group-deleted`,
+`typing` with `groupId`), send-path un-archive for every member but the
+author, core DTOs/events + parser branches, app group surface (ApiClient
+group methods, repository state + events + send/read, ChatCache
+`applyGroupRead` reader convergence, `GroupsScreen`/`GroupChatScreen`/
+`GroupDetailScreen`/create dialog via `GroupsUi.kt`, contacts menu entry,
+notification routing with the `is_group` intent flag for content/quick-reply/
+mark-read), oracle `scripts/verify-groups.mjs`, protocol.md group contract,
+ADR-0012 implementation note, screenshots `20-groups`/`21-group-chat` + dark
+variants. Group media/voice in chat and group calls are deliberately out of
+scope (ADR-0012 constraints) — group calls move to Phase 20.
+
+---
+
+### Phase 20 — Group calls (confbridge)
+
+**Effort:** Large
+**Status:** Planned
+**Depends on:** Phase 19 (groups), ADR-0012 constraint 6 (PBX stays pairwise
+until a call-phase decision)
+
+Group voice calls over an Asterisk **confbridge** bridge (needs its own ADR,
+planned as ADR-0014):
+
+- The API creates a conference per group call and tears it down when the
+  last participant leaves; SIP REGISTER/INVITE flows stay unchanged.
+- The app's call engine dials the conference instead of the peer's SIP URI;
+  pairwise calls are unaffected.
+- Busy/ringing semantics for N participants, and which member may start a
+  call (admin? any member?) need the ADR's decisions before implementation.
+
 ---
 
 ## Deferred indefinitely
@@ -913,7 +953,7 @@ and group chat screens.
 | [ADR-0009](adr/0009-media-storage-s3.md) | Media storage — Garage default, S3-compatible interface | Accepted |
 | [ADR-0010](adr/0010-message-delivery-states.md) | Read receipts (always-on) | Accepted |
 | [ADR-0011](adr/0011-message-extras.md) | Reactions, replies, deletion semantics | Accepted (planned) |
-| [ADR-0012](adr/0012-group-chat-scope.md) | Group chats — scope and one-to-one compatibility constraints | Accepted; implementation as Phase 19 |
+| [ADR-0012](adr/0012-group-chat-scope.md) | Group chats — scope and one-to-one compatibility constraints | Accepted; shipped as Phase 19 (group calls deferred to Phase 20) |
 
 ---
 

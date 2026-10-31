@@ -13,6 +13,7 @@ class Reactions(
     private val db: JdbcClient,
     private val messages: Messages,
     private val hub: WsHub,
+    private val groups: Groups,
 ) {
 
     /**
@@ -57,6 +58,51 @@ class Reactions(
         return listForMessage(messageId)
     }
 
+    /**
+     * Adds or replaces a reaction on a group message (Phase 19). The author
+     * must be a current group member; the fan-out reaches every member
+     * through the `group-reaction` frame. Throws
+     * [GroupMessageAccessException] when the caller is not a member.
+     */
+    fun addGroupReaction(messageId: String, author: String, emoji: String): List<ReactionDto> {
+        val message = memberMessage(messageId, author)
+        val now = System.currentTimeMillis()
+        db.sql(
+            "INSERT INTO reactions(message_id, author_username, emoji, created_at) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON CONFLICT (message_id, author_username) DO UPDATE SET emoji = excluded.emoji, created_at = excluded.created_at",
+        ).params(messageId, author, emoji, now).update()
+        hub.broadcastGroupReaction(message, groups.memberNames(message.groupId!!), author, emoji, added = true)
+        return listForMessage(messageId)
+    }
+
+    /** Removes the author's reaction on a group message. Idempotent like the pairwise variant. */
+    fun removeGroupReaction(messageId: String, author: String): List<ReactionDto> {
+        val message = memberMessage(messageId, author)
+        val previous = db.sql("SELECT emoji FROM reactions WHERE message_id = ? AND author_username = ?")
+            .params(messageId, author).query(String::class.java).optional().orElse(null)
+        val deleted = db.sql(
+            "DELETE FROM reactions WHERE message_id = ? AND author_username = ?",
+        ).params(messageId, author).update()
+        if (deleted > 0) {
+            hub.broadcastGroupReaction(message, groups.memberNames(message.groupId!!), author, previous ?: "", added = false)
+        }
+        return listForMessage(messageId)
+    }
+
+    /**
+     * Loads a group message and checks the caller's live membership; the
+     * shared guard for both group reaction mutations.
+     */
+    private fun memberMessage(messageId: String, author: String): MessageRecord {
+        val message = messages.findById(messageId)
+            ?: throw IllegalArgumentException("message not found")
+        val groupId = message.groupId
+            ?: throw IllegalArgumentException("message not found")
+        if (!groups.isMember(groupId, author)) throw GroupMessageAccessException()
+        return message
+    }
+
     /** All reactions on a message, for the history response. */
     fun listForMessage(messageId: String): List<ReactionDto> =
         db.sql("SELECT message_id, author_username, emoji, created_at FROM reactions WHERE message_id = ? ORDER BY created_at")
@@ -64,7 +110,6 @@ class Reactions(
             .query { rs, _ ->
                 ReactionDto(rs.getString("author_username"), rs.getString("emoji"), rs.getLong("created_at"))
             }.list()
-
     /** All reactions on a set of messages, for bulk-loading the history response. */
     fun listForMessages(messageIds: List<String>): Map<String, List<ReactionDto>> {
         if (messageIds.isEmpty()) return emptyMap()
@@ -80,3 +125,10 @@ class Reactions(
 
 @kotlinx.serialization.Serializable
 data class ReactionDto(val authorUsername: String, val emoji: String, val createdAt: Long)
+
+/**
+ * The caller is not a member of the group that owns the message. The REST
+ * layer maps this to 404 so non-members cannot learn the message exists
+ * (ADR-0012: membership failures are indistinguishable from absence).
+ */
+class GroupMessageAccessException : RuntimeException()

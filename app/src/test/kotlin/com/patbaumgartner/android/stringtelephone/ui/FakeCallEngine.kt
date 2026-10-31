@@ -281,6 +281,58 @@ object PreviewFactory {
     /** Which preview message is edited, with its edit stamp (Phase 17). */
     private val EDITS: Map<Int, Long> = mapOf(1 to 1_750_000_060_000L)
 
+    /**
+     * The group fixtures (Phase 19): two groups for the list screen — one
+     * with an unread badge — and a group conversation with several senders,
+     * a reply and a reaction so the group bubbles differ visibly from the
+     * pairwise ones. Fixed 2025 stamps keep the day chips deterministic.
+     */
+    private val PREVIEW_GROUPS = listOf(
+        com.patbaumgartner.android.stringtelephone.core.GroupDto(
+            id = "grp-hike",
+            name = "Hike planning",
+            creator = "alice",
+            createdAt = 1_749_000_000_000L,
+            updatedAt = 1_749_000_000_000L,
+            members = listOf(
+                com.patbaumgartner.android.stringtelephone.core.GroupMemberDto("alice", "ADMIN", 1_749_000_000_000L),
+                com.patbaumgartner.android.stringtelephone.core.GroupMemberDto("bob", "MEMBER", 1_749_000_000_001L),
+                com.patbaumgartner.android.stringtelephone.core.GroupMemberDto("carol", "MEMBER", 1_749_000_000_002L),
+            ),
+        ),
+        com.patbaumgartner.android.stringtelephone.core.GroupDto(
+            id = "grp-ramen",
+            name = "Ramen club",
+            creator = "bob",
+            createdAt = 1_748_000_000_000L,
+            updatedAt = 1_748_000_000_000L,
+            members = listOf(
+                com.patbaumgartner.android.stringtelephone.core.GroupMemberDto("bob", "ADMIN", 1_748_000_000_000L),
+                com.patbaumgartner.android.stringtelephone.core.GroupMemberDto("alice", "MEMBER", 1_748_000_000_001L),
+            ),
+        ),
+    )
+
+    /** (fromMe, sender, content, at) quadruples for the group chat preview. */
+    private val GROUP_CHAT: List<Quadruple> = listOf(
+        Quadruple(false, "bob", "Saturday hike is on — meeting 9am at the trailhead.", "2025-06-13T08:20:00Z"),
+        Quadruple(false, "carol", "I can drive, three seats free.", "2025-06-13T08:21:00Z"),
+        Quadruple(true, "alice", "Perfect, I am in. Bringing the map.", "2025-06-13T08:22:00Z"),
+        Quadruple(false, "bob", "Weather looks dry all morning.", "2025-06-13T08:23:00Z"),
+    )
+
+    /** Read counter per outgoing message index: who has read it (Phase 19). */
+    private val GROUP_READS: Map<Int, Set<String>> = mapOf(2 to setOf("bob", "carol"))
+
+    /** The one group message that reacts, keyed like the pairwise fixture. */
+    private val GROUP_REACTIONS: Map<Int, Map<String, String>> = mapOf(1 to mapOf("alice" to "👍"))
+
+    /** The reply target inside the group conversation (index 1 → index 0). */
+    private val GROUP_REPLIES: Map<Int, String> = mapOf(3 to "group-0")
+
+    /** Small tuple keeping the group fixture table readable. */
+    private data class Quadruple(val fromMe: Boolean, val sender: String, val content: String, val at: String)
+
     fun viewModel(
         context: Context,
         callEngine: CallEngine = FakeCallEngine(),
@@ -294,6 +346,7 @@ object PreviewFactory {
         lastSeen: Boolean = false,
         contactsManaged: Boolean = false,
         contactPreviews: Boolean = false,
+        groupChat: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
         val conversation: List<Triple<Boolean, String, String>> = when {
@@ -308,7 +361,7 @@ object PreviewFactory {
         }
         conversation.forEachIndexed { index, (fromMe, content, at) ->
             val state = when {
-                chatImage || chatReactions || chatReply || chatDeletion || chatVoice || chatEdited -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
+                chatImage || chatReactions || chatReply || chatDeletion || chatVoice || chatEdited || groupChat -> com.patbaumgartner.android.stringtelephone.chat.SendState.SENT
                 deliveryStates -> DELIVERY_STATES[index]
                 index == conversation.lastIndex -> com.patbaumgartner.android.stringtelephone.chat.SendState.PENDING
                 index == conversation.lastIndex - 1 -> com.patbaumgartner.android.stringtelephone.chat.SendState.FAILED
@@ -319,7 +372,7 @@ object PreviewFactory {
             cache.append(
                 "bob",
                 com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
-                    key, key, fromMe, content, java.time.Instant.parse(at).toEpochMilli(), state,
+                    key, key, fromMe, "", content, java.time.Instant.parse(at).toEpochMilli(), state,
                     readAtEpochMs = if (state == com.patbaumgartner.android.stringtelephone.chat.SendState.READ) {
                         java.time.Instant.parse("2025-06-13T08:25:00Z").toEpochMilli()
                     } else {
@@ -332,6 +385,26 @@ object PreviewFactory {
                     editedAtEpochMs = if (chatEdited) EDITS[index] else null,
                 ),
             )
+        }
+        if (groupChat) {
+            // Phase 19: group messages cache under the group id key; sender
+            // names ride the message so bubbles can header them. Read counts
+            // mirror what the server would have stored.
+            GROUP_CHAT.forEachIndexed { index, q ->
+                val key = "group-$index"
+                cache.append(
+                    "grp-hike",
+                    com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
+                        key, key, q.fromMe, q.sender, q.content, java.time.Instant.parse(q.at).toEpochMilli(),
+                        com.patbaumgartner.android.stringtelephone.chat.SendState.SENT,
+                        reactions = GROUP_REACTIONS.getOrElse(index) { emptyMap() },
+                        replyToId = GROUP_REPLIES[index],
+                        groupId = "grp-hike",
+                        readCount = GROUP_READS[index]?.size,
+                        readBy = GROUP_READS[index] ?: emptySet(),
+                    ),
+                )
+            }
         }
         if (chatImage) {
             cache.append(
@@ -437,6 +510,7 @@ object PreviewFactory {
         )
         container.repository.seedForPreviews(
             me = com.patbaumgartner.android.stringtelephone.network.MeResult("alice", "Alice"),
+            groups = if (groupChat) PREVIEW_GROUPS else emptyList(),
             contacts = if (contactsManaged) {
                 // Phase 18: pin/mute/archive flags baked into the contact
                 // rows; the ordering logic splits the list client-side.

@@ -78,6 +78,7 @@ class ScreenshotActivity : ComponentActivity() {
                 contactsManaged = route == ScreenshotRoute.CONTACTS_MANAGED.ordinal,
                 lastSeen = route == ScreenshotRoute.CONTACTS_LAST_SEEN.ordinal,
                 contactPreviews = route == ScreenshotRoute.CONTACTS_PREVIEWS.ordinal,
+                groupChat = route == ScreenshotRoute.GROUP_CHAT.ordinal,
             ).apply {
                 if (intent.getBooleanExtra(EXTRA_ERROR, false)) {
                     updateIncomingCallAccess(com.patbaumgartner.android.stringtelephone.notify.IncomingCallAccess.FULL_SCREEN_OFF)
@@ -102,6 +103,8 @@ class ScreenshotActivity : ComponentActivity() {
                         ScreenshotRoute.CHAT_DELETION.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CHAT_VOICE.ordinal -> ChatScreen(peer, viewModel)
                         ScreenshotRoute.CHAT_EDITED.ordinal -> ChatScreen(peer, viewModel)
+                        ScreenshotRoute.GROUPS.ordinal -> GroupsScreen(viewModel)
+                        ScreenshotRoute.GROUP_CHAT.ordinal -> GroupChatScreen("grp-hike", viewModel)
                         ScreenshotRoute.CALL.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
                         ScreenshotRoute.CALL_VIDEO.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
                         else -> SettingsScreen(viewModel)
@@ -119,4 +122,4 @@ class ScreenshotActivity : ComponentActivity() {
     }
 }
 
-enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION, CHAT_VOICE, CHAT_EDITED, CALL_VIDEO, CONTACTS_LAST_SEEN, CONTACTS_PREVIEWS, CONTACTS_MANAGED }
+enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION, CHAT_VOICE, CHAT_EDITED, CALL_VIDEO, CONTACTS_LAST_SEEN, CONTACTS_PREVIEWS, CONTACTS_MANAGED, GROUPS, GROUP_CHAT }

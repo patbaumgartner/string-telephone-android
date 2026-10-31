@@ -91,7 +91,7 @@ const toggle       = memberBody(repo, 'fun toggleReaction(');
 const applyReaction = memberBody(chatCache, 'fun applyReaction(');
 const parseFn      = memberBody(coreDtos, 'fun parseRealtimeEvent(');
 const vmToggle     = memberBody(vm, 'fun toggleReaction(');
-const chatBubble   = memberBody(chatScreen, 'private fun ChatBubble(');
+const chatBubble   = memberBody(chatScreen, 'internal fun ChatBubble(');
 
 // ── Server contract ──────────────────────────────────────────────────────────
 

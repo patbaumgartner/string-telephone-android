@@ -122,6 +122,112 @@ PUT /v1/conversations/bob/state
 200 {"pinned":true,"muted":false,"archived":false}
 ```
 
+## Groups (`/v1/groups`)
+
+Group chats (Phase 19, [ADR-0012](adr/0012-group-chat-scope.md)) extend the
+pairwise model: membership lives in its own tables (`groups`,
+`group_members`), never overloaded onto `recipient`. A group has exactly one
+ADMIN — the creator; every other member is a MEMBER. Groups cap at 32
+members; names are 1–64 characters after trimming.
+
+- **Authorisation is membership.** Every group endpoint first resolves the
+  caller's membership; a non-member gets `404` ("no such group"), never
+  `403`, so a non-member cannot even learn that a group exists.
+- **Authorship stays derived** (ADR-0003): no group request takes a sender
+  field; the author is the authenticated principal.
+
+### Group management
+
+| Route | Body | Effect |
+| --- | --- | --- |
+| `POST /v1/groups` | `{"name":"Hike planning","members":["bob","carol"]}` | Creates the group; the creator joins as ADMIN, listed members as MEMBER (active users only, `404` unknown user, `400` blank/too-long name or too many members). Returns `201` with the group incl. members. |
+| `GET /v1/groups` | none | Lists the caller's groups (with members), newest activity first. |
+| `GET /v1/groups/{groupId}` | none | One group with its member list. `404` for non-members. |
+| `PUT /v1/groups/{groupId}` | `{"name":"New name"}` | Renames; ADMIN only (`403` otherwise). |
+| `POST /v1/groups/{groupId}/members` | `{"username":"dave"}` | Adds a MEMBER; ADMIN only. Unknown/inactive user `404`, over cap `400`; adding an existing member is an idempotent no-op. |
+| `DELETE /v1/groups/{groupId}/members/{username}` | none | ADMIN removes anyone but themselves; a MEMBER may only remove themselves (= leave). Otherwise `403`. Leaving as the ADMIN is impossible by design — the admin disbands instead. |
+| `DELETE /v1/groups/{groupId}` | none | Disbands; ADMIN only. Membership and messages cascade away server-side. |
+
+```json
+{
+  "id":"grp-uuid",
+  "name":"Hike planning",
+  "creator":"alice",
+  "createdAt":1760000000000,
+  "updatedAt":1760000000000,
+  "members":[
+    {"username":"alice","role":"ADMIN","joinedAt":1760000000000},
+    {"username":"bob","role":"MEMBER","joinedAt":1760000001000}
+  ]
+}
+```
+
+### `POST /v1/groups/{groupId}/messages`
+
+Sends one group text message; authorship comes from the principal, visibility
+from membership.
+
+```json
+{"content":"trailhead at nine","clientKey":"random-per-logical-message"}
+```
+
+- `content` must be nonempty and at most 8192 UTF-8 bytes (`413`), the same
+  cap as pairwise text.
+- `replyToId` optionally quotes a message that must belong to the same group
+  (`400` otherwise).
+- Idempotency is per `(sender, groupId, clientKey)` — its own partial unique
+  index, never the pairwise triple. Retrying returns the original record.
+- The stored row keeps `recipient` empty and carries `group_id`; the
+  fan-out reaches every member over the websocket (`group-message`).
+- Group messages are text only in this first cut (ADR-0012): media and voice
+  keep the pairwise path.
+
+Response `201` is the pairwise message record with two group additions:
+`groupId` names the conversation and `readCount` (int) says how many members
+have read the message so far — null/absent on pairwise messages.
+
+### `GET /v1/groups/{groupId}/messages`
+
+Paginated history for the group; identical cursor semantics to pairwise
+history (`MessagesPageDto` shape, URL-safe Base64 of
+`"<createdAtEpochMs>:<messageId>"`, `limit` default 50). Each message carries
+its reactions, and `readCount` instead of a single `readAt`.
+
+### `POST /v1/groups/{groupId}/read`
+
+Marks the group's messages read for the calling member. The reader is the
+authenticated principal; the caller's own messages are never marked.
+
+```json
+{"upToMessageId":"uuid"}
+```
+
+`upToMessageId` is optional and means "that message and every earlier one",
+like the pairwise mark. A foreign or unknown id is a `400`. Read state is
+stored per `(message, reader)` in `group_message_reads` — one row per member,
+idempotent, first mark wins the timestamp.
+
+Response `200` is the pairwise mark shape
+(`{"messageIds":[...],"readAt":...}`). Every member's devices receive a
+`group-message-read` frame naming the `reader`, so each device converges the
+"N read" counter idempotently (ADR-0010 extended to N readers). Only the
+foreground group chat marks read — never a notification handler or background
+sync.
+
+### Group reactions and deletion
+
+- `PUT`/`DELETE /v1/groups/{groupId}/messages/{messageId}/reactions` —
+  add/replace/remove the caller's reaction, one per author per message,
+  exactly the pairwise ADR-0011 rules. The message must belong to
+  `{groupId}` and the caller must be a current member; anything else is
+  `404`. Members receive a `group-reaction` frame.
+- `DELETE /v1/groups/{groupId}/messages/{messageId}` — tombstone for all
+  members. The author or the ADMIN may delete (`403` otherwise); the
+  tombstone fans out as `group-deleted`. Idempotent like the pairwise
+  delete.
+- The pairwise endpoints (`/v1/conversations/{peer}/...`) reject group
+  messages with `404` — a group row is never reachable through a peer path.
+
 ### `POST /v1/conversations/{peer}/messages`
 
 ```json
@@ -508,6 +614,35 @@ Invalid credentials close with `1008` immediately after upgrade.
   the socket; the server relays it to the sender's conversation partners as
   `{"peer":"bob","typing":true}`. Nothing is persisted. A peer with no
   recent message in either direction is not reachable via this signal.
+  The same client frame may carry a group variant
+  (Phase 19): `{"type":"typing","payload":{"groupId":"grp-uuid",
+  "typing":true}}` relays as `{"peer":"","typing":true,"groupId":"grp-uuid"}`
+  to every group member except the composer. The single `"typing"` branch
+  handles both: a payload with `groupId` routes by membership, without it
+  routes pairwise. Nothing is persisted.
+- `{"type":"group-message","payload":"<JSON string>"}` (Phase 19) fans a
+  stored group message out to every member. The payload is the pairwise
+  message record with `groupId` set and `recipient` empty; `readCount`
+  (how many members have read it) appears on history rows and updates
+  through the read frames below.
+- `{"type":"group-message-read","payload":"<JSON string>"}` (Phase 19) is
+  the per-member read fan-out:
+  `{"groupId":"grp-uuid","reader":"bob","messageIds":["uuid"],
+  "readAt":1760000005000}`. Every member receives it — including the
+  reader's other sessions — so all devices converge the same "N read"
+  counters; the `reader` field is what makes the convergence idempotent.
+  Applying a frame twice is harmless.
+- `{"type":"group-reaction","payload":"<JSON string>"}` (Phase 19) mirrors
+  `message-reaction` for groups:
+  `{"messageId":"uuid","groupId":"grp-uuid","authorUsername":"alice",
+  "emoji":"👍","action":"added|removed"}`. Members apply it to the cached
+  message immediately.
+- `{"type":"group-deleted","payload":"<JSON string>"}` (Phase 19) mirrors
+  `message-deleted` for groups:
+  `{"messageId":"uuid","groupId":"grp-uuid","peer":"","deletedBy":"bob",
+  "deletedAt":1760000000000}`. `peer` is empty for group events; `groupId`
+  names the conversation. REST history remains authoritative after a
+  reconnect, as with the pairwise tombstone.
 - `{"type":"message-reaction","payload":"<JSON string>"}` (Phase 8) is a
   durable fan-out of a reaction change. Both conversation participants
   receive it; the client applies the add or remove to the cached message so

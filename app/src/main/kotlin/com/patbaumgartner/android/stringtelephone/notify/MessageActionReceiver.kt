@@ -23,19 +23,26 @@ class MessageActionReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val peer = intent.getStringExtra(EXTRA_PEER) ?: return
+        val isGroup = intent.getBooleanExtra(EXTRA_IS_GROUP, false)
         val container = context.stringTelephoneContainer
 
         when (intent.action) {
-            ACTION_QUICK_REPLY -> handleQuickReply(context, container, peer, intent)
-            ACTION_MARK_READ -> handleMarkRead(context, container, peer)
+            ACTION_QUICK_REPLY -> handleQuickReply(context, container, peer, isGroup, intent)
+            ACTION_MARK_READ -> handleMarkRead(context, container, peer, isGroup)
         }
     }
 
-    private fun handleQuickReply(context: Context, container: AppContainer, peer: String, intent: Intent) {
+    private fun handleQuickReply(context: Context, container: AppContainer, peer: String, isGroup: Boolean, intent: Intent) {
         val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY_TEXT, "")?.toString()?.trim()
         if (text.isNullOrEmpty()) return
 
-        container.repository.send(peer, text) { success ->
+        // Group quick replies (Phase 19) ride the group send path; pairwise
+        // stays untouched. The send action is an explicit user gesture from
+        // the shade, so marking rules are unaffected (ADR-0010).
+        val send: (String, String, (Boolean) -> Unit) -> Unit = { target, body, onResult ->
+            if (isGroup) container.repository.sendGroup(target, body) { onResult(it) } else container.repository.send(target, body) { onResult(it) }
+        }
+        send(peer, text) { success ->
             if (!success) {
                 val notification = NotificationCompat.Builder(
                     context,
@@ -69,8 +76,10 @@ class MessageActionReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun handleMarkRead(context: Context, container: AppContainer, peer: String) {
-        container.repository.markConversationRead(peer, null)
+    private fun handleMarkRead(context: Context, container: AppContainer, peer: String, isGroup: Boolean) {
+        // The shade's explicit button counts as a human read (ADR-0010);
+        // for groups it marks per-member state (Phase 19).
+        if (isGroup) container.repository.markGroupConversationRead(peer, null) else container.repository.markConversationRead(peer, null)
         // The notification is left to fade naturally; the next incoming
         // message from this peer will refresh it, or the user opens the chat.
     }
@@ -79,6 +88,7 @@ class MessageActionReceiver : BroadcastReceiver() {
         const val ACTION_QUICK_REPLY = "com.patbaumgartner.android.stringtelephone.action.QUICK_REPLY"
         const val ACTION_MARK_READ    = "com.patbaumgartner.android.stringtelephone.action.MARK_READ"
         const val EXTRA_PEER          = "peer"
+        const val EXTRA_IS_GROUP      = "is_group"
         const val KEY_REPLY_TEXT      = "reply_text"
 
         /** Base id for per-peer send-failure notifications, away from the other ids. */
@@ -89,24 +99,26 @@ class MessageActionReceiver : BroadcastReceiver() {
          * so the same peer key is used for both the quick-reply and mark-read
          * intents (requestCode = peer.hashCode(), matching the content intent).
          */
-        fun quickReplyIntent(context: Context, peer: String): PendingIntent {
+        fun quickReplyIntent(context: Context, peer: String, isGroup: Boolean = false): PendingIntent {
             return PendingIntent.getBroadcast(
                 context,
                 peer.hashCode(),
                 Intent(context, MessageActionReceiver::class.java)
                     .setAction(ACTION_QUICK_REPLY)
-                    .putExtra(EXTRA_PEER, peer),
+                    .putExtra(EXTRA_PEER, peer)
+                    .putExtra(EXTRA_IS_GROUP, isGroup),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         }
 
-        fun markReadIntent(context: Context, peer: String): PendingIntent {
+        fun markReadIntent(context: Context, peer: String, isGroup: Boolean = false): PendingIntent {
             return PendingIntent.getBroadcast(
                 context,
                 peer.hashCode(),
                 Intent(context, MessageActionReceiver::class.java)
                     .setAction(ACTION_MARK_READ)
-                    .putExtra(EXTRA_PEER, peer),
+                    .putExtra(EXTRA_PEER, peer)
+                    .putExtra(EXTRA_IS_GROUP, isGroup),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         }

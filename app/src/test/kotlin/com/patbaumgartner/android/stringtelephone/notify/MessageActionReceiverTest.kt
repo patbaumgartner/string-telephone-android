@@ -79,7 +79,7 @@ class MessageActionReceiverTest {
 
     @Test
     fun `message notifications offer inline reply and mark as read`() {
-        AppNotifier.notifyConversation(context, "bob", "Bob", listOf("Hello" to 1_000L), 1)
+        AppNotifier.notifyConversation(context, "bob", "Bob", listOf(Triple("", "Hello", 1_000L)), 1)
         val notification = notifications.single().notification
 
         assertEquals(2, notification.actions.size)
@@ -93,7 +93,7 @@ class MessageActionReceiverTest {
 
     @Test
     fun `a quick reply sends through the repository without opening the activity`() {
-        AppNotifier.notifyConversation(context, "bob", "Bob", listOf("Hello" to 1_000L), 1)
+        AppNotifier.notifyConversation(context, "bob", "Bob", listOf(Triple("", "Hello", 1_000L)), 1)
         val startedBefore = nextStartedOrNull()
 
         receiver.onReceive(context, quickReplyIntent("hi from the shade"))
@@ -111,7 +111,7 @@ class MessageActionReceiverTest {
     @Test
     fun `a failed quick reply surfaces a follow-up notification`() {
         // The test container's repository has no server: every send fails.
-        AppNotifier.notifyConversation(context, "bob", "Bob", listOf("Hello" to 1_000L), 1)
+        AppNotifier.notifyConversation(context, "bob", "Bob", listOf(Triple("", "Hello", 1_000L)), 1)
         receiver.onReceive(context, quickReplyIntent("will not arrive"))
 
         awaitUntil { notifications.size == 2 }
@@ -124,7 +124,7 @@ class MessageActionReceiverTest {
 
     @Test
     fun `mark as read never opens the activity`() {
-        AppNotifier.notifyConversation(context, "bob", "Bob", listOf("Hello" to 1_000L), 1)
+        AppNotifier.notifyConversation(context, "bob", "Bob", listOf(Triple("", "Hello", 1_000L)), 1)
         val startedBefore = nextStartedOrNull()
 
         receiver.onReceive(context, actionIntent(MessageActionReceiver.ACTION_MARK_READ))
@@ -135,7 +135,7 @@ class MessageActionReceiverTest {
 
     @Test
     fun `quick reply without text does nothing`() {
-        AppNotifier.notifyConversation(context, "bob", "Bob", listOf("Hello" to 1_000L), 1)
+        AppNotifier.notifyConversation(context, "bob", "Bob", listOf(Triple("", "Hello", 1_000L)), 1)
 
         receiver.onReceive(context, actionIntent(MessageActionReceiver.ACTION_QUICK_REPLY))
         idle()

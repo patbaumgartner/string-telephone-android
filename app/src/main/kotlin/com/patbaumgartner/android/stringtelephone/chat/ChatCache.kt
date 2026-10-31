@@ -17,6 +17,8 @@ data class ChatMessage(
     val serverId: String?,
     val clientKey: String,
     val fromMe: Boolean,
+    /** Username of the author (Phase 19): pairwise derives it from fromMe, groups render it. */
+    val sender: String = "",
     val content: String,
     val sentAtEpochMs: Long,
     val state: SendState,
@@ -42,6 +44,12 @@ data class ChatMessage(
     val waveform: String? = null,
     /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
     val editedAtEpochMs: Long? = null,
+    /** Group conversation this message belongs to (Phase 19); null for pairwise. */
+    val groupId: String? = null,
+    /** How many members read this group message (Phase 19); null for pairwise. */
+    val readCount: Int? = null,
+    /** Which members have read this group message, for the detail's "who read" (Phase 19). */
+    val readBy: Set<String> = emptySet(),
 ) {
     /** True when deleted for both sides; the bubble renders a placeholder. */
     val deleted: Boolean get() = deletedAtEpochMs != null
@@ -59,6 +67,7 @@ data class ChatMessage(
             serverId = m.id,
             clientKey = m.clientKey,
             fromMe = m.sender == myUsername,
+            sender = m.sender,
             content = m.content,
             sentAtEpochMs = m.createdAt,
             state = if (m.readAt != null) SendState.READ else SendState.SENT,
@@ -74,6 +83,8 @@ data class ChatMessage(
             durationMs = m.durationMs,
             waveform = m.waveform,
             editedAtEpochMs = m.editedAt,
+            groupId = m.groupId,
+            readCount = m.readCount,
         )
     }
 }
@@ -293,6 +304,44 @@ class ChatCache {
             }
         }
         return null
+    }
+
+    /**
+     * Applies a per-member group read (Phase 19): [reader] read the listed
+     * messages, so the cached copy's read counter grows by one for each
+     * message not already counted. Returns the group id whose cached list
+     * changed, or null when nothing was cached or the reader had already
+     * been counted.
+     *
+     * The reader's identity matters: the same frame arrives on every
+     * member's devices, and applying it twice (once as the marking device,
+     * once via the fan-out) must not double-count.
+     */
+    @Synchronized
+    fun applyGroupRead(groupId: String, reader: String, messageIds: Set<String>, readAtEpochMs: Long): String? {
+        if (messageIds.isEmpty()) return null
+        var changed: String? = null
+        for (entry in byPeer) {
+            var touched = false
+            for (index in entry.value.indices) {
+                val message = entry.value[index]
+                val id = message.serverId
+                if (id == null || id !in messageIds) continue
+                val counted = message.readBy + reader
+                if (counted.size == message.readBy.size) continue
+                entry.value[index] = message.copy(
+                    readBy = counted,
+                    readCount = counted.size,
+                    readAtEpochMs = message.readAtEpochMs ?: readAtEpochMs,
+                )
+                touched = true
+            }
+            if (touched) {
+                changed = entry.key
+                emit(entry.key)
+            }
+        }
+        return changed
     }
 
     /** Local hide ("delete for me", ADR-0011, Phase 10): no server change. */

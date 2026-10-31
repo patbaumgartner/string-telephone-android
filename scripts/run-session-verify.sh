@@ -33,6 +33,7 @@ node scripts/verify-previews.mjs
 node scripts/verify-search.mjs
 node scripts/verify-edit.mjs
 node scripts/verify-conversation-state.mjs
+node scripts/verify-groups.mjs
 node scripts/verify-screenshots.mjs
 
 echo "SESSION-VERIFY-OK"

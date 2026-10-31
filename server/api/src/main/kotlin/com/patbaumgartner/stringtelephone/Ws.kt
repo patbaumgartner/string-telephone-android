@@ -25,6 +25,7 @@ class WsHub(
     private val presence: Presence,
     private val sessions: WsSessions,
     private val jdbcClient: JdbcClient,
+    private val groups: Groups,
 ) : TextWebSocketHandler() {
 
     override fun afterConnectionEstablished(session: WebSocketSession) {
@@ -61,12 +62,23 @@ class WsHub(
 
     /**
      * Client frames are ephemeral signals only; messages ride the HTTP send
-     * endpoint. The only accepted frame today is the typing signal (Phase 7),
-     * fanned out to the sender's conversation peers in both directions.
+     * endpoint. The accepted frames are the typing signals: the pairwise
+     * variant (Phase 7) fans out to the sender's conversation peers, the
+     * group variant (Phase 19) to every member except the composer.
      */
     internal fun handleClientFrame(sender: String, frame: String) {
         val envelope = runCatching { Json.decodeFromString<WsMessageDto>(frame) }.getOrNull() ?: return
         if (envelope.type != "typing") return
+        // Group variant first: its payload carries a groupId.
+        val groupPayload = runCatching {
+            Json.decodeFromString<WsClientGroupTypingPayload>(envelope.payload)
+        }.getOrNull()
+        if (groupPayload != null) {
+            val members = groups.memberNames(groupPayload.groupId)
+            if (sender !in members) return
+            broadcastGroupTyping(groupPayload.groupId, sender, members, groupPayload.typing)
+            return
+        }
         val typing = runCatching {
             Json.decodeFromString<WsClientTypingPayload>(envelope.payload).typing
         }.getOrNull() ?: return
@@ -98,6 +110,34 @@ class WsHub(
 
     fun broadcastNewMessage(message: MessageRecord) =
         sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.newMessage(message))
+
+    /**
+     * Group message fan-out (Phase 19): every *current* member receives the
+     * frame. Membership is read live, so members who joined a heartbeat ago
+     * get the frame and removed members stop receiving immediately.
+     */
+    fun broadcastGroupMessage(message: MessageRecord, members: List<String>) =
+        sessions.sendTo(members.toSet(), WsFrames.groupNewMessage(message))
+
+    /**
+     * Per-member group read fan-out (Phase 19): every member's devices
+     * learn which messages [reader] read, so the author's "3 read" counter
+     * converges and the reader's other devices apply it idempotently.
+     */
+    fun broadcastGroupRead(groupId: String, reader: String, members: List<String>, mark: ReadMark) =
+        sessions.sendTo(members.toSet(), WsFrames.groupMessageRead(groupId, reader, mark))
+
+    /** Group reaction fan-out (Phase 19): mirrors the pairwise one over membership. */
+    fun broadcastGroupReaction(message: MessageRecord, members: List<String>, author: String, emoji: String, added: Boolean) =
+        sessions.sendTo(members.toSet(), WsFrames.groupReaction(message, author, emoji, added))
+
+    /** Group deletion fan-out (Phase 19): mirrors the pairwise one over membership. */
+    fun broadcastGroupMessageDeleted(message: MessageRecord, members: List<String>) =
+        sessions.sendTo(members.toSet(), WsFrames.groupMessageDeleted(message))
+
+    /** Group typing fan-out (Phase 19): everyone except the composer. */
+    fun broadcastGroupTyping(groupId: String, from: String, members: List<String>, typing: Boolean) =
+        sessions.sendTo((members.toSet() - from), WsFrames.groupTyping(groupId, from, typing))
 
     /**
      * Fan-out for a reaction change (ADR-0011, Phase 8): both participants

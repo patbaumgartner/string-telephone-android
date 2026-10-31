@@ -201,24 +201,40 @@ object AppNotifier {
 
     /**
      * Shows or updates the notification for one conversation. [messages] are
-     * the recent unseen (content, epoch ms) pairs from [peer], oldest first;
-     * tapping opens that chat. Also carries a quick-reply RemoteInput and a
-     * mark-as-read action (Phase 14).
+     * the recent unseen (sender, content, epoch ms) triples from [peer],
+     * oldest first; tapping opens that chat. For groups (Phase 19),
+     * [senderNames] maps each sender's username to a display name and each
+     * line's person is that sender — the group name titles the notification.
+     * Also carries a quick-reply RemoteInput and a mark-as-read action
+     * (Phase 14).
      */
     fun notifyConversation(
         context: Context,
         peer: String,
         displayPeer: String,
-        messages: List<Pair<String, Long>>,
+        messages: List<Triple<String, String, Long>>,
         unreadCount: Int,
+        senderNames: ((String) -> String)? = null,
     ) {
         if (messages.isEmpty() || !canPost(context)) return
         ensureChannels(context)
-        val sender = Person.Builder().setName(displayPeer).setKey(peer).build()
+        val groupSenders = senderNames != null
+        val sender = if (groupSenders) {
+            Person.Builder().setName(displayPeer).setKey(peer).build()
+        } else {
+            Person.Builder().setName(displayPeer).setKey(peer).build()
+        }
         val style = NotificationCompat.MessagingStyle(
             Person.Builder().setName(context.getString(R.string.notification_you)).build(),
         )
-        for ((content, at) in messages) style.addMessage(content, at, sender)
+        for ((senderName, content, at) in messages) {
+            val linePerson = if (groupSenders) {
+                Person.Builder().setName(senderNames.invoke(senderName)).setKey(senderName).build()
+            } else {
+                sender
+            }
+            style.addMessage(content, at, linePerson)
+        }
         val latest = messages.last()
 
         // Quick-reply: RemoteInput gives an inline text field in the notification
@@ -227,7 +243,7 @@ object AppNotifier {
         val quickReplyAction = NotificationCompat.Action.Builder(
             R.drawable.ic_message,
             context.getString(R.string.notification_reply),
-            MessageActionReceiver.quickReplyIntent(context, peer),
+            MessageActionReceiver.quickReplyIntent(context, peer, groupSenders),
         )
             .addRemoteInput(replyRemoteInput)
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
@@ -238,7 +254,7 @@ object AppNotifier {
         val markReadAction = NotificationCompat.Action.Builder(
             R.drawable.ic_done,
             context.getString(R.string.notification_mark_read),
-            MessageActionReceiver.markReadIntent(context, peer),
+            MessageActionReceiver.markReadIntent(context, peer, groupSenders),
         )
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
             .setShowsUserInterface(false)
@@ -248,15 +264,15 @@ object AppNotifier {
             .setSmallIcon(R.drawable.ic_message)
             .setColor(context.getColor(R.color.notification_accent))
             .setContentTitle(displayPeer)
-            .setContentText(latest.first)
-            .setWhen(latest.second)
+            .setContentText(latest.second)
+            .setWhen(latest.third)
             .setShowWhen(true)
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setNumber(unreadCount)
             .setAutoCancel(true)
             .setOnlyAlertOnce(false)
-            .setContentIntent(activityIntent(context, MainActivity.ACTION_OPEN_CHAT, peer, peer.hashCode()))
+            .setContentIntent(activityIntent(context, MainActivity.ACTION_OPEN_CHAT, peer, peer.hashCode(), groupSenders))
             .addAction(quickReplyAction)
             .addAction(markReadAction)
             .build()
@@ -285,10 +301,11 @@ object AppNotifier {
         runCatching { NotificationManagerCompat.from(context).notify(tag, id, notification) }
     }
 
-    private fun activityIntent(context: Context, action: String, peer: String, requestCode: Int): PendingIntent {
+    private fun activityIntent(context: Context, action: String, peer: String, requestCode: Int, isGroup: Boolean = false): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .setAction(action)
             .putExtra(MainActivity.EXTRA_PEER, peer)
+            .putExtra(MainActivity.EXTRA_IS_GROUP, isGroup)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         return PendingIntent.getActivity(
             context,

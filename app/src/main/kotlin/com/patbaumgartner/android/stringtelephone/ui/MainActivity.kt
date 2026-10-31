@@ -80,7 +80,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleLaunch(intent: Intent?) {
-        viewModel.handleLaunchAction(intent?.action, intent?.getStringExtra(EXTRA_PEER))
+        viewModel.handleLaunchAction(
+            intent?.action,
+            intent?.getStringExtra(EXTRA_PEER),
+            intent?.getBooleanExtra(EXTRA_IS_GROUP, false) ?: false,
+        )
     }
 
     /** Lets a ringing or active call show above the lock screen, and only then. */
@@ -109,5 +113,6 @@ class MainActivity : ComponentActivity() {
         const val ACTION_OPEN_CHAT = "com.patbaumgartner.android.stringtelephone.action.OPEN_CHAT"
         const val ACTION_OPEN_CONTACTS = "com.patbaumgartner.android.stringtelephone.action.OPEN_CONTACTS"
         const val EXTRA_PEER = "peer"
+        const val EXTRA_IS_GROUP = "is_group"
     }
 }

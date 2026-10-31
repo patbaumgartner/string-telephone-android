@@ -11,7 +11,7 @@ import kotlin.test.assertEquals
 
 class ChatTimelineTest {
     private fun message(key: String, fromMe: Boolean, at: String) =
-        ChatMessage(key, key, fromMe, key, Instant.parse(at).toEpochMilli(), SendState.SENT)
+        ChatMessage(key, key, fromMe, "", key, Instant.parse(at).toEpochMilli(), SendState.SENT)
 
     @Test
     fun `day chips separate days and tails mark each change of sender`() {

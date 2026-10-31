@@ -153,7 +153,7 @@ function cacheIncludesQuoteComment() {
 check('AppViewModel — deleteMessage pass-through',   vm.includes('fun deleteMessage(peer: String, message: ChatMessage)'));
 check('AppViewModel — deleteForMe pass-through',     vm.includes('fun deleteForMe(peer: String, message: ChatMessage)'));
 check('ChatScreen — delete options in sheet',        chatScreen.includes('onDeleteForMe') && chatScreen.includes('onDeleteForBoth'));
-check('ChatScreen — tombstone placeholder',          memberBody(chatScreen, 'private fun ChatBubble(').includes('message.deleted'));
+check('ChatScreen — tombstone placeholder',          memberBody(chatScreen, 'internal fun ChatBubble(').includes('message.deleted'));
 check('ChatScreen — placeholder string',             chatScreen.includes('R.string.chat_deleted'));
 check('ChatScreen — delete for both needs server id', chatScreen.includes('if (message.serverId != null)'));
 check('strings.xml — chat_delete resources',         strings.includes('chat_delete_for_everyone') && strings.includes('chat_delete_for_me'));

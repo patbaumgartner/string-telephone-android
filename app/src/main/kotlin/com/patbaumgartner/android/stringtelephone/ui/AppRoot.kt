@@ -45,8 +45,8 @@ internal fun AppRoot(viewModel: AppViewModel) {
             }
         }
     }
-    BackHandler(enabled = screen is AppScreen.Chat || screen is AppScreen.Settings) {
-        viewModel.backToContacts()
+    BackHandler(enabled = screen is AppScreen.Chat || screen is AppScreen.Settings || screen is AppScreen.GroupChat || screen is AppScreen.GroupDetail) {
+        if (screen is AppScreen.GroupDetail) viewModel.backToContacts() else viewModel.backToContacts()
     }
     Crossfade(targetState = screen, label = "screen") { current ->
         when (current) {
@@ -54,6 +54,17 @@ internal fun AppRoot(viewModel: AppViewModel) {
             is AppScreen.Contacts -> ContactsScreen(viewModel, onCall = { peer ->
                 requestMicrophone { viewModel.startCall(peer) }
             })
+            is AppScreen.Groups -> GroupsScreen(viewModel)
+            is AppScreen.GroupDetail -> GroupDetailScreen(
+                group = viewModel.groupById(current.groupId),
+                contacts = viewModel.contactsState().collectAsState().value.contacts,
+                meUsername = viewModel.meUsername() ?: "",
+                viewModel = viewModel,
+            )
+            is AppScreen.GroupChat -> GroupChatScreen(
+                groupId = current.groupId,
+                viewModel = viewModel,
+            )
             is AppScreen.Chat -> ChatScreen(
                 peer = current.peer,
                 viewModel = viewModel,

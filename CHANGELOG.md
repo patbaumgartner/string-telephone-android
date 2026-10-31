@@ -9,6 +9,15 @@ No public release has been published yet.
 
 ### Changed
 
+- Group chats (Phase 19). Create a group from the contacts menu, pick
+  members, and chat with everyone at once: the group list shows member
+  counts and unread badges, the chat renders the sender's name above each
+  incoming bubble, and sent messages show a "N read" counter that converges
+  across all members' devices. The admin (the creator) renames the group,
+  adds or removes members and disbands it; other members can leave. Replies,
+  reactions and deletion work exactly as in one-to-one chats, and the
+  notification shade routes taps, quick replies and "Mark as read" to the
+  right conversation. Group calls are a separate future phase.
 - Conversations can be pinned, muted and archived (Phase 18). Long-press a
   conversation row to open the options sheet. Pinned chats float to the
   top (up to five), muted chats keep their unread badge but raise no

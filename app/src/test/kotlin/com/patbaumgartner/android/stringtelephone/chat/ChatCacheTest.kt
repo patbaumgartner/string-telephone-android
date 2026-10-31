@@ -7,13 +7,13 @@ import kotlin.test.assertTrue
 class ChatCacheTest {
 
     private fun message(clientKey: String, content: String, at: Long, state: SendState = SendState.PENDING) =
-        ChatMessage(serverId = null, clientKey = clientKey, fromMe = true, content = content, sentAtEpochMs = at, state = state)
+        ChatMessage(serverId = null, clientKey = clientKey, fromMe = true, sender = "", content = content, sentAtEpochMs = at, state = state)
 
     @Test
     fun `append adds and sorts by timestamp`() {
         val cache = ChatCache()
         cache.append("bob", message("k2", "second", 200))
-        cache.append("bob", ChatMessage("s1", "k1", false, "first", 100, SendState.SENT))
+        cache.append("bob", ChatMessage("s1", "k1", false, "", "first", 100, SendState.SENT))
         assertEquals(listOf("first", "second"), cache.history("bob").map { it.content })
     }
 
@@ -96,7 +96,7 @@ class ChatCacheTest {
     @Test
     fun `a read receipt turns the sent copy into a double tick`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "hey", 1, SendState.SENT))
         assertTrue(cache.applyReadReceipt(setOf("m1"), 500))
         val stored = cache.history("bob").single()
         assertEquals(SendState.READ, stored.state)
@@ -106,8 +106,8 @@ class ChatCacheTest {
     @Test
     fun `a read receipt only touches the listed server ids`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", true, "one", 1, SendState.SENT))
-        cache.append("bob", ChatMessage("m2", "k2", true, "two", 2, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "one", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "", "two", 2, SendState.SENT))
         assertTrue(cache.applyReadReceipt(setOf("m2"), 500))
         val states = cache.history("bob").associate { it.serverId to it.state }
         assertEquals(SendState.SENT, states["m1"])
@@ -117,7 +117,7 @@ class ChatCacheTest {
     @Test
     fun `applyReaction adds one emoji per author and replaces on react again`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "hey", 1, SendState.SENT))
         assertTrue(cache.applyReaction("m1", "alice", "👍", added = true).let { it != null })
 
         // Reacting again replaces the emoji (one row per author).
@@ -128,7 +128,7 @@ class ChatCacheTest {
     @Test
     fun `applyReaction removes only the named author's reaction`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "hey", 1, SendState.SENT))
         cache.applyReaction("m1", "alice", "👍", added = true)
         cache.applyReaction("m1", "bob", "❤️", added = true)
 
@@ -143,8 +143,8 @@ class ChatCacheTest {
     @Test
     fun `applyEdited replaces content stamps the hint and keeps receipts`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", true, "helo", 1, SendState.READ, readAtEpochMs = 9L))
-        cache.append("bob", ChatMessage("m2", "k2", false, "from peer", 2, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "helo", 1, SendState.READ, readAtEpochMs = 9L))
+        cache.append("bob", ChatMessage("m2", "k2", false, "", "from peer", 2, SendState.SENT))
 
         assertEquals("bob", cache.applyEdited("m1", "hello", 55L))
         val edited = cache.history("bob").single { it.serverId == "m1" }
@@ -171,8 +171,8 @@ class ChatCacheTest {
 
     @Test
     fun `applyReaction touches only the named server id and reports unknown ids`() {        val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", true, "one", 1, SendState.SENT))
-        cache.append("carol", ChatMessage("m2", "k2", false, "two", 2, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "one", 1, SendState.SENT))
+        cache.append("carol", ChatMessage("m2", "k2", false, "", "two", 2, SendState.SENT))
 
         assertEquals("carol", cache.applyReaction("m2", "bob", "🔥", added = true))
         assertEquals(emptyMap(), cache.history("bob").single().reactions)
@@ -183,7 +183,7 @@ class ChatCacheTest {
     @Test
     fun `a receipt for an unknown id changes nothing`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "hey", 1, SendState.SENT))
         assertTrue(!cache.applyReadReceipt(setOf("other"), 500))
         assertTrue(!cache.applyReadReceipt(emptySet(), 500))
         assertEquals(SendState.SENT, cache.history("bob").single().state)
@@ -192,10 +192,10 @@ class ChatCacheTest {
     @Test
     fun `a read state is never downgraded by a later history page`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "hey", 1, SendState.SENT))
         cache.applyReadReceipt(setOf("m1"), 500)
         // A page fetched before the receipt still says unread.
-        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "hey", 1, SendState.SENT))
         val stored = cache.history("bob").single()
         assertEquals(SendState.READ, stored.state)
         assertEquals(500L, stored.readAtEpochMs)
@@ -204,8 +204,8 @@ class ChatCacheTest {
     @Test
     fun `reply carries its target id through the cache`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", false, "can you make saturday", 1, SendState.SENT))
-        cache.append("bob", ChatMessage("m2", "k2", true, "yes 2pm works", 2, SendState.SENT, replyToId = "m1"))
+        cache.append("bob", ChatMessage("m1", "k1", false, "", "can you make saturday", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "", "yes 2pm works", 2, SendState.SENT, replyToId = "m1"))
         val reply = cache.history("bob").single { it.serverId == "m2" }
         assertEquals("m1", reply.replyToId)
     }
@@ -213,8 +213,8 @@ class ChatCacheTest {
     @Test
     fun `findQuotedMessage resolves the referenced message in the same conversation`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", false, "can you make saturday", 1, SendState.SENT))
-        cache.append("bob", ChatMessage("m2", "k2", true, "yes 2pm works", 2, SendState.SENT, replyToId = "m1"))
+        cache.append("bob", ChatMessage("m1", "k1", false, "", "can you make saturday", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "", "yes 2pm works", 2, SendState.SENT, replyToId = "m1"))
 
         val quoted = cache.findQuotedMessage("bob", "m1")
         assertEquals("can you make saturday", quoted?.content)
@@ -226,8 +226,8 @@ class ChatCacheTest {
     @Test
     fun `applyDeleted tombstones exactly the named message`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", false, "secret", 1, SendState.SENT))
-        cache.append("bob", ChatMessage("m2", "k2", true, "other", 2, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", false, "", "secret", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "", "other", 2, SendState.SENT))
 
         val peer = cache.applyDeleted("m1", 500, "bob")
         assertEquals("bob", peer)
@@ -244,7 +244,7 @@ class ChatCacheTest {
     @Test
     fun `applyDeleted is idempotent and keeps the first tombstone`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", true, "hello", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "hello", 1, SendState.SENT))
         cache.applyDeleted("m1", 500, "alice")
         cache.applyDeleted("m1", 999, "bob")
 
@@ -256,8 +256,8 @@ class ChatCacheTest {
     @Test
     fun `hideLocally removes only the named message and does not touch the server record`() {
         val cache = ChatCache()
-        cache.append("bob", ChatMessage("m1", "k1", false, "keep", 1, SendState.SENT))
-        cache.append("bob", ChatMessage("m2", "k2", true, "hide me", 2, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", false, "", "keep", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m2", "k2", true, "", "hide me", 2, SendState.SENT))
 
         assertTrue(cache.hideLocally("bob", "k2"))
         assertEquals(listOf("keep"), cache.history("bob").map { it.content })
@@ -284,7 +284,7 @@ class ChatCacheTest {
 
 class ChatCacheReadElsewhereTest {
     private fun message(serverId: String, clientKey: String, fromMe: Boolean, state: SendState) =
-        ChatMessage(serverId = serverId, clientKey = clientKey, fromMe = fromMe, content = "x", sentAtEpochMs = 1, state = state)
+        ChatMessage(serverId = serverId, clientKey = clientKey, fromMe = fromMe, sender = "", content = "x", sentAtEpochMs = 1, state = state)
 
     @Test
     fun `applyReadReceiptForPeers returns the peers whose messages actually changed`() {

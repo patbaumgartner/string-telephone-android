@@ -186,11 +186,20 @@ class SessionController(
         val lines = recentMessages.getOrPut(message.peer) { ArrayDeque() }
         lines.addLast(message)
         while (lines.size > MAX_NOTIFICATION_LINES) lines.removeFirst()
+        // Group messages (Phase 19) announce the group's name and carry the
+        // sender in each line's person; pairwise keeps the peer's name.
+        val isGroup = message.groupId != null
+        val displayPeer = if (isGroup) {
+            repository.groups.value.firstOrNull { it.id == message.peer }?.name ?: message.peer
+        } else {
+            displayNameOf(message.peer)
+        }
         AppNotifier.notifyConversation(
             context = context,
             peer = message.peer,
-            displayPeer = displayNameOf(message.peer),
-            messages = lines.map { it.content to it.createdAtEpochMs },
+            displayPeer = displayPeer,
+            senderNames = if (isGroup) { sender -> displayNameOf(sender) } else null,
+            messages = lines.map { Triple(it.sender, it.content, it.createdAtEpochMs) },
             unreadCount = repository.unread.value[message.peer] ?: lines.size,
         )
     }
