@@ -145,6 +145,18 @@ class ScreenshotTest {
         capture("dark-contacts-managed", ScreenshotRoute.CONTACTS_MANAGED, dark = true)
     }
 
+    /** The group list with rows, member counts and unread badges (Phase 19). */
+    @Test
+    fun captureGroups() {
+        capture("20-groups", ScreenshotRoute.GROUPS)
+    }
+
+    /** A group conversation: sender headers, group bubbles, "N read" counter (Phase 19). */
+    @Test
+    fun captureGroupChat() {
+        capture("21-group-chat", ScreenshotRoute.GROUP_CHAT)
+    }
+
     @Test
     fun captureSettings() {
         capture("05-settings", ScreenshotRoute.SETTINGS)

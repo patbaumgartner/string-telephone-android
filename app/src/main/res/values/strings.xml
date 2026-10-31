@@ -206,4 +206,30 @@
     <string name="cd_mute">Mute the microphone</string>
     <string name="cd_unmute">Unmute the microphone</string>
     <string name="menu_settings">Settings</string>
+
+    <!-- Groups (Phase 19) -->
+    <string name="groups_title">Groups</string>
+    <string name="groups_create_title">New group</string>
+    <string name="groups_name_label">Group name</string>
+    <string name="groups_pick_members">Pick members from your contacts</string>
+    <string name="groups_create">Create</string>
+    <string name="groups_member_count">%1$d members</string>
+    <string name="groups_rename">Rename</string>
+    <string name="groups_add_member">Add member</string>
+    <string name="groups_remove">Remove</string>
+    <string name="groups_disband">Disband</string>
+    <string name="groups_leave">Leave</string>
+    <string name="groups_role_admin">Admin</string>
+    <string name="groups_no_candidates">Everyone is already in this group.</string>
+    <string name="groups_disband_confirm_title">Disband this group?</string>
+    <string name="groups_disband_confirm_body">Messages stay on each member\'s device, but the group disappears for everyone.</string>
+    <string name="groups_load_failed">This group is gone.</string>
+    <string name="groups_empty">No groups yet</string>
+    <string name="groups_empty_hint">Create a group from the toolbar to chat with several people at once.</string>
+    <string name="groups_create_cd">Create a group</string>
+    <string name="groups_open_detail">Open group details</string>
+    <string name="cd_open_group_chat">Open group messages</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="chat_read_count">%1$d read</string>
 </resources>

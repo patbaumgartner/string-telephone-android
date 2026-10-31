@@ -2,11 +2,10 @@
 
 ## Status
 
-Accepted as a **scope decision only**. Group chat implementation is deferred
-beyond the current roadmap horizon (`docs/feature-plan.md`); this ADR exists
-so that the one-to-one designs being built now (ADR-0010 read receipts,
-ADR-0011 reactions/replies/deletion, ADR-0009 media) do not hard-code
-assumptions that would force rework when groups arrive.
+Accepted. Superseded in part by Phase 19's implementation
+(2026-10-31): the compatibility constraints held, and group *chats* are now
+built — group *calls* (confbridge, constraint 6) remain pairwise-call-only
+and move to Phase 20 with their own ADR-0014.
 
 ## Context
 
@@ -92,3 +91,24 @@ design or record an explicit exception here.
 - Until groups are implemented, the maximum conversation size stays two and
   group-related requests (none exist yet) are impossible by construction —
   no speculative group code ships with this decision.
+
+## Implementation note (Phase 19, 2026-10-31)
+
+Group chats shipped under these constraints, each one verifiably held:
+
+1. **Conversation addressing** — group REST paths are
+   `/v1/groups/{groupId}/...`, pairwise paths stay `/v1/conversations/{peer}/...`.
+2. **Per-message, per-member state** — `group_message_reads` extends the
+   ADR-0010 receipt model; reactions and deletion run through the same
+   service seams with the acting user.
+3. **Events name their conversation** — every group frame carries
+   `groupId`; `group-message-read` additionally names the `reader`.
+4. **Authorship stays derived** — group sends take no sender field; the
+   author is the authenticated principal.
+5. **`recipient` never became a group key** — membership lives in
+   `groups`/`group_members`; group message rows keep `recipient = ''` with a
+   separate `group_id` column and per-kind idempotency indexes.
+6. **PBX untouched** — group calls are Phase 20 (confbridge, ADR-0014).
+7. **Roadmap** — this file (feature-plan Phase 19) records the shipped scope;
+   the deferred pieces (media/voice in groups, group calls) are Phase 20 and
+   later work.

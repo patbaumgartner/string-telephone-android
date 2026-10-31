@@ -24,7 +24,7 @@ class NotificationBrandingTest {
     @Test
     fun `missed calls, incoming calls and messages use the cyan notification accent`() {
         AppNotifier.notifyMissedCall(context, "bob", "Bob")
-        AppNotifier.notifyConversation(context, "bob", "Bob", listOf("Hello" to 1_000L), 1)
+        AppNotifier.notifyConversation(context, "bob", "Bob", listOf(Triple("", "Hello", 1_000L)), 1)
         AppNotifier.notifyIncomingCall(context, "carol", "Carol")
         val notifications = context.getSystemService(NotificationManager::class.java).activeNotifications
         assertEquals(3, notifications.size)

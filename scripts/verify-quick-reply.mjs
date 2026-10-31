@@ -83,7 +83,7 @@ function check(name, condition, hint) {
 check('Receiver — class exists and handles both actions', receiver.includes('class MessageActionReceiver : BroadcastReceiver()') && receiver.includes('ACTION_QUICK_REPLY') && receiver.includes('ACTION_MARK_READ'));
 check('Receiver — extracts the RemoteInput result', receiver.includes('RemoteInput.getResultsFromIntent(intent)'));
 check('Receiver — blank replies are ignored', receiver.includes('if (text.isNullOrEmpty()) return'));
-check('Receiver — sends through the repository send path', receiver.includes('container.repository.send(peer, text)'));
+check('Receiver — sends through the repository send path', receiver.includes('container.repository.send(target, body)') && receiver.includes('container.repository.sendGroup(target, body)'));
 check('Receiver — mark-as-read goes through markConversationRead', receiver.includes('container.repository.markConversationRead(peer, null)'));
 check('Receiver — failed sends post a follow-up notification', receiver.includes('notification_send_failed_title') && receiver.includes('notify(peer.hashCode()'));
 check('Receiver — failure notification opens the conversation when tapped', receiver.includes('MainActivity.ACTION_OPEN_CHAT'));
@@ -92,8 +92,8 @@ check('Receiver — pending intents are immutable and receiver-directed', receiv
 
 // ── Notifier: actions on the conversation notification ───────────────────────
 
-check('Notifier — reply action with RemoteInput on message notifications', notifier.includes('addRemoteInput(replyRemoteInput)') && notifier.includes('MessageActionReceiver.quickReplyIntent(context, peer)'));
-check('Notifier — mark-as-read action on message notifications', notifier.includes('MessageActionReceiver.markReadIntent(context, peer)') && notifier.includes('R.string.notification_mark_read'));
+check('Notifier — reply action with RemoteInput on message notifications', notifier.includes('addRemoteInput(replyRemoteInput)') && notifier.includes('MessageActionReceiver.quickReplyIntent(context, peer, groupSenders)'));
+check('Notifier — mark-as-read action on message notifications', notifier.includes('MessageActionReceiver.markReadIntent(context, peer, groupSenders)') && notifier.includes('R.string.notification_mark_read'));
 check('Notifier — actions declare semantic actions and no UI', notifier.includes('SEMANTIC_ACTION_REPLY') && notifier.includes('SEMANTIC_ACTION_MARK_AS_READ') && notifier.includes('setShowsUserInterface(false)'));
 check('Notifier — both actions added to the builder', notifier.includes('.addAction(quickReplyAction)') && notifier.includes('.addAction(markReadAction)'));
 

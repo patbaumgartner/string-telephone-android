@@ -35,7 +35,7 @@ class StringTelephoneRepositoryPreviewTest {
         val repo = repository(cache)
         repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
 
-        cache.append("bob", ChatMessage(null, "k1", fromMe = false, "hello there", 1_000, SendState.SENT))
+        cache.append("bob", ChatMessage(null, "k1", fromMe = false, "", "hello there", 1_000, SendState.SENT))
 
         val preview = awaitPreviews(repo, "bob")
         assertEquals("hello there", preview?.content)
@@ -47,7 +47,7 @@ class StringTelephoneRepositoryPreviewTest {
         val repo = repository(cache)
         repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
 
-        cache.append("bob", ChatMessage(null, "k1", fromMe = true, "from the composer", 1_000, SendState.PENDING))
+        cache.append("bob", ChatMessage(null, "k1", fromMe = true, "", "from the composer", 1_000, SendState.PENDING))
         awaitPreviews(repo, "bob")
 
         cache.markSent("k1", "srv-9")
@@ -62,7 +62,7 @@ class StringTelephoneRepositoryPreviewTest {
         val cache = ChatCache()
         val repo = repository(cache)
         repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
-        cache.append("bob", ChatMessage(null, "k1", fromMe = false, "hello", 1_000, SendState.SENT))
+        cache.append("bob", ChatMessage(null, "k1", fromMe = false, "", "hello", 1_000, SendState.SENT))
         awaitPreviews(repo, "bob")
 
         repo.clearSession()
@@ -75,7 +75,7 @@ class StringTelephoneRepositoryPreviewTest {
         val cache = ChatCache()
         val repo = repository(cache)
         repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
-        val message = ChatMessage(null, "k1", fromMe = false, "hello", 1_000, SendState.SENT)
+        val message = ChatMessage(null, "k1", fromMe = false, "", "hello", 1_000, SendState.SENT)
         cache.append("bob", message)
         awaitPreviews(repo, "bob")
 

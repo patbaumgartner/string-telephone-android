@@ -104,6 +104,11 @@ internal fun ContactsScreen(viewModel: AppViewModel, onCall: (String) -> Unit = 
                 }
                 DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.groups_title)) },
+                        leadingIcon = { Icon(StringTelephoneIcons.Group, contentDescription = null) },
+                        onClick = { menuExpanded = false; viewModel.openGroups() },
+                    )
+                    DropdownMenuItem(
                         text = { Text(stringResource(R.string.menu_settings)) },
                         leadingIcon = { Icon(StringTelephoneIcons.Settings, contentDescription = null) },
                         onClick = { menuExpanded = false; viewModel.openSettings() },

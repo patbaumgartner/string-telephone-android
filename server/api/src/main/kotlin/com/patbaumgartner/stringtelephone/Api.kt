@@ -21,6 +21,7 @@ class ApiController(
     private val media: MediaService,
     private val reactions: Reactions,
     private val conversationStates: ConversationStates,
+    private val groups: Groups,
 ) {
     @GetMapping("/health")
     fun health() = mapOf("status" to "ok")
@@ -108,6 +109,167 @@ class ApiController(
             throw ApiFailure(HttpStatus.BAD_REQUEST, "too many pinned conversations")
         }
         return ConversationStateDto(record.pinned, record.muted, record.archived)
+    }
+
+    // ── Groups (Phase 19, ADR-0012) ─────────────────────────────────────────
+
+    private fun groupDto(withMembers: GroupWithMembers) = GroupDto(
+        withMembers.group.id, withMembers.group.name, withMembers.group.creator,
+        withMembers.group.createdAt, withMembers.group.updatedAt,
+        withMembers.members.map { GroupMemberDto(it.username, it.role, it.joinedAt) },
+    )
+
+    /** Loads a group and checks the caller's membership; non-members see 404. */
+    private fun memberGroup(request: HttpServletRequest, groupId: String): Pair<UserRecord, GroupWithMembers> {
+        val me = principal(request)
+        val group = groups.find(groupId) ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such group")
+        val withMembers = groups.withMembers(group)
+        if (!withMembers.isMember(me.username)) throw ApiFailure(HttpStatus.NOT_FOUND, "no such group")
+        return me to withMembers
+    }
+
+    @PostMapping("/v1/groups")
+    fun createGroup(request: HttpServletRequest, @RequestBody body: CreateGroupRequest): ResponseEntity<GroupDto> {
+        val me = principal(request)
+        val members = body.members.distinct().filter { it != me.username }
+        for (member in members) {
+            if (users.find(member)?.active != true) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user: $member")
+        }
+        val created = try {
+            groups.create(body.name, me.username)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "invalid group name")
+        }
+        for (member in members) {
+            try {
+                groups.addMember(created.group.id, member)
+            } catch (_: IllegalArgumentException) {
+                throw ApiFailure(HttpStatus.BAD_REQUEST, "too many members")
+            }
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(groupDto(groups.withMembers(created.group)))
+    }
+
+    @GetMapping("/v1/groups")
+    fun myGroups(request: HttpServletRequest): List<GroupDto> {
+        val me = principal(request)
+        return groups.groupsOf(me.username).map { groupDto(it) }
+    }
+
+    @GetMapping("/v1/groups/{groupId}")
+    fun groupDetails(request: HttpServletRequest, @PathVariable groupId: String): GroupDto {
+        val (_, group) = memberGroup(request, groupId)
+        return groupDto(group)
+    }
+
+    @PutMapping("/v1/groups/{groupId}")
+    fun renameGroup(request: HttpServletRequest, @PathVariable groupId: String, @RequestBody body: RenameGroupRequest): GroupDto {
+        val (me, group) = memberGroup(request, groupId)
+        if (!group.isAdmin(me.username)) throw ApiFailure(HttpStatus.FORBIDDEN, "only the admin may rename")
+        val renamed = try {
+            groups.rename(groupId, body.name)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "invalid group name")
+        }
+        return groupDto(groups.withMembers(renamed))
+    }
+
+    @PostMapping("/v1/groups/{groupId}/members")
+    fun addGroupMember(request: HttpServletRequest, @PathVariable groupId: String, @RequestBody body: AddGroupMemberRequest): GroupDto {
+        val (me, group) = memberGroup(request, groupId)
+        if (!group.isAdmin(me.username)) throw ApiFailure(HttpStatus.FORBIDDEN, "only the admin may add members")
+        if (users.find(body.username)?.active != true) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
+        val members = try {
+            groups.addMember(groupId, body.username)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "too many members")
+        }
+        return groupDto(GroupWithMembers(group.group, members))
+    }
+
+    @DeleteMapping("/v1/groups/{groupId}/members/{username}")
+    fun removeGroupMember(request: HttpServletRequest, @PathVariable groupId: String, @PathVariable username: String): GroupDto {
+        val (me, group) = memberGroup(request, groupId)
+        val members = try {
+            groups.removeMember(groupId, me.username, username)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.FORBIDDEN, "not allowed to remove this member")
+        }
+        return groupDto(GroupWithMembers(group.group, members!!))
+    }
+
+    @DeleteMapping("/v1/groups/{groupId}")
+    fun disbandGroup(request: HttpServletRequest, @PathVariable groupId: String): Map<String, String> {
+        val (me, group) = memberGroup(request, groupId)
+        if (!group.isAdmin(me.username)) throw ApiFailure(HttpStatus.FORBIDDEN, "only the admin may disband")
+        groups.disband(groupId)
+        return mapOf("status" to "disbanded")
+    }
+
+    /**
+     * Sends a group message (Phase 19): authorship comes from the principal
+     * (ADR-0012 constraint 4), membership is the only authorisation, and
+     * the fan-out reaches every member over the websocket.
+     */
+    @PostMapping("/v1/groups/{groupId}/messages")
+    fun sendGroupMessage(request: HttpServletRequest, @PathVariable groupId: String, @RequestBody body: SendGroupMessageRequest): ResponseEntity<MessageDto> {
+        val (me, group) = memberGroup(request, groupId)
+        val replyToId = body.replyToId?.takeIf { it.isNotBlank() }
+        if (replyToId != null) {
+            val replyMsg = messages.findById(replyToId)
+                ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "reply target not found")
+            if (replyMsg.groupId != groupId) throw ApiFailure(HttpStatus.BAD_REQUEST, "reply target not in this group")
+        }
+        if (body.content.isEmpty() || body.content.toByteArray(Charsets.UTF_8).size > Messages.MAX_CONTENT_BYTES) {
+            throw ApiFailure(HttpStatus.CONTENT_TOO_LARGE, "content size invalid")
+        }
+        val stored = messages.insertGroupText(me.username, groupId, body.content, body.clientKey, replyToId)
+        hub.broadcastGroupMessage(stored, group.memberNames())
+        return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
+    }
+
+    /**
+     * Group message history (Phase 19): identical pagination semantics to
+     * the pairwise page, scoped to the caller's membership.
+     */
+    @GetMapping("/v1/groups/{groupId}/messages")
+    fun groupMessages(
+        request: HttpServletRequest,
+        @PathVariable groupId: String,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "50") limit: Int,
+    ): GroupMessagesPageDto {
+        val (_, _) = memberGroup(request, groupId)
+        val before = cursor?.let {
+            decodeMessageCursor(it) ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "invalid cursor")
+        }
+        val rows = messages.groupPage(groupId, before, limit)
+        val messageIds = rows.map { it.id }
+        val reactionsMap = if (messageIds.isNotEmpty()) reactions.listForMessages(messageIds) else emptyMap()
+        val readCounts = if (messageIds.isNotEmpty()) messages.groupReadCounts(messageIds) else emptyMap()
+        return GroupMessagesPageDto(
+            rows.map { record -> messageDto(record, reactionsMap[record.id] ?: emptyList(), readCounts[record.id] ?: 0) },
+            rows.lastOrNull()?.let { encodeMessageCursor(it.createdAt, it.id) },
+        )
+    }
+
+    /**
+     * Marks group messages read (Phase 19): one row per (message, reader)
+     * in `group_message_reads`, fanned to every member. Never marks the
+     * caller's own messages.
+     */
+    @PostMapping("/v1/groups/{groupId}/read")
+    fun markGroupRead(request: HttpServletRequest, @PathVariable groupId: String, @RequestBody body: MarkGroupReadRequest): MarkReadResponse {
+        val (me, group) = memberGroup(request, groupId)
+        val upTo = body.upToMessageId?.takeIf { it.isNotBlank() }?.let {
+            val message = messages.findById(it)
+                ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "upToMessageId not found")
+            if (message.groupId != groupId) throw ApiFailure(HttpStatus.BAD_REQUEST, "upToMessageId not in this group")
+            Pair(message.createdAt, message.id)
+        }
+        val mark = messages.markGroupRead(groupId, me.username, upTo)
+        if (mark.messageIds.isNotEmpty()) hub.broadcastGroupRead(groupId, me.username, group.memberNames(), mark)
+        return MarkReadResponse(mark.messageIds, mark.readAt)
     }
 
     @GetMapping("/v1/conversations/{peer}/messages")
@@ -253,6 +415,7 @@ class ApiController(
         @RequestBody body: AddReactionRequest,
     ): List<ReactionDto> {
         val me = principal(request)
+        ensurePairwiseMessage(peer, messageId)
         val result = reactions.addReaction(messageId, me.username, body.emoji)
         return result
     }
@@ -264,7 +427,86 @@ class ApiController(
         @PathVariable messageId: String,
     ): List<ReactionDto> {
         val me = principal(request)
+        ensurePairwiseMessage(peer, messageId)
         return reactions.removeReaction(messageId, me.username)
+    }
+
+    // ── Group reactions and deletion (Phase 19) ─────────────────────────────
+
+    @PutMapping("/v1/groups/{groupId}/messages/{messageId}/reactions")
+    fun addGroupReaction(
+        request: HttpServletRequest,
+        @PathVariable groupId: String,
+        @PathVariable messageId: String,
+        @RequestBody body: AddReactionRequest,
+    ): List<ReactionDto> {
+        val me = principal(request)
+        ensureGroupMessage(groupId, messageId)
+        return try {
+            reactions.addGroupReaction(messageId, me.username, body.emoji)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        } catch (_: GroupMessageAccessException) {
+            throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        }
+    }
+
+    @DeleteMapping("/v1/groups/{groupId}/messages/{messageId}/reactions")
+    fun removeGroupReaction(
+        request: HttpServletRequest,
+        @PathVariable groupId: String,
+        @PathVariable messageId: String,
+    ): List<ReactionDto> {
+        val me = principal(request)
+        ensureGroupMessage(groupId, messageId)
+        return try {
+            reactions.removeGroupReaction(messageId, me.username)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        } catch (_: GroupMessageAccessException) {
+            throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        }
+    }
+
+    /**
+     * Deletes a group message for all members (Phase 19): the author or the
+     * admin may tombstone; the tombstone fans out as `group-deleted`.
+     */
+    @DeleteMapping("/v1/groups/{groupId}/messages/{messageId}")
+    fun deleteGroupMessage(
+        request: HttpServletRequest,
+        @PathVariable groupId: String,
+        @PathVariable messageId: String,
+    ): MessageDto {
+        val (me, group) = memberGroup(request, groupId)
+        val message = messages.findById(messageId)
+            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        if (message.groupId != groupId) {
+            throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        }
+        val allowed = message.sender == me.username || group.isAdmin(me.username)
+        if (!allowed) throw ApiFailure(HttpStatus.FORBIDDEN, "only the author or the admin may delete")
+        val tombstone = messages.delete(messageId, me.username)
+        if (tombstone != null && tombstone.deletedAt != null) {
+            hub.broadcastGroupMessageDeleted(tombstone, group.memberNames())
+        }
+        return messageDto(tombstone!!)
+    }
+
+    /** Rejects a group path whose message does not belong to that group (404). */
+    private fun ensureGroupMessage(groupId: String, messageId: String) {
+        val message = messages.findById(messageId)
+            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        if (message.groupId != groupId) throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+    }
+
+    /** Rejects a pairwise path whose message is a group message or foreign to the pair (404). */
+    private fun ensurePairwiseMessage(peer: String, messageId: String) {
+        val message = messages.findById(messageId)
+            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        if (message.groupId != null || (message.sender != peer && message.recipient != peer)) {
+            throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        }
     }
 
     // ── Deletion (ADR-0011, Phase 10) ───────────────────────────────────────
@@ -286,8 +528,10 @@ class ApiController(
         val me = principal(request)
         val message = messages.findById(messageId)
             ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
-        val participant = message.sender == me.username || message.recipient == me.username
-        if (!participant) {
+        // A group row lives in the group namespace only: the pairwise path
+        // answers 404 instead of leaking its existence (ADR-0012).
+        if (message.groupId != null) throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        if (message.sender != me.username && message.recipient != me.username) {
             throw ApiFailure(HttpStatus.FORBIDDEN, "not a participant")
         }
         val tombstone = messages.delete(messageId, me.username)
@@ -317,6 +561,9 @@ class ApiController(
         val me = principal(request)
         val message = messages.findById(messageId)
             ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        if (message.groupId != null) {
+            throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        }
         if (message.sender != me.username) {
             throw ApiFailure(HttpStatus.FORBIDDEN, "only the author may edit")
         }
@@ -337,9 +584,9 @@ class ApiController(
     }
 }
 
-private fun messageDto(record: MessageRecord, reactions: List<ReactionDto> = emptyList()) =
+private fun messageDto(record: MessageRecord, reactions: List<ReactionDto> = emptyList(), readCount: Int? = null) =
     MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt, record.type, record.mediaId, record.width, record.height,
-        if (reactions.isEmpty()) null else reactions, record.replyTo, record.deletedAt, record.deletedBy, record.durationMs, record.waveform, record.editedAt)
+        if (reactions.isEmpty()) null else reactions, record.replyTo, record.deletedAt, record.deletedBy, record.durationMs, record.waveform, record.editedAt, record.groupId, readCount)
 
 /**
  * Normalizes the client's waveform sample list (Phase 11): keeps numeric

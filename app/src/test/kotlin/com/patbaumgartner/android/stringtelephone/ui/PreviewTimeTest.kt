@@ -63,16 +63,16 @@ class PreviewTimeTest {
 
     @Test
     fun `tombstones and media take placeholders text does not`() {
-        val text = ChatMessage("s1", "k1", fromMe = false, "plain text", 1_000, SendState.SENT)
+        val text = ChatMessage("s1", "k1", fromMe = false, "", "plain text", 1_000, SendState.SENT)
         assertFalse(isPlaceholderPreview(text))
 
-        val image = ChatMessage("s2", "k2", fromMe = false, "", 1_000, SendState.SENT, type = "IMAGE")
+        val image = ChatMessage("s2", "k2", fromMe = false, "", "", 1_000, SendState.SENT, type = "IMAGE")
         assertTrue(isPlaceholderPreview(image))
 
-        val voice = ChatMessage("s3", "k3", fromMe = false, "", 1_000, SendState.SENT, type = "VOICE")
+        val voice = ChatMessage("s3", "k3", fromMe = false, "", "", 1_000, SendState.SENT, type = "VOICE")
         assertTrue(isPlaceholderPreview(voice))
 
-        val tombstone = ChatMessage("s4", "k4", fromMe = false, "gone", 1_000, SendState.SENT, deletedAtEpochMs = 2_000)
+        val tombstone = ChatMessage("s4", "k4", fromMe = false, "", "gone", 1_000, SendState.SENT, deletedAtEpochMs = 2_000)
         assertTrue(isPlaceholderPreview(tombstone))
     }
 }

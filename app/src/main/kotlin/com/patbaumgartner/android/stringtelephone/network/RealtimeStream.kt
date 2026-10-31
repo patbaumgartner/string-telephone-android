@@ -19,4 +19,7 @@ interface RealtimeStream {
 
     /** Sends the ephemeral typing signal (Phase 7); best effort, no delivery guarantee. */
     fun sendTyping(typing: Boolean) {}
+
+    /** Sends the group typing signal (Phase 19); same best-effort rules. */
+    fun sendGroupTyping(groupId: String, typing: Boolean) {}
 }

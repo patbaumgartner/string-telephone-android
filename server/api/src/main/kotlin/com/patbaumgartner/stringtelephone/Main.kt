@@ -42,28 +42,40 @@ class StringTelephoneServer {
     fun wsSessions() = WsSessions()
 
     @Bean
-    fun wsHub(users: Users, presence: Presence, sessions: WsSessions, jdbcClient: JdbcClient) =
-        WsHub(users, presence, sessions, jdbcClient)
+    fun wsHub(users: Users, presence: Presence, sessions: WsSessions, jdbcClient: JdbcClient, groups: Groups) =
+        WsHub(users, presence, sessions, jdbcClient, groups)
 
     @Bean
     fun presence(pbx: PbxGateway, sessions: WsSessions, users: Users) = Presence(pbx, sessions, users)
 
     @Bean
-    fun messages(jdbcClient: JdbcClient, hub: WsHub, conversationStates: ConversationStates) =
+    fun messages(jdbcClient: JdbcClient, hub: WsHub, conversationStates: ConversationStates, groups: Groups) =
         Messages(jdbcClient, onNewMessage = { stored: MessageRecord ->
             // A new incoming message un-archives the conversation for the
             // recipient (Phase 18, WhatsApp behaviour) so every device
-            // converges without a client-side round trip.
-            hub.broadcastNewMessage(stored)
-            conversationStates.unarchive(stored.recipient, stored.sender)
+            // converges without a client-side round trip. Group messages
+            // fan out over membership instead and un-archive for every
+            // member except the author (Phase 19).
+            if (stored.groupId == null) {
+                hub.broadcastNewMessage(stored)
+                conversationStates.unarchive(stored.recipient, stored.sender)
+            } else {
+                hub.broadcastGroupMessage(stored, groups.memberNames(stored.groupId))
+                for (member in groups.memberNames(stored.groupId)) {
+                    if (member != stored.sender) conversationStates.unarchive(member, stored.sender)
+                }
+            }
         })
 
     @Bean
-    fun reactions(jdbcClient: JdbcClient, messages: Messages, hub: WsHub) =
-        Reactions(jdbcClient, messages, hub)
+    fun reactions(jdbcClient: JdbcClient, messages: Messages, hub: WsHub, groups: Groups) =
+        Reactions(jdbcClient, messages, hub, groups)
 
     @Bean
     fun conversationStates(jdbcClient: JdbcClient) = ConversationStates(jdbcClient)
+
+    @Bean
+    fun groups(jdbcClient: JdbcClient) = Groups(jdbcClient)
 
     @Bean
     fun media(jdbcClient: JdbcClient, store: MediaStore) = MediaService(jdbcClient, store)

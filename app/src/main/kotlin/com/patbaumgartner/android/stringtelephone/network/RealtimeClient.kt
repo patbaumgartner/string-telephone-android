@@ -119,6 +119,11 @@ class RealtimeClient(
         socket?.send("""{"type":"typing","payload":{"typing":$typing}}""")
     }
 
+    /** Sends the group typing signal (Phase 19); best effort, no delivery guarantee. */
+    override fun sendGroupTyping(groupId: String, typing: Boolean) {
+        socket?.send("""{"type":"typing","payload":{"groupId":"$groupId","typing":$typing}}""")
+    }
+
     private companion object {
         const val CLOSE_NORMAL = 1000
         const val BASE_BACKOFF_MS = 1_000L

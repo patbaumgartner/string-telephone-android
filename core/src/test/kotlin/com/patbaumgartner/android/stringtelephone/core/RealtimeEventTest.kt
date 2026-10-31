@@ -129,6 +129,52 @@ class RealtimeEventTest {
     }
 
     @Test
+    fun `parses group frames into their events`() {
+        val message = parseRealtimeEvent(
+            """{"type":"group-message","payload":"{\"id\":\"g1\",\"sender\":\"alice\",\"recipient\":\"\",\"groupId\":\"grp\",\"content\":\"hi all\",\"createdAt\":42,\"clientKey\":\"k1\"}"}""",
+        )
+        val groupMessage = assertIs<RealtimeEvent.GroupMessage>(message)
+        assertEquals("g1", groupMessage.id)
+        assertEquals("alice", groupMessage.sender)
+        assertEquals("grp", groupMessage.groupId)
+        assertEquals("hi all", groupMessage.content)
+
+        val read = assertIs<RealtimeEvent.GroupMessageRead>(
+            parseRealtimeEvent("""{"type":"group-message-read","payload":"{\"groupId\":\"grp\",\"reader\":\"bob\",\"messageIds\":[\"g1\"],\"readAt\":99}"}"""),
+        )
+        assertEquals("grp", read.groupId)
+        assertEquals("bob", read.reader)
+        assertEquals(listOf("g1"), read.messageIds)
+
+        val reaction = assertIs<RealtimeEvent.GroupMessageReaction>(
+            parseRealtimeEvent("""{"type":"group-reaction","payload":"{\"messageId\":\"g1\",\"peer\":\"\",\"groupId\":\"grp\",\"authorUsername\":\"bob\",\"emoji\":\"👍\",\"action\":\"added\"}"}"""),
+        )
+        assertEquals("grp", reaction.groupId)
+        assertEquals("bob", reaction.authorUsername)
+        assertEquals(true, reaction.added)
+
+        val deleted = assertIs<RealtimeEvent.GroupMessageDeleted>(
+            parseRealtimeEvent("""{"type":"group-deleted","payload":"{\"messageId\":\"g1\",\"peer\":\"\",\"groupId\":\"grp\",\"deletedBy\":\"alice\",\"deletedAt\":77}"}"""),
+        )
+        assertEquals("grp", deleted.groupId)
+        assertEquals("alice", deleted.deletedBy)
+
+        // The group typing variant rides the same envelope with a groupId.
+        val typing = assertIs<RealtimeEvent.GroupTyping>(
+            parseRealtimeEvent("""{"type":"typing","payload":"{\"peer\":\"bob\",\"typing\":true,\"groupId\":\"grp\"}"}"""),
+        )
+        assertEquals("grp", typing.groupId)
+        assertEquals("bob", typing.from)
+        assertEquals(true, typing.typing)
+    }
+
+    @Test
+    fun `group frames without a groupId are dropped instead of misrouted`() {
+        assertNull(parseRealtimeEvent("""{"type":"group-message","payload":"{\"id\":\"g1\",\"sender\":\"a\",\"recipient\":\"\",\"content\":\"x\",\"createdAt\":1,\"clientKey\":\"k\"}"}"""))
+        assertNull(parseRealtimeEvent("""{"type":"group-reaction","payload":"{\"messageId\":\"m1\",\"peer\":\"\",\"authorUsername\":\"a\",\"emoji\":\"x\",\"action\":\"added\"}"}"""))
+    }
+
+    @Test
     fun `drops malformed frames and unknown fields`() {
         assertNull(parseRealtimeEvent("not json"))
         assertNull(parseRealtimeEvent("""{"type":"new-message","payload":"{broken"}"""))

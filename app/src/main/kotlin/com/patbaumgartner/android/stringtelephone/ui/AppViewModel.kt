@@ -18,6 +18,7 @@ import com.patbaumgartner.android.stringtelephone.chat.ImageDownscale
 import com.patbaumgartner.android.stringtelephone.core.CallState
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
 import com.patbaumgartner.android.stringtelephone.core.ConversationStateDto
+import com.patbaumgartner.android.stringtelephone.core.GroupDto
 import com.patbaumgartner.android.stringtelephone.core.ServerUrlValidation
 import com.patbaumgartner.android.stringtelephone.core.validateServerUrl
 import com.patbaumgartner.android.stringtelephone.data.AccountState
@@ -49,7 +50,10 @@ import kotlinx.coroutines.withContext
 sealed interface AppScreen {
     data object Onboarding : AppScreen
     data object Contacts : AppScreen
+    data object Groups : AppScreen
     data class Chat(val peer: String) : AppScreen
+    data class GroupChat(val groupId: String) : AppScreen
+    data class GroupDetail(val groupId: String) : AppScreen
     data class Call(val peer: String, val incoming: Boolean) : AppScreen
     data object Settings : AppScreen
 }
@@ -171,7 +175,14 @@ class AppViewModel(
             session.registrationFailed.collect { callRegistrationFailed = it }
         }
         viewModelScope.launch {
-            _screen.collect { screen -> session.onChatShown((screen as? AppScreen.Chat)?.peer) }
+            _screen.collect { screen ->
+                val chatPeer = when (screen) {
+                    is AppScreen.Chat -> screen.peer
+                    is AppScreen.GroupChat -> screen.groupId
+                    else -> null
+                }
+                session.onChatShown(chatPeer)
+            }
         }
         viewModelScope.launch {
             repository.signIn.collect { state ->
@@ -239,7 +250,7 @@ class AppViewModel(
     }
 
     /** Applies a notification tap delivered to [MainActivity]. */
-    fun handleLaunchAction(action: String?, peer: String?) {
+    fun handleLaunchAction(action: String?, peer: String?, isGroup: Boolean = false) {
         if (!repository.signIn.value.success) return
         when (action) {
             MainActivity.ACTION_SHOW_CALL, MainActivity.ACTION_ANSWER_CALL -> {
@@ -250,7 +261,9 @@ class AppViewModel(
                     if (ringing && action == MainActivity.ACTION_ANSWER_CALL) pendingAnswer = true
                 }
             }
-            MainActivity.ACTION_OPEN_CHAT -> if (!peer.isNullOrBlank()) openChat(peer)
+            MainActivity.ACTION_OPEN_CHAT -> if (!peer.isNullOrBlank()) {
+                if (isGroup) openGroupChat(peer) else openChat(peer)
+            }
             MainActivity.ACTION_OPEN_CONTACTS -> if (_screen.value !is AppScreen.Call) {
                 _screen.value = AppScreen.Contacts
             }
@@ -420,6 +433,44 @@ class AppViewModel(
     /** The username of the peer currently composing, or null when the indicator is hidden. */
     fun typingPeerState(): StateFlow<String?> = repository.typingPeer
 
+    // ── Groups (Phase 19, ADR-0012) ─────────────────────────────────────────
+
+    /** The signed-in user's groups for the group list screen. */
+    fun groupsState(): StateFlow<List<GroupDto>> = repository.groups
+
+    /** Composing members per group id, for the group chat's typing line. */
+    fun groupTypingState(): StateFlow<Map<String, Set<String>>> = repository.groupTyping
+
+    fun refreshGroupsSilently() {
+        repository.refreshGroups()
+    }
+
+    fun createGroup(name: String, members: List<String>, onResult: (GroupDto?) -> Unit) {
+        repository.createGroup(name, members, onResult)
+    }
+
+    fun renameGroup(groupId: String, name: String, onResult: (GroupDto?) -> Unit) {
+        repository.renameGroup(groupId, name, onResult)
+    }
+
+    fun addGroupMember(groupId: String, username: String, onResult: (GroupDto?) -> Unit) {
+        repository.addGroupMember(groupId, username, onResult)
+    }
+
+    fun removeGroupMember(groupId: String, username: String, onResult: (GroupDto?) -> Unit) {
+        repository.removeGroupMember(groupId, username, onResult)
+    }
+
+    fun disbandGroup(groupId: String, onResult: (Boolean) -> Unit) {
+        repository.disbandGroup(groupId, onResult)
+    }
+
+    /** Finds a group by id from the loaded list; null when absent. */
+    fun groupById(groupId: String): GroupDto? = repository.groups.value.firstOrNull { it.id == groupId }
+
+    /** Display name of a group member; contacts first, fallback to the username. */
+    fun memberDisplayName(username: String, contacts: List<ContactDto>): String = displayNameOf(username, contacts)
+
     fun buildInfo(): com.patbaumgartner.android.stringtelephone.di.BuildInfo = container.buildInfo
 
     fun displayNameOf(username: String, contacts: List<ContactDto>): String =
@@ -584,6 +635,19 @@ class AppViewModel(
         repository.account.value.me?.let { me -> repository.loadHistory(peer, me.username) }
     }
 
+    /** Opens a group conversation (Phase 19): history loads under the group id key. */
+    fun openGroupChat(groupId: String) {
+        chatInput = repository.chatDraftFlow(groupId).value
+        _replyingTo.value = null
+        _screen.value = AppScreen.GroupChat(groupId)
+        repository.account.value.me?.let { me -> repository.loadGroupHistory(groupId, me.username) }
+    }
+
+    /** Opens the group detail screen (members, admin actions). */
+    fun openGroupDetail(groupId: String) {
+        _screen.value = AppScreen.GroupDetail(groupId)
+    }
+
     /**
      * Marks the peer's messages as read (ADR-0010).
      *
@@ -598,12 +662,66 @@ class AppViewModel(
         repository.markConversationRead(peer, upToMessageId)
     }
 
+    /**
+     * Marks the group's messages read (Phase 19): only the foreground group
+     * chat screen calls this, mirroring the pairwise ADR-0010 rule.
+     */
+    fun markGroupConversationRead(groupId: String, upToMessageId: String?) {
+        repository.markGroupConversationRead(groupId, upToMessageId)
+    }
+
+    /** Group message send (Phase 19): the composer path mirrors [sendMessage]. */
+    fun sendGroupMessage(groupId: String, content: String) {
+        val text = content.trim()
+        if (text.isEmpty()) return
+        val replyTo = _replyingTo.value
+        val replyToId = replyTo?.serverId
+        chatInput = ""
+        repository.saveChatDraft(groupId, "")
+        _replyingTo.value = null
+        repository.sendGroupTypingStop(groupId)
+        repository.sendGroup(groupId, text, replyToId) { }
+    }
+
+    /** Group typing signal (Phase 19): debounced like the pairwise composer. */
+    fun onGroupChatInputChanged(groupId: String, value: String) {
+        chatInput = value
+        if (_editingMessage.value != null) return
+        repository.saveChatDraft(groupId, value)
+        typingDebounceJob?.cancel()
+        typingDebounceJob = viewModelScope.launch {
+            delay(TYPING_DEBOUNCE_MS)
+            typingDebounceJob = null
+            repository.notifyGroupTyping(groupId)
+        }
+    }
+
+    /** Long-press actions on a group message (Phase 19). */
+    fun toggleGroupReaction(groupId: String, message: ChatMessage, emoji: String) {
+        repository.toggleGroupReaction(groupId, message, emoji)
+    }
+
+    fun deleteGroupMessage(groupId: String, message: ChatMessage) {
+        repository.deleteGroupMessage(groupId, message)
+        if (_replyingTo.value?.clientKey == message.clientKey) _replyingTo.value = null
+    }
+
+    fun backFromGroupDetail() {
+        _screen.value = AppScreen.Contacts
+    }
+
     fun backToContacts() {
         _screen.value = AppScreen.Contacts
     }
 
     fun openSettings() {
         _screen.value = AppScreen.Settings
+    }
+
+    /** Opens the group list (Phase 19); the list refreshes on entry. */
+    fun openGroups() {
+        repository.refreshGroups()
+        _screen.value = AppScreen.Groups
     }
 
     fun refreshContactsSilently() {

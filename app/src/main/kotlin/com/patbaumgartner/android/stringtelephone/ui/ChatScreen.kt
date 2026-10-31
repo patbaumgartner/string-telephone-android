@@ -515,7 +515,7 @@ private fun ChatSearchResults(
  */
 /** Decorative initial; the name next to it is what screen readers announce. */
 @Composable
-private fun Avatar(name: String) {
+internal fun Avatar(name: String) {
     Box(
         modifier = Modifier
             .size(40.dp)
@@ -532,7 +532,7 @@ private fun Avatar(name: String) {
 }
 
 @Composable
-private fun DayChip(date: LocalDate) {
+internal fun DayChip(date: LocalDate) {
     val today = LocalDate.now()
     val locale = LocalConfiguration.current.locales[0]
     val label = when (dayLabel(date, today)) {
@@ -559,7 +559,7 @@ private fun DayChip(date: LocalDate) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatBubble(
+internal fun ChatBubble(
     peer: String,
     message: ChatMessage,
     startsGroup: Boolean,
@@ -998,7 +998,7 @@ private fun VoiceWaveform(
 }
 
 @Composable
-private fun Composer(
+internal fun Composer(
     value: String,
     onValueChange: (String) -> Unit,
     emojiPickerVisible: Boolean,
@@ -1382,7 +1382,7 @@ private fun ReactionChips(
 
 /** Long-press reaction sheet: any emoji from the quick set or the keyboard. */
 @Composable
-private fun ReactionPickerDialog(
+internal fun ReactionPickerDialog(
     myUsername: String,
     reactions: Map<String, String>,
     onReact: (String) -> Unit,
@@ -1764,7 +1764,7 @@ private fun ReplyOptionsSheet(
 }
 
 /** A faint dot grid over the tinted chat background. */
-private fun Modifier.chatWallpaper(base: Color, dots: Color): Modifier = drawBehind {
+internal fun Modifier.chatWallpaper(base: Color, dots: Color): Modifier = drawBehind {
     drawRect(base)
     val step = 22.dp.toPx()
     val radius = 1.2.dp.toPx()
@@ -1783,7 +1783,7 @@ private fun Modifier.chatWallpaper(base: Color, dots: Color): Modifier = drawBeh
 }
 
 private val TAIL_WIDTH = 7.dp
-private const val BUBBLE_WIDTH_FRACTION = 0.82f
+internal const val BUBBLE_WIDTH_FRACTION = 0.82f
 
 /**
  * Rounded bubble whose first message in a group points at its sender with a

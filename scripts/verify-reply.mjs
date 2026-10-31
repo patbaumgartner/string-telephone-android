@@ -141,7 +141,7 @@ check('AppViewModel — setReplyingTo / clearReplyTo', vm.includes('fun setReply
 check('AppViewModel — sendCurrent passes reply target', memberBody(vm, 'fun sendCurrent(').includes('_replyingTo.value?.serverId'));
 check('ChatScreen — ReplyOptionsSheet',            chatScreen.includes('ReplyOptionsSheet'));
 check('ChatScreen — QuotedMessageBanner above composer', chatScreen.includes('QuotedMessageBanner('));
-check('ChatScreen — QuotedBubble in message',      memberBody(chatScreen, 'private fun ChatBubble(').includes('QuotedBubble('));
+check('ChatScreen — QuotedBubble in message',      memberBody(chatScreen, 'internal fun ChatBubble(').includes('QuotedBubble('));
 check('ChatScreen — long-press offers reply',      chatScreen.includes('ReplyOptionsSheet('));
 check('strings.xml — chat_reply resource',         strings.includes('chat_reply'));
 check('strings.xml — reply_to resource',           strings.includes('"reply_to"'));

@@ -535,6 +535,225 @@ class ApiIntegrationTest {
         assertNull(messageOf(server.get("/v1/conversations/alice/messages", bob), replyId)["readAt"])
     }
 
+    // ── Phase 19: group chats (ADR-0012) ────────────────────────────────────
+
+    private fun createGroup(token: String, name: String, members: List<String> = emptyList()): JsonObject {
+        val body = """{"name":"$name","members":[${members.joinToString(",") { "\"$it\"" }}]}"""
+        val response = server.post("/v1/groups", body, token)
+        assertEquals(201, response.statusCode(), response.body())
+        return Json.parseToJsonElement(response.body()).jsonObject
+    }
+
+    @Test
+    fun `group lifecycle covers create list rename membership and disband with admin-only powers`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        val carol = server.create("carol", "Carol").getValue("apiToken").jsonPrimitive.content
+        val dave = server.create("dave", "Dave").getValue("apiToken").jsonPrimitive.content
+
+        // Creation: the creator becomes ADMIN, listed members join as MEMBER.
+        val created = createGroup(alice, "Expedition", listOf("bob", "carol"))
+        val groupId = created.getValue("id").jsonPrimitive.content
+        assertEquals("alice", created.getValue("creator").jsonPrimitive.content)
+        val roles = created.getValue("members").jsonArray.associate {
+            it.jsonObject.getValue("username").jsonPrimitive.content to
+                it.jsonObject.getValue("role").jsonPrimitive.content
+        }
+        assertEquals("ADMIN", roles["alice"])
+        assertEquals("MEMBER", roles["bob"])
+        assertEquals("MEMBER", roles["carol"])
+
+        // Blank and over-long names are rejected; unknown members abort creation.
+        assertEquals(400, server.post("/v1/groups", """{"name":"   "}""", alice).statusCode())
+        assertEquals(400, server.post("/v1/groups", """{"name":"${"x".repeat(65)}"}""", alice).statusCode())
+        assertEquals(404, server.post("/v1/groups", """{"name":"ok","members":["stranger"]}""", alice).statusCode())
+
+        // Non-members cannot see or enumerate the group (404, not 403).
+        assertEquals(404, server.get("/v1/groups/$groupId", dave).statusCode())
+        val listing = Json.parseToJsonElement(server.get("/v1/groups", bob).body()).jsonArray
+        assertEquals(1, listing.size)
+
+        // Only the admin renames; members get 403.
+        assertEquals(403, server.put("/v1/groups/$groupId", """{"name":"Hijacked"}""", bob).statusCode())
+        assertEquals(200, server.put("/v1/groups/$groupId", """{"name":"Expedition Two"}""", alice).statusCode())
+        assertEquals("Expedition Two", Json.parseToJsonElement(server.get("/v1/groups/$groupId", bob).body())
+            .jsonObject.getValue("name").jsonPrimitive.content)
+
+        // Only the admin adds members; an existing member add is idempotent.
+        assertEquals(403, server.post("/v1/groups/$groupId/members", """{"username":"dave"}""", bob).statusCode())
+        assertEquals(404, server.post("/v1/groups/$groupId/members", """{"username":"stranger"}""", alice).statusCode())
+        assertEquals(200, server.post("/v1/groups/$groupId/members", """{"username":"dave"}""", alice).statusCode())
+        val three = Json.parseToJsonElement(server.get("/v1/groups/$groupId", carol).body()).jsonObject
+        assertEquals(4, three.getValue("members").jsonArray.size)
+
+        // A member may leave; only the admin may remove someone else.
+        assertEquals(403, server.delete("/v1/groups/$groupId/members/carol", bob).statusCode())
+        assertEquals(200, server.delete("/v1/groups/$groupId/members/carol", alice).statusCode())
+        assertEquals(404, server.get("/v1/groups/$groupId", carol).statusCode(), "a removed member loses visibility")
+        assertEquals(200, server.delete("/v1/groups/$groupId/members/dave", dave).statusCode(), "a member may leave")
+
+        // The admin cannot leave — disbanding is the only exit.
+        assertEquals(403, server.delete("/v1/groups/$groupId/members/alice", alice).statusCode())
+
+        // Only the admin disbands; afterwards everything is gone for everyone.
+        assertEquals(403, server.delete("/v1/groups/$groupId", bob).statusCode())
+        assertEquals(200, server.delete("/v1/groups/$groupId", alice).statusCode())
+        assertEquals(404, server.get("/v1/groups/$groupId", alice).statusCode())
+        assertEquals(404, server.get("/v1/groups/$groupId", bob).statusCode())
+    }
+
+    @Test
+    fun `group messages send read and paginate like pairwise with per-member receipts`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        val carol = server.create("carol", "Carol").getValue("apiToken").jsonPrimitive.content
+        val dave = server.create("dave", "Dave").getValue("apiToken").jsonPrimitive.content
+        val groupId = createGroup(alice, "Readers", listOf("bob", "carol")).getValue("id").jsonPrimitive.content
+
+        // Sending derives the author from the principal; an empty content is rejected.
+        assertEquals(413, server.post("/v1/groups/$groupId/messages", """{"content":"","clientKey":"g-e"}""", alice).statusCode())
+        assertEquals(404, server.post("/v1/groups/$groupId/messages", """{"content":"x","clientKey":"g-n"}""", dave).statusCode())
+        val sent = server.post("/v1/groups/$groupId/messages", """{"content":"hello members","clientKey":"g-1"}""", alice)
+        assertEquals(201, sent.statusCode(), sent.body())
+        val record = Json.parseToJsonElement(sent.body()).jsonObject
+        val messageId = record.getValue("id").jsonPrimitive.content
+        assertEquals(groupId, record.getValue("groupId").jsonPrimitive.content)
+        assertEquals("", record.getValue("recipient").jsonPrimitive.content)
+
+        // Idempotent resend returns the same row.
+        val again = server.post("/v1/groups/$groupId/messages", """{"content":"hello members","clientKey":"g-1"}""", alice)
+        assertEquals(messageId, Json.parseToJsonElement(again.body()).jsonObject.getValue("id").jsonPrimitive.content)
+
+        // History is visible to every member and carries the same row.
+        for (member in listOf(bob, carol)) {
+            val page = Json.parseToJsonElement(server.get("/v1/groups/$groupId/messages", member).body()).jsonObject
+            assertEquals(1, page.getValue("messages").jsonArray.size)
+            assertEquals(messageId, page.getValue("messages").jsonArray[0].jsonObject.getValue("id").jsonPrimitive.content)
+        }
+        assertEquals(404, server.get("/v1/groups/$groupId/messages", dave).statusCode())
+
+        // Bob reads: only bob's mark, only others' messages, idempotent.
+        val mark = server.post("/v1/groups/$groupId/read", """{"upToMessageId":"$messageId"}""", bob)
+        assertEquals(200, mark.statusCode(), mark.body())
+        assertEquals(listOf(messageId), Json.parseToJsonElement(mark.body()).jsonObject
+            .getValue("messageIds").jsonArray.map { it.jsonPrimitive.content })
+        val repeated = server.post("/v1/groups/$groupId/read", """{"upToMessageId":"$messageId"}""", bob)
+        assertEquals(0, Json.parseToJsonElement(repeated.body()).jsonObject.getValue("messageIds").jsonArray.size)
+
+        // The author's own messages are never marked by themselves.
+        assertEquals(0, Json.parseToJsonElement(
+            server.post("/v1/groups/$groupId/read", "{}", alice).body(),
+        ).jsonObject.getValue("messageIds").jsonArray.size)
+
+        // History rows expose per-message read counts for the "N read" badge.
+        val badge = Json.parseToJsonElement(server.get("/v1/groups/$groupId/messages", alice).body()).jsonObject
+        assertEquals(1, badge.getValue("messages").jsonArray[0].jsonObject
+            .getValue("readCount").jsonPrimitive.int)
+        val readerView = Json.parseToJsonElement(server.get("/v1/groups/$groupId/messages", bob).body()).jsonObject
+        assertEquals(1, readerView.getValue("messages").jsonArray[0].jsonObject
+            .getValue("readCount").jsonPrimitive.int, "the count is the same for every member's view")
+
+        // A foreign message id cannot sneak into the group mark.
+        val foreign = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"pairwise","clientKey":"pw-1"}""", carol).let {
+            // carol→bob is a different conversation; alice cannot mark it here.
+            Json.parseToJsonElement(it.body()).jsonObject.getValue("id").jsonPrimitive.content
+        }
+        assertEquals(400, server.post("/v1/groups/$groupId/read", """{"upToMessageId":"$foreign"}""", alice).statusCode())
+    }
+
+    @Test
+    fun `group message fan-out reaches every member over the websocket with group frames`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        val carol = server.create("carol", "Carol").getValue("apiToken").jsonPrimitive.content
+        val groupId = createGroup(alice, "Listeners", listOf("bob", "carol")).getValue("id").jsonPrimitive.content
+
+        val bobEvents = SocketListener()
+        val bobSocket = connect(bob, bobEvents)
+        val carolEvents = SocketListener()
+        val carolSocket = connect(carol, carolEvents)
+
+        assertEquals(201, server.post("/v1/groups/$groupId/messages", """{"content":"fan out","clientKey":"ws-1"}""", alice).statusCode())
+        for (listener in listOf(bobEvents, carolEvents)) {
+            val payload = Json.parseToJsonElement(listener.next("group-message").getValue("payload").jsonPrimitive.content).jsonObject
+            assertEquals("fan out", payload.getValue("content").jsonPrimitive.content)
+            assertEquals(groupId, payload.getValue("groupId").jsonPrimitive.content)
+        }
+
+        // The read fan-out reaches every connected member.
+        val messageId = Json.parseToJsonElement(
+            server.get("/v1/groups/$groupId/messages", bob).body(),
+        ).jsonObject.getValue("messages").jsonArray[0].jsonObject.getValue("id").jsonPrimitive.content
+        assertEquals(200, server.post("/v1/groups/$groupId/read", """{"upToMessageId":"$messageId"}""", bob).statusCode())
+        for (listener in listOf(bobEvents, carolEvents)) {
+            val payload = Json.parseToJsonElement(listener.next("group-message-read").getValue("payload").jsonPrimitive.content).jsonObject
+            assertEquals(groupId, payload.getValue("groupId").jsonPrimitive.content)
+            assertEquals("bob", payload.getValue("reader").jsonPrimitive.content)
+            assertEquals(messageId, payload.getValue("messageIds").jsonArray.single().jsonPrimitive.content)
+        }
+
+        bobSocket.abort()
+        carolSocket.abort()
+    }
+
+    @Test
+    fun `group reactions and deletion fan out and pairwise endpoints reject group rows`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        val carol = server.create("carol", "Carol").getValue("apiToken").jsonPrimitive.content
+        val groupId = createGroup(alice, "Reactors", listOf("bob", "carol")).getValue("id").jsonPrimitive.content
+
+        val sent = server.post("/v1/groups/$groupId/messages", """{"content":"react to me","clientKey":"rx-1"}""", alice)
+        val messageId = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
+
+        val bobEvents = SocketListener()
+        val bobSocket = connect(bob, bobEvents)
+        val carolEvents = SocketListener()
+        val carolSocket = connect(carol, carolEvents)
+
+        // Bob reacts; every member receives the group-reaction frame.
+        assertEquals(200, server.put("/v1/groups/$groupId/messages/$messageId/reactions", """{"emoji":"👍"}""", bob).statusCode())
+        for (listener in listOf(bobEvents, carolEvents)) {
+            val payload = Json.parseToJsonElement(listener.next("group-reaction").getValue("payload").jsonPrimitive.content).jsonObject
+            assertEquals(messageId, payload.getValue("messageId").jsonPrimitive.content)
+            assertEquals("bob", payload.getValue("authorUsername").jsonPrimitive.content)
+            assertEquals("👍", payload.getValue("emoji").jsonPrimitive.content)
+            assertEquals("added", payload.getValue("action").jsonPrimitive.content)
+            assertEquals(groupId, payload.getValue("groupId").jsonPrimitive.content)
+        }
+        val reactions = Json.parseToJsonElement(
+            server.get("/v1/groups/$groupId/messages", carol).body(),
+        ).jsonObject.getValue("messages").jsonArray[0].jsonObject.getValue("reactions").jsonArray
+        assertEquals("bob", reactions[0].jsonObject.getValue("authorUsername").jsonPrimitive.content)
+
+        // Only the author or the admin deletes; the tombstone fans out.
+        assertEquals(403, server.delete("/v1/groups/$groupId/messages/$messageId", carol).statusCode())
+        assertEquals(200, server.delete("/v1/groups/$groupId/messages/$messageId", alice).statusCode())
+        for (listener in listOf(bobEvents, carolEvents)) {
+            val payload = Json.parseToJsonElement(listener.next("group-deleted").getValue("payload").jsonPrimitive.content).jsonObject
+            assertEquals(messageId, payload.getValue("messageId").jsonPrimitive.content)
+            assertEquals("alice", payload.getValue("deletedBy").jsonPrimitive.content)
+        }
+        val tombstone = Json.parseToJsonElement(
+            server.get("/v1/groups/$groupId/messages", bob).body(),
+        ).jsonObject.getValue("messages").jsonArray.single().jsonObject
+        assertNotNull(tombstone.getValue("deletedAt").jsonPrimitive.longOrNull)
+        assertEquals("", tombstone.getValue("content").jsonPrimitive.content)
+        bobSocket.abort()
+        carolSocket.abort()
+
+        // A second group message: pairwise endpoints must not see group rows.
+        val second = server.post("/v1/groups/$groupId/messages", """{"content":"pairwise probe","clientKey":"pw-2"}""", bob)
+        val secondId = Json.parseToJsonElement(second.body()).jsonObject.getValue("id").jsonPrimitive.content
+        assertEquals(404, server.delete("/v1/conversations/alice/messages/$secondId", bob).statusCode())
+        assertEquals(404, server.put("/v1/conversations/bob/messages/$secondId", """{"content":"hijack"}""", bob).statusCode())
+        assertEquals(404, server.put("/v1/conversations/bob/messages/$secondId/reactions", """{"emoji":"x"}""", bob).statusCode())
+    }
+
     private fun messageOf(response: java.net.http.HttpResponse<String>, id: String): JsonObject =
         Json.parseToJsonElement(response.body()).jsonObject.getValue("messages").jsonArray
             .map { it.jsonObject }.single { it.getValue("id").jsonPrimitive.content == id }

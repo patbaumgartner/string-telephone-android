@@ -208,7 +208,7 @@ class StringTelephoneRepositoryRealtimeTest {
         val fake = FakeRealtimeStream()
         val repo = repository(cache, fake)
         repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
-        cache.append("bob", ChatMessage("m1", "k1", true, "hey", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", true, "", "hey", 1, SendState.SENT))
 
         repo.startRealtime()
         fake.emit(RealtimeEvent.MessageReaction("m1", "bob", "bob", "👍", added = true))
@@ -226,7 +226,7 @@ class StringTelephoneRepositoryRealtimeTest {
         val fake = FakeRealtimeStream()
         val repo = repository(cache, fake)
         repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
-        cache.append("bob", ChatMessage("m1", "k1", false, "secret", 1, SendState.SENT))
+        cache.append("bob", ChatMessage("m1", "k1", false, "", "secret", 1, SendState.SENT))
 
         repo.startRealtime()
         fake.emit(RealtimeEvent.MessageDeleted("m1", "alice", "bob", 77))
@@ -244,7 +244,7 @@ class StringTelephoneRepositoryRealtimeTest {
         val fake = FakeRealtimeStream()
         val repo = repository(cache, fake)
         repo.seedForPreviews(MeResult("alice", "Alice"), emptyList())
-        cache.append("bob", ChatMessage("m1", "k1", false, "helo", 1, SendState.SENT, readAtEpochMs = 5L))
+        cache.append("bob", ChatMessage("m1", "k1", false, "", "helo", 1, SendState.SENT, readAtEpochMs = 5L))
 
         repo.startRealtime()
         fake.emit(RealtimeEvent.MessageEdited("m1", "alice", "hello", 99))
@@ -292,7 +292,7 @@ class StringTelephoneRepositoryRealtimeTest {
         val collector = launch(Dispatchers.Unconfined) { repo.readElsewhere.collect { readElsewhere += it } }
         fake.emit(RealtimeEvent.MessageRead(listOf("m1"), 5_000))
 
-        awaitUntil { repo.unread.value.isEmpty() && readElsewhere == listOf("bob") }
+        awaitUntil { repo.unread.value.isEmpty() && readElsewhere.toList() == listOf("bob") }
         assertEquals(SendState.READ, cache.history("bob").single().state)
         assertEquals(5_000L, cache.history("bob").single().readAtEpochMs)
         collector.cancel()

@@ -70,6 +70,10 @@ data class MessageDto(
     val waveform: String? = null,
     /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
     val editedAt: Long? = null,
+    /** Group conversation this message belongs to (Phase 19); null for pairwise. */
+    val groupId: String? = null,
+    /** How many members read this group message (Phase 19); null for pairwise. */
+    val readCount: Int? = null,
 )
 
 /** One emoji reaction: who reacted and when (ADR-0011, Phase 8). */
@@ -122,6 +126,60 @@ data class MarkReadRequest(val upToMessageId: String? = null)
 @Serializable
 data class MarkReadResponseDto(val messageIds: List<String> = emptyList(), val readAt: Long = 0)
 
+// ── Group chats (Phase 19, ADR-0012) ────────────────────────────────────────
+
+/** One group as the REST surface returns it, with its member list. */
+@Serializable
+data class GroupDto(
+    val id: String,
+    val name: String,
+    val creator: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val members: List<GroupMemberDto>,
+)
+
+@Serializable
+data class GroupMemberDto(
+    val username: String,
+    val role: String, // "ADMIN" or "MEMBER"
+    val joinedAt: Long,
+)
+
+@Serializable
+data class CreateGroupRequest(val name: String, val members: List<String> = emptyList())
+
+@Serializable
+data class RenameGroupRequest(val name: String)
+
+@Serializable
+data class AddGroupMemberRequest(val username: String)
+
+@Serializable
+data class GroupMessagesPageDto(val messages: List<MessageDto>, val nextCursor: String?)
+
+/** Sends one group message: no recipient, authorship comes from the principal. */
+@Serializable
+data class SendGroupMessageRequest(
+    val content: String,
+    val clientKey: String,
+    val replyToId: String? = null,
+)
+
+/** Per-member group read fan-out payload (Phase 19). */
+@Serializable
+data class WsGroupMessageReadDto(
+    val groupId: String,
+    /** Who read the messages, so every device can converge the counter. */
+    val reader: String,
+    val messageIds: List<String> = emptyList(),
+    val readAt: Long = 0,
+)
+
+/** Group typing payload: composer started or stopped in a group (Phase 19). */
+@Serializable
+data class WsGroupTypingDto(val groupId: String, val typing: Boolean)
+
 /** Adds or replaces the caller's reaction on a message (ADR-0011, Phase 8). */
 @Serializable
 data class SetReactionRequest(val emoji: String)
@@ -154,6 +212,8 @@ data class WsNewMessageDto(
     val waveform: String? = null,
     /** Epoch ms at which the author last edited the message (Phase 17); null when never edited. */
     val editedAt: Long? = null,
+    /** Group conversation this message belongs to (Phase 19); null for pairwise. */
+    val groupId: String? = null,
 )
 
 @Serializable
@@ -170,7 +230,7 @@ data class WsMessageReadDto(val messageIds: List<String> = emptyList(), val read
 
 /** Typing indicator event payload: peer started or stopped composing (Phase 7). */
 @Serializable
-data class WsTypingDto(val peer: String, val typing: Boolean)
+data class WsTypingDto(val peer: String, val typing: Boolean, val groupId: String? = null)
 
 /** Reaction event payload (ADR-0011, Phase 8). */
 @Serializable
@@ -180,6 +240,8 @@ data class WsReactionDto(
     val authorUsername: String,
     val emoji: String,
     val action: String, // "added" or "removed"
+    /** Set for group fan-out (Phase 19); null in the pairwise variant. */
+    val groupId: String? = null,
 )
 
 /** Deletion tombstone event payload (ADR-0011, Phase 10). */
@@ -189,6 +251,8 @@ data class WsMessageDeletedDto(
     val peer: String,
     val deletedBy: String,
     val deletedAt: Long,
+    /** Set for group fan-out (Phase 19); null in the pairwise variant. */
+    val groupId: String? = null,
 )
 
 /** Edit event payload (Phase 17): the new content plus the edit timestamp. */
@@ -278,6 +342,57 @@ sealed interface RealtimeEvent {
         val editedAtEpochMs: Long,
     ) : RealtimeEvent
 
+    // ── Group chats (Phase 19, ADR-0012) ────────────────────────────────────
+
+    /** A group message was stored; [groupId] names the conversation. */
+    data class GroupMessage(
+        val id: String,
+        val sender: String,
+        val groupId: String,
+        val content: String,
+        val createdAtEpochMs: Long,
+        val clientKey: String,
+        val type: String = "TEXT",
+        val mediaId: String? = null,
+        val width: Int? = null,
+        val height: Int? = null,
+        val replyToId: String? = null,
+        val durationMs: Int? = null,
+        val waveform: String? = null,
+    ) : RealtimeEvent
+
+    /** A member read group messages up to [messageIds] (per-member receipts). */
+    data class GroupMessageRead(
+        val groupId: String,
+        val reader: String,
+        val messageIds: List<String>,
+        val readAtEpochMs: Long,
+    ) : RealtimeEvent
+
+    /** A member reacted to a group message. */
+    data class GroupMessageReaction(
+        val groupId: String,
+        val messageId: String,
+        val authorUsername: String,
+        val emoji: String,
+        val added: Boolean,
+    ) : RealtimeEvent
+
+    /** A group message was tombstoned for all members. */
+    data class GroupMessageDeleted(
+        val groupId: String,
+        val messageId: String,
+        val deletedBy: String,
+        val deletedAtEpochMs: Long,
+    ) : RealtimeEvent
+
+    /** Typing inside a group: everyone except the composer receives it. */
+    data class GroupTyping(
+        val groupId: String,
+        val from: String,
+        val typing: Boolean,
+    ) : RealtimeEvent
+
     data class Unknown(val type: String) : RealtimeEvent
 }
 
@@ -318,7 +433,12 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
         }.getOrNull()
         "typing" -> runCatching {
             val event = realtimeJson.decodeFromString(WsTypingDto.serializer(), envelope.payload)
-            RealtimeEvent.Typing(event.peer, event.typing)
+            val group = event.groupId
+            if (group != null) {
+                RealtimeEvent.GroupTyping(group, event.peer, event.typing)
+            } else {
+                RealtimeEvent.Typing(event.peer, event.typing)
+            }
         }.getOrNull()
         "message-reaction" -> runCatching {
             val event = realtimeJson.decodeFromString(WsReactionDto.serializer(), envelope.payload)
@@ -346,6 +466,47 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 peer = event.peer,
                 content = event.content,
                 editedAtEpochMs = event.editedAt,
+            )
+        }.getOrNull()
+        "group-message" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsNewMessageDto.serializer(), envelope.payload)
+            RealtimeEvent.GroupMessage(
+                id = event.id,
+                sender = event.sender,
+                groupId = requireNotNull(event.groupId) { "group-message without groupId" },
+                content = event.content,
+                createdAtEpochMs = event.createdAt,
+                clientKey = event.clientKey,
+                type = event.type,
+                mediaId = event.mediaId,
+                width = event.width,
+                height = event.height,
+                replyToId = event.replyToId,
+                durationMs = event.durationMs,
+                waveform = event.waveform,
+            )
+        }.getOrNull()
+        "group-message-read" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsGroupMessageReadDto.serializer(), envelope.payload)
+            RealtimeEvent.GroupMessageRead(event.groupId, event.reader, event.messageIds, event.readAt)
+        }.getOrNull()
+        "group-reaction" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsReactionDto.serializer(), envelope.payload)
+            RealtimeEvent.GroupMessageReaction(
+                groupId = requireNotNull(event.groupId) { "group-reaction without groupId" },
+                messageId = event.messageId,
+                authorUsername = event.authorUsername,
+                emoji = event.emoji,
+                added = event.action == "added",
+            )
+        }.getOrNull()
+        "group-deleted" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsMessageDeletedDto.serializer(), envelope.payload)
+            RealtimeEvent.GroupMessageDeleted(
+                groupId = requireNotNull(event.groupId) { "group-deleted without groupId" },
+                messageId = event.messageId,
+                deletedBy = event.deletedBy,
+                deletedAtEpochMs = event.deletedAt,
             )
         }.getOrNull()
         else -> RealtimeEvent.Unknown(envelope.type)
