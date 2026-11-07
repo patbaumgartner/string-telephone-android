@@ -271,6 +271,41 @@ data class MarkGroupReadRequest(val upToMessageId: String? = null)
 @kotlinx.serialization.Serializable
 data class WsClientGroupTypingPayload(val groupId: String, val typing: Boolean)
 
+// ── Group calls (Phase 20, ADR-0014) ────────────────────────────────────────
+
+/** Starts (or returns) the group's call: the response names the bridge to dial. */
+@kotlinx.serialization.Serializable
+data class GroupCallDto(
+    val bridgeId: String,
+    val groupId: String,
+    val starter: String,
+    val withVideo: Boolean = false,
+    val startedAt: Long,
+)
+
+@kotlinx.serialization.Serializable
+data class StartGroupCallRequest(val withVideo: Boolean = false)
+
+/** Realtime invite: ring every member except the starter. */
+@kotlinx.serialization.Serializable
+data class WsGroupCallInviteEvent(
+    val groupId: String,
+    val bridgeId: String,
+    val starter: String,
+    val withVideo: Boolean = false,
+)
+
+/** Realtime call state: `joined`, `left` or `ended`; `members` is who is on now. */
+@kotlinx.serialization.Serializable
+data class WsGroupCallStateEvent(
+    val groupId: String,
+    val bridgeId: String,
+    val state: String,
+    val by: String,
+    val members: List<String> = emptyList(),
+    val reason: String? = null,
+)
+
 /**
  * The caller's pin/mute/archive state for one conversation (Phase 18).
  * Returned by GET/PUT `/v1/conversations/{peer}/state`.

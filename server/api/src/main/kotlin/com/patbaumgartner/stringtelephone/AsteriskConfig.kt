@@ -108,5 +108,15 @@ object AsteriskConfig {
             appendLine("exten => ${it.username},1,Dial(PJSIP/${it.username},${settings.ringSeconds})")
             appendLine("same => n,Hangup()")
         }
+        // Group calls (Phase 20, ADR-0014): one static generic pattern carries
+        // every bridge. The bridge id (`conf-<uuid>`, generated and validated
+        // by the API) is the dialed extension; membership is checked by the
+        // API, not the dialplan. Bridges live per call, created/destroyed over
+        // AMI. Pattern traps, verified live against Asterisk 22: `X` matches
+        // digits only, and bare letters are case-insensitive specials (`n` is
+        // `N` = 2-9), so a literal `conf` must be escaped character by
+        // character — `_conf-.` silently never matches.
+        appendLine("exten => _[c][o][n][f]-.,1,Confbridge(\${EXTEN})")
+        appendLine("same => n,Hangup()")
     }
 }

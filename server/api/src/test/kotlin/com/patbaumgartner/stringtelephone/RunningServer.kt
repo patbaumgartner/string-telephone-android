@@ -24,6 +24,8 @@ class FakePbx : PbxGateway {
     val disconnected = mutableListOf<String>()
     /** Asterisk DeviceState per endpoint; registered endpoints default to "Not in use". */
     val deviceStates = java.util.concurrent.ConcurrentHashMap<String, String>()
+    /** Open confbridge bridges and their member lists (ADR-0014). */
+    val conferences = java.util.concurrent.ConcurrentHashMap<String, MutableList<String>>()
     private fun checkAvailable() { if (!available) throw PbxUnavailable("Test PBX is unreachable") }
     override fun apply(accounts: List<PbxAccount>, settings: PbxSettings) {
         checkAvailable()
@@ -39,6 +41,18 @@ class FakePbx : PbxGateway {
     override fun status(): PbxStatus {
         checkAvailable()
         return PbxStatus(applied.map { EndpointStatus(it.username, deviceStates[it.username] ?: "Not in use", 0) }, 0)
+    }
+    override fun openConference(bridgeId: String, withVideo: Boolean) {
+        checkAvailable()
+        conferences.computeIfAbsent(bridgeId) { mutableListOf() }
+    }
+    override fun destroyConference(bridgeId: String) {
+        checkAvailable()
+        conferences.remove(bridgeId)
+    }
+    override fun conferenceMembers(bridgeId: String): List<String> {
+        checkAvailable()
+        return conferences[bridgeId]?.toList() ?: emptyList()
     }
 }
 

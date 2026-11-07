@@ -175,6 +175,40 @@ class RealtimeEventTest {
     }
 
     @Test
+    fun `parses group call frames into their events`() {
+        val invite = assertIs<RealtimeEvent.GroupCallInvite>(
+            parseRealtimeEvent("""{"type":"group-call-invite","payload":"{\"groupId\":\"grp\",\"bridgeId\":\"conf-abc\",\"starter\":\"alice\",\"withVideo\":true}"}"""),
+        )
+        assertEquals("grp", invite.groupId)
+        assertEquals("conf-abc", invite.bridgeId)
+        assertEquals("alice", invite.starter)
+        assertEquals(true, invite.withVideo)
+
+        val joined = assertIs<RealtimeEvent.GroupCallState>(
+            parseRealtimeEvent("""{"type":"group-call-state","payload":"{\"groupId\":\"grp\",\"bridgeId\":\"conf-abc\",\"state\":\"joined\",\"by\":\"bob\",\"members\":[\"alice\",\"bob\"]}"}"""),
+        )
+        assertEquals("grp", joined.groupId)
+        assertEquals("conf-abc", joined.bridgeId)
+        assertEquals("joined", joined.state)
+        assertEquals("bob", joined.by)
+        assertEquals(listOf("alice", "bob"), joined.members)
+        assertNull(joined.reason)
+
+        val ended = assertIs<RealtimeEvent.GroupCallState>(
+            parseRealtimeEvent("""{"type":"group-call-state","payload":"{\"groupId\":\"grp\",\"bridgeId\":\"conf-abc\",\"state\":\"ended\",\"by\":\"alice\",\"members\":[],\"reason\":\"last-member-left\"}"}"""),
+        )
+        assertEquals("ended", ended.state)
+        assertEquals("last-member-left", ended.reason)
+
+        // Malformed payloads drop; unknown fields are tolerated.
+        assertNull(parseRealtimeEvent("""{"type":"group-call-invite","payload":"{broken"}"""))
+        val tolerant = assertIs<RealtimeEvent.GroupCallInvite>(
+            parseRealtimeEvent("""{"type":"group-call-invite","payload":"{\"groupId\":\"grp\",\"bridgeId\":\"conf-abc\",\"starter\":\"alice\",\"withVideo\":false,\"future\":1}"}"""),
+        )
+        assertEquals(false, tolerant.withVideo)
+    }
+
+    @Test
     fun `drops malformed frames and unknown fields`() {
         assertNull(parseRealtimeEvent("not json"))
         assertNull(parseRealtimeEvent("""{"type":"new-message","payload":"{broken"}"""))

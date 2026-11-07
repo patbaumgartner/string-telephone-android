@@ -9,6 +9,14 @@ No public release has been published yet.
 
 ### Changed
 
+- Group calls (Phase 20). Any group member can start a voice or video call
+  from the group chat; every other member's devices ring at once through a
+  notification and an in-chat banner. The call is an Asterisk confbridge
+  bridge created on demand and destroyed when the last participant leaves;
+  the first answer stops the ringing on every device, and busy devices
+  (already in a call) stay silent. Inside the call, mute, speaker routing,
+  hang-up and the camera controls work like one-to-one calls; the call
+  screen shows the group's name.
 - Group chats (Phase 19). Create a group from the contacts menu, pick
   members, and chat with everyone at once: the group list shows member
   counts and unread badges, the chat renders the sender's name above each
@@ -17,7 +25,7 @@ No public release has been published yet.
   adds or removes members and disbands it; other members can leave. Replies,
   reactions and deletion work exactly as in one-to-one chats, and the
   notification shade routes taps, quick replies and "Mark as read" to the
-  right conversation. Group calls are a separate future phase.
+  right conversation.
 - Conversations can be pinned, muted and archived (Phase 18). Long-press a
   conversation row to open the options sheet. Pinned chats float to the
   top (up to five), muted chats keep their unread badge but raise no

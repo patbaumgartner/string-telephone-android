@@ -12,6 +12,8 @@
 # G6: the companion API answers HTTPS/WSS on 8443 (skipped without openssl)
 # G7: read receipts are persisted, mutual and idempotent
 # G8: revocation disconnects an established call without manual PBX edits
+# G9: group calls bridge one active call per group over the API (ADR-0014)
+# G9b: a SIP INVITE dials a confbridge through the static dialplan pattern
 #
 set -euo pipefail
 
@@ -105,10 +107,12 @@ echo "API host ports: http=$ST_API_HTTP_PORT https=$ST_API_HTTPS_PORT"
 
 echo "== starting prototype stack =="
 # Only the services the prototype exercises: the PBX, the database and the
-# API. The prototype deliberately keeps ST_MEDIA_ENABLED at its in-memory
-# default (no Garage): media behaviour is proven by the Garage Testcontainers
-# test (G9) and the API integration tests' InMemoryMediaStore, while the
-# production wiring of ST_MEDIA_* is in compose.yaml.
+# API. The prototype keeps the in-memory media store (no Garage): media
+# behaviour is proven by the Garage Testcontainers test (G9) and the API
+# integration tests' InMemoryMediaStore, while the production wiring of
+# ST_MEDIA_* is in compose.yaml — which defaults ST_MEDIA_ENABLED to true,
+# so it must be turned off here explicitly.
+export ST_MEDIA_ENABLED=false
 docker compose -f "$COMPOSE_FILE" -p "$PROJECT" up -d --build --wait asterisk db api
 
 for _ in $(seq 1 60); do
@@ -235,6 +239,27 @@ fi
 
 echo "== G7: read receipts are persisted, mutual and idempotent =="
 node scripts/test-read-receipts.mjs "http://127.0.0.1:$ST_API_HTTP_PORT" "$STATE_FILE"
+
+echo "== G9: group calls bridge one active call per group (ADR-0014) =="
+node scripts/test-group-calls.mjs "http://127.0.0.1:$ST_API_HTTP_PORT" "$STATE_FILE"
+
+echo "== G9b: a SIP INVITE dials a confbridge through the static dialplan =="
+# The app's engine dials `conf-<bridgeId>` like any peer; the one static
+# pattern `_[c][o][n][f]-.` routes it into the Confbridge application, which answers
+# immediately — no callee registration needed (ADR-0014 rule 3).
+BRIDGE_ID="conf-proto-$$"
+CALLER_LOG="$(mktemp)"
+if ! node "$SIP_DIR/caller.cjs" 127.0.0.1 5060 alice "$SIP_PASSWORD" "$BRIDGE_ID" > "$CALLER_LOG" 2>&1; then
+    echo "PROTOTYPE-FAIL: the bridge INVITE did not complete" >&2
+    cat "$CALLER_LOG" >&2
+    rm -f "$CALLER_LOG"
+    exit 1
+fi
+grep -q "ANSWERED" "$CALLER_LOG" || { echo "PROTOTYPE-FAIL: Confbridge did not answer" >&2; cat "$CALLER_LOG" >&2; rm -f "$CALLER_LOG"; exit 1; }
+grep -q "CALL-COMPLETE" "$CALLER_LOG" || { echo "PROTOTYPE-FAIL: bridge call never ended cleanly" >&2; cat "$CALLER_LOG" >&2; rm -f "$CALLER_LOG"; exit 1; }
+rm -f "$CALLER_LOG"
+echo "G9-BRIDGE-DIAL-COMPLETE"
+
 
 echo "== G8: revocation disconnects an established call without manual PBX edits =="
 CALLEE_LOG="$(mktemp)"

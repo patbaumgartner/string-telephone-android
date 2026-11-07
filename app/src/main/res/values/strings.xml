@@ -93,6 +93,14 @@
     <string name="call_failure_no_answer">No answer</string>
     <string name="call_failure_not_connected">Calling is not connected yet. Try again in a moment.</string>
     <string name="call_close">Close</string>
+    <string name="call_group_start_voice">Start group call</string>
+    <string name="call_group_start_video">Start group video call</string>
+    <string name="call_group_join">Join group call</string>
+    <string name="call_group_ring">Group call</string>
+    <string name="call_group_ring_from">%1$s started a group call</string>
+    <string name="cd_group_call">Start a group call</string>
+    <string name="cd_group_call_video">Start a group video call</string>
+    <string name="cd_group_call_decline">Dismiss group call ring</string>
     <string name="state_call_ringing">Waiting for an answer</string>
     <string name="state_call_ringing_out">Ringing…</string>
     <string name="state_call_active">Connected</string>
@@ -147,6 +155,10 @@
     <string name="notification_incoming_call_text">%1$s is calling</string>
     <string name="notification_incoming_call_video_title">Incoming video call</string>
     <string name="notification_incoming_call_video_text">%1$s is calling with video</string>
+    <string name="notification_group_call_title">Group call</string>
+    <string name="notification_group_call_text">%1$s started a group call</string>
+    <string name="notification_group_call_video_title">Group video call</string>
+    <string name="notification_group_call_video_text">%1$s started a group video call</string>
     <string name="notification_keep_alive_channel">Connection</string>
     <string name="notification_keep_alive_title">Ready for calls and messages</string>
     <string name="notification_keep_alive_text">Keeps you reachable while String Telephone is closed.</string>

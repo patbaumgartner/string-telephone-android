@@ -4,8 +4,8 @@
 
 Accepted. Superseded in part by Phase 19's implementation
 (2026-10-31): the compatibility constraints held, and group *chats* are now
-built — group *calls* (confbridge, constraint 6) remain pairwise-call-only
-and move to Phase 20 with their own ADR-0014.
+built. Group *calls* (constraint 6) shipped as Phase 20 (2026-11-01) under
+their own [ADR-0014](0014-group-calls-confbridge.md).
 
 ## Context
 

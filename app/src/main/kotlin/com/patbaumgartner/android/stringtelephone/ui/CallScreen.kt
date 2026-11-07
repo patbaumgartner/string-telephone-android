@@ -106,7 +106,7 @@ internal fun CallScreen(
             Spacer(Modifier.weight(1f))
 
             Text(
-                viewModel.displayNameOf(peer, contactsState.contacts),
+                viewModel.callTitleOf(peer, contactsState.contacts),
                 style = MaterialTheme.typography.displayLarge,
                 color = if (showVideo) Color.White else MaterialTheme.colorScheme.onBackground,
                 textAlign = TextAlign.Center,

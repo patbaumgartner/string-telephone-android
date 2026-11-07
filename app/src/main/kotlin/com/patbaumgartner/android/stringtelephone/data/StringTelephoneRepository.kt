@@ -6,6 +6,7 @@ import com.patbaumgartner.android.stringtelephone.chat.SendState
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
 import com.patbaumgartner.android.stringtelephone.core.ConversationStateDto
 import com.patbaumgartner.android.stringtelephone.core.GroupDto
+import com.patbaumgartner.android.stringtelephone.core.GroupCallDto
 import com.patbaumgartner.android.stringtelephone.core.RealtimeEvent
 import com.patbaumgartner.android.stringtelephone.core.newMessageClientKey
 import com.patbaumgartner.android.stringtelephone.network.ApiException
@@ -121,6 +122,23 @@ class StringTelephoneRepository(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val incomingMessages: SharedFlow<IncomingMessage> = _incoming.asSharedFlow()
+
+    /** A member started a group call: ring (ADR-0014). One ring surface, like incoming messages. */
+    private val _groupCallRing = MutableSharedFlow<RealtimeEvent.GroupCallInvite>(
+        extraBufferCapacity = 16,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val groupCallRing: SharedFlow<RealtimeEvent.GroupCallInvite> = _groupCallRing.asSharedFlow()
+
+    /**
+     * Group-call state changes (joined/left/ended): the session layer stops
+     * the ringtone on `joined`/`ended` and clears the group's call banner.
+     */
+    private val _groupCallState = MutableSharedFlow<RealtimeEvent.GroupCallState>(
+        extraBufferCapacity = 16,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val groupCallState: SharedFlow<RealtimeEvent.GroupCallState> = _groupCallState.asSharedFlow()
 
     /**
      * Peers whose messages were marked read by *another* device of this
@@ -267,6 +285,8 @@ class StringTelephoneRepository(
             is RealtimeEvent.GroupMessageReaction -> onGroupMessageReaction(event)
             is RealtimeEvent.GroupMessageDeleted -> onGroupMessageDeleted(event)
             is RealtimeEvent.GroupTyping -> onGroupTyping(event)
+            is RealtimeEvent.GroupCallInvite -> _groupCallRing.tryEmit(event)
+            is RealtimeEvent.GroupCallState -> _groupCallState.tryEmit(event)
             is RealtimeEvent.Unknown -> Unit
         }
     }
@@ -560,6 +580,53 @@ class StringTelephoneRepository(
     /** Replaces one group in the list, keeping the newest-activity order. */
     private fun replaceGroup(updated: GroupDto) {
         _groups.value = _groups.value.map { if (it.id == updated.id) updated else it }
+    }
+
+    // ── Group calls (Phase 20, ADR-0014) ────────────────────────────────────
+
+    /**
+     * Starts (or joins-in-place) the group's call. The engine must dial
+     * [onReady]'s bridge id; `null` signals a failure the call screen or
+     * chat explains.
+     */
+    fun startGroupCall(groupId: String, withVideo: Boolean, onReady: (GroupCallDto?) -> Unit) {
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: run { onReady(null); return@launch }
+            try {
+                val call = withContext(Dispatchers.IO) { client.startGroupCall(groupId, withVideo) }
+                ensureActive()
+                onReady(call)
+            } catch (_: ApiException) {
+                ensureActive()
+                onReady(null)
+            }
+        }
+    }
+
+    /** Records the join after the engine dialled the bridge; best effort. */
+    fun joinGroupCall(groupId: String, bridgeId: String) {
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: return@launch
+            try {
+                withContext(Dispatchers.IO) { client.joinGroupCall(groupId, bridgeId) }
+            } catch (_: ApiException) {
+                // The SIP leg is already up; a missed join record only skips a
+                // fan-out. The next member's frame still carries the state.
+            }
+        }
+    }
+
+    /** Records the leave; the server destroys the bridge on the last leave. */
+    fun leaveGroupCall(groupId: String, bridgeId: String) {
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: return@launch
+            try {
+                withContext(Dispatchers.IO) { client.leaveGroupCall(groupId, bridgeId) }
+            } catch (_: ApiException) {
+                // The bridge reclaims itself: a missed leave keeps the call
+                // open until the last real member leaves (retry loop).
+            }
+        }
     }
 
     /** Loads one group conversation's history under its group id key. */

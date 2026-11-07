@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -512,6 +513,7 @@ internal fun GroupChatScreen(
     groupId: String,
     viewModel: AppViewModel,
     scrollbarVisible: Boolean? = null,
+    requestMicrophone: (() -> Unit) -> Unit = { block -> block() },
 ) {
     val messages by viewModel.messagesFor(groupId).collectAsState()
     val historyFailed by viewModel.historyErrorFor(groupId).collectAsState()
@@ -519,6 +521,8 @@ internal fun GroupChatScreen(
     val contactsState by viewModel.contactsState().collectAsState()
     val groupTyping by viewModel.groupTypingState().collectAsState()
     val replyingTo by viewModel.replyingTo.collectAsState()
+    val ringingCall by viewModel.groupCallRing.collectAsState()
+    val activeGroupCall by viewModel.activeGroupCallState().collectAsState()
     val group = groups.firstOrNull { it.id == groupId }
     val meUsername = viewModel.meUsername().orEmpty()
     val rows = remember(messages) { chatTimeline(messages, ZoneId.systemDefault()) }
@@ -556,8 +560,7 @@ internal fun GroupChatScreen(
                 modifier = Modifier
                     .weight(1f)
                     .clickable { group?.let { viewModel.openGroupDetail(groupId) } },
-            ) {
-                Text(
+            ) {                Text(
                     group?.name.orEmpty(),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
@@ -578,6 +581,33 @@ internal fun GroupChatScreen(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // Group call (Phase 20, ADR-0014): any member may start one. The
+            // microphone gate runs here, exactly like the pairwise call button.
+            IconButton(
+                onClick = { requestMicrophone { viewModel.startGroupCall(groupId, withVideo = false) } },
+                enabled = activeGroupCall == null,
+            ) {
+                Icon(
+                    StringTelephoneIcons.Call,
+                    contentDescription = stringResource(R.string.cd_group_call),
+                    tint = StringTelephoneTheme.accents.brand,
+                )
+            }
+        }
+        // Ringing banner (ADR-0014 rule 6): Answer joins the bridge; the
+        // dismissal without joining comes from the state fan-out (first
+        // answer / end stops the ring on every device).
+        ringingCall?.takeIf { it.groupId == groupId && activeGroupCall == null }?.let { ring ->
+            GroupCallRingingBanner(
+                starter = viewModel.memberDisplayName(ring.starter, contactsState.contacts),
+                withVideo = ring.withVideo,
+                onJoin = {
+                    requestMicrophone {
+                        viewModel.joinGroupCall(ring)
+                    }
+                },
+                onDismiss = { viewModel.dismissGroupCallRing(ring) },
+            )
         }
         if (historyFailed) {
             Column(modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
@@ -771,6 +801,56 @@ private fun GroupBubble(
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * The group-call ring banner (Phase 20, ADR-0014): a member started a call.
+ * Answer joins the bridge after the microphone gate; the ring stops for
+ * everyone on the first answer (the state fan-out), so no per-device timer
+ * lives here.
+ */
+@Composable
+internal fun GroupCallRingingBanner(
+    starter: String,
+    withVideo: Boolean,
+    onJoin: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (withVideo) StringTelephoneIcons.Videocam else StringTelephoneIcons.Call,
+                contentDescription = stringResource(R.string.call_group_ring),
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.call_group_ring),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    stringResource(R.string.call_group_ring_from, starter),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.call_reject))
+            }
+            Button(onClick = onJoin) {
+                Text(stringResource(R.string.call_group_join))
             }
         }
     }

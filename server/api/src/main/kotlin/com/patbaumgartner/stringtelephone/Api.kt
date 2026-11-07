@@ -22,6 +22,7 @@ class ApiController(
     private val reactions: Reactions,
     private val conversationStates: ConversationStates,
     private val groups: Groups,
+    private val groupCalls: GroupCallService,
 ) {
     @GetMapping("/health")
     fun health() = mapOf("status" to "ok")
@@ -498,6 +499,61 @@ class ApiController(
         val message = messages.findById(messageId)
             ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
         if (message.groupId != groupId) throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+    }
+
+    // ── Group calls (Phase 20, ADR-0014) ────────────────────────────────────
+
+    /**
+     * Starts (or returns) the group's one active call; non-members see 404.
+     * `201` when this request created the call, `200` when a call was
+     * already running (idempotent start — the bridge id is the same).
+     */
+    @PostMapping("/v1/groups/{groupId}/calls")
+    fun startGroupCall(
+        request: HttpServletRequest,
+        @PathVariable groupId: String,
+        @RequestBody(required = false) body: StartGroupCallRequest?,
+    ): ResponseEntity<GroupCallDto> {
+        val me = principal(request)
+        val existing = groupCalls.activeCall(groupId, me.username)
+        if (existing != null) {
+            return ResponseEntity.ok(GroupCallDto(existing.bridgeId, existing.groupId, existing.starter, existing.withVideo, existing.startedAt))
+        }
+        val call = groupCalls.start(groupId, me.username, body?.withVideo ?: false)
+        return ResponseEntity.status(HttpStatus.CREATED).body(GroupCallDto(call.bridgeId, call.groupId, call.starter, call.withVideo, call.startedAt))
+    }
+
+    /** The group's active call, when one is running (the "call in progress" hint). */
+    @GetMapping("/v1/groups/{groupId}/calls/active")
+    fun activeGroupCall(request: HttpServletRequest, @PathVariable groupId: String): GroupCallDto? {
+        val me = principal(request)
+        return groupCalls.activeCall(groupId, me.username)?.let {
+            GroupCallDto(it.bridgeId, it.groupId, it.starter, it.withVideo, it.startedAt)
+        }
+    }
+
+    /** Records a member joining the bridge their device just dialled. */
+    @PostMapping("/v1/groups/{groupId}/calls/{bridgeId}/join")
+    fun joinGroupCall(
+        request: HttpServletRequest,
+        @PathVariable groupId: String,
+        @PathVariable bridgeId: String,
+    ): GroupCallDto {
+        val me = principal(request)
+        val call = groupCalls.join(groupId, bridgeId, me.username)
+        return GroupCallDto(call.bridgeId, call.groupId, call.starter, call.withVideo, call.startedAt)
+    }
+
+    /** Records a member leaving; the last leave destroys the bridge. */
+    @PostMapping("/v1/groups/{groupId}/calls/{bridgeId}/leave")
+    fun leaveGroupCall(
+        request: HttpServletRequest,
+        @PathVariable groupId: String,
+        @PathVariable bridgeId: String,
+    ): Map<String, String> {
+        val me = principal(request)
+        groupCalls.leave(groupId, bridgeId, me.username)
+        return mapOf("status" to "left")
     }
 
     /** Rejects a pairwise path whose message is a group message or foreign to the pair (404). */

@@ -37,6 +37,48 @@ class PbxGatewayTest {
     }
 
     @Test
+    fun `dialplan gains one generic confbridge pattern independent of groups`() {
+        val account = PbxAccount("alice", sipDigest("alice", TEST_PASSPHRASE))
+        val dialplan = AsteriskConfig.dialplan(listOf(account), PbxSettings())
+        // ADR-0014 rule 3: one static pattern; the bridge id is the extension.
+        assertContains(dialplan, "exten => _[c][o][n][f]-.,1,Confbridge(\${EXTEN})")
+        assertContains(dialplan, "same => n,Hangup()")
+        // Per-group PBX state does not exist: renaming nothing to do with groups
+        // leaves the pattern identical.
+        val other = AsteriskConfig.dialplan(emptyList(), PbxSettings())
+        assertContains(other, "exten => _[c][o][n][f]-.,1,Confbridge(\${EXTEN})")
+    }
+
+    @Test
+    fun `confbridge lifecycle verifies kick and members over the AMI fixture`() {
+        // A live bridge (as if a member's INVITE created it) with alice on it.
+        ami("No endpoints found", initialBridge = "conf-abc") { gateway, _ ->
+            gateway.openConference("conf-abc", withVideo = true) // validation only; bridge is PBX-side
+            gateway.openConference("conf-abc", withVideo = true) // idempotent re-open
+            assertEquals(listOf("alice"), gateway.conferenceMembers("conf-abc"))
+            gateway.destroyConference("conf-abc") // kicks everyone; empty bridge destroys itself
+            assertEquals(emptyList(), gateway.conferenceMembers("conf-abc"))
+        }
+    }
+
+    @Test
+    fun `an unknown bridge reads as no members instead of a PBX error`() {
+        ami("No endpoints found", initialBridge = null) { gateway, _ ->
+            assertEquals(emptyList(), gateway.conferenceMembers("conf-never-existed"))
+        }
+    }
+
+    @Test
+    fun `a bridge id with AMI metacharacters is rejected before any network access`() {
+        val directory = java.nio.file.Path.of("unused-bridge-validation")
+        val gateway = AsteriskGateway(directory, "127.0.0.1", 5038, "fixture", TEST_PASSPHRASE)
+        for (bridgeId in listOf("conf-x\r\nAction: Login", "conf-x;drop", "", "conf x")) {
+            assertFailsWith<IllegalArgumentException> { gateway.openConference(bridgeId, withVideo = false) }
+            assertFailsWith<IllegalArgumentException> { gateway.destroyConference(bridgeId) }
+        }
+    }
+
+    @Test
     fun `invalid manager credentials fail before any provisioning or network access`() {
         val directory = java.nio.file.Path.of("unused-ami-configuration")
         for (password in listOf("short", "$TEST_PASSPHRASE\ninjected")) {
@@ -77,10 +119,14 @@ class PbxGatewayTest {
         }
     }
 
-    private fun ami(endpointMessage: String, block: (PbxGateway, java.nio.file.Path) -> Unit) {
+    private fun ami(endpointMessage: String, block: (PbxGateway, java.nio.file.Path) -> Unit) =
+        ami(endpointMessage, null, block)
+
+    private fun ami(endpointMessage: String, initialBridge: String?, block: (PbxGateway, java.nio.file.Path) -> Unit) {
         val directory = Files.createTempDirectory("st-ami-test")
         val listener = ServerSocket(0)
         val failure = AtomicReference<Throwable>()
+        var bridge: String? = initialBridge
         val worker = Thread {
             try {
                 while (!listener.isClosed) {
@@ -104,8 +150,20 @@ class PbxGatewayTest {
                         val id = request.getValue("ActionID")
                         when (request["Action"]) {
                             "PJSIPShowEndpoints" -> send("Response: Error\r\nActionID: $id\r\nMessage: $endpointMessage\r\n\r\n")
-                            "CoreShowChannels" -> send("Response: Success\r\nActionID: $id\r\n\r\nEvent: CoreShowChannelsComplete\r\nActionID: $id\r\n\r\n")
-                            "Command" -> send("Response: Follows\r\nActionID: $id\r\nOutput: Reload complete\r\n\r\n")
+                            "CoreShowChannels" -> send(
+                                if (bridge == null) "Response: Success\r\nActionID: $id\r\n\r\nEvent: CoreShowChannelsComplete\r\nActionID: $id\r\n\r\n"
+                                else "Response: Success\r\nActionID: $id\r\n\r\n" +
+                                    "Event: CoreShowChannel\r\nActionID: $id\r\nChannel: PJSIP/alice-000001\r\nApplication: Confbridge\r\nApplicationData: $bridge\r\n\r\n" +
+                                    "Event: CoreShowChannelsComplete\r\nActionID: $id\r\n\r\n",
+                            )
+                            "Command" -> send(
+                                if (request["Command"]?.startsWith("confbridge kick") == true) {
+                                    bridge = null
+                                    "Response: Success\r\nActionID: $id\r\nOutput: Kicked alice\r\n\r\n"
+                                } else {
+                                    "Response: Follows\r\nActionID: $id\r\nOutput: Reload complete\r\n\r\n"
+                                },
+                            )
                             else -> error("Unexpected AMI action")
                         }
                     }
