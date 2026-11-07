@@ -41,8 +41,11 @@ class SecurityConfiguration {
     @Order(2)
     fun androidSecurity(http: HttpSecurity): SecurityFilterChain {
         http.securityMatcher("/v1/me", "/v1/contacts", "/v1/conversations/**", "/v1/groups/**", "/v1/media", "/v1/media/**", "/v1/ws")
-            // These stateless routes authenticate with bearer headers, not browser session cookies.
-            .csrf { it.disable() }
+            // These stateless routes authenticate with bearer headers, not browser session cookies,
+            // so CSRF tokens do not apply; exclude exactly these paths instead of disabling CSRF.
+            .csrf {
+                it.ignoringRequestMatchers("/v1/me", "/v1/contacts", "/v1/conversations/**", "/v1/groups/**", "/v1/media", "/v1/media/**", "/v1/ws")
+            }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests { it.anyRequest().permitAll() }
         return http.build()
