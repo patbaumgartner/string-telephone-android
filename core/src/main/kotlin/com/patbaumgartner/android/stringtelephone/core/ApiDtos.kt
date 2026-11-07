@@ -110,7 +110,10 @@ data class EditMessageRequest(val content: String)
 data class MediaRecordDto(
     val id: String,
     val owner: String,
-    val peer: String,
+    /** Pairwise peer; null for group media (Phase 21). */
+    val peer: String? = null,
+    /** Group the media belongs to; null for pairwise media (Phase 21). */
+    val groupId: String? = null,
     val contentType: String,
     val byteSize: Long,
     val sha256: String,
@@ -180,6 +183,14 @@ data class SendGroupMessageRequest(
     val content: String,
     val clientKey: String,
     val replyToId: String? = null,
+    /** Message kind: TEXT (default), IMAGE or VOICE (Phase 21). */
+    val type: String = "TEXT",
+    /** Media id referenced by an IMAGE/VOICE message; must be an upload scoped to this group. */
+    val mediaId: String? = null,
+    /** Voice message duration in milliseconds (Phase 21); required for VOICE. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 21); required for VOICE. */
+    val waveform: String? = null,
 )
 
 /** Per-member group read fan-out payload (Phase 19). */

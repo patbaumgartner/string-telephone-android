@@ -766,6 +766,63 @@ class AppViewModel(
         repository.markGroupConversationRead(groupId, upToMessageId)
     }
 
+    /**
+     * Attaches a picked image to a group chat (Phase 21): read, downscale and
+     * send exactly like the pairwise [attachImage], but the upload is scoped
+     * to the group so every member may fetch it.
+     */
+    fun attachGroupImage(groupId: String, uri: android.net.Uri) {
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    container.context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } ?: return@launch
+                val scaled = withContext(Dispatchers.IO) {
+                    ImageDownscale.downscale(bytes)
+                }
+                sendGroupImage(groupId, scaled, "image/jpeg", "image.jpg")
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Uploads the image scoped to the group, then sends the IMAGE message. */
+    fun sendGroupImage(groupId: String, bytes: ByteArray, contentType: String, fileName: String) {
+        viewModelScope.launch {
+            try {
+                val media = withContext(Dispatchers.IO) { repository.uploadGroupMedia(groupId, bytes, contentType, fileName) }
+                repository.sendGroupImage(groupId, media.id, media.width, media.height) { }
+            } catch (_: Exception) {
+                // A failed upload discards the image, same as the pairwise path.
+            }
+        }
+    }
+
+    /**
+     * Finishes the held recording and sends it as a group VOICE message
+     * (Phase 21): the group twin of [finishVoiceRecording].
+     */
+    fun finishGroupVoiceRecording(groupId: String) {
+        val replyToId = _replyingTo.value?.serverId
+        _replyingTo.value = null
+        voiceRecorder.finish { recording ->
+            if (recording == null) return@finish
+            viewModelScope.launch {
+                withContext(Dispatchers.Main) {
+                    repository.sendGroupVoiceRecording(
+                        groupId,
+                        recording.bytes,
+                        recording.contentType,
+                        recording.fileName,
+                        recording.durationMs,
+                        recording.waveform,
+                        replyToId,
+                    ) { }
+                }
+            }
+        }
+    }
+
     /** Group message send (Phase 19): the composer path mirrors [sendMessage]. */
     fun sendGroupMessage(groupId: String, content: String) {
         val text = content.trim()

@@ -93,6 +93,14 @@ data class SendGroupMessageRequest(
     val clientKey: String,
     /** Message this one replies to; must belong to the same group (ADR-0011). */
     val replyToId: String? = null,
+    /** Message kind: TEXT (default), IMAGE or VOICE (Phase 21). */
+    val type: String = "TEXT",
+    /** Media id referenced by an IMAGE/VOICE message; must be an upload scoped to this group. */
+    val mediaId: String? = null,
+    /** Voice message duration in milliseconds (Phase 21); required for VOICE. */
+    val durationMs: Int? = null,
+    /** Comma-separated waveform amplitudes 0-100 (Phase 21); required for VOICE. */
+    val waveform: String? = null,
 )
 
 @kotlinx.serialization.Serializable

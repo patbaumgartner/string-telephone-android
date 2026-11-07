@@ -34,6 +34,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -529,6 +530,10 @@ internal fun GroupChatScreen(
     val listState = rememberLazyListState()
     var replySheetMessage by remember { mutableStateOf<ChatMessage?>(null) }
     var pendingReactionMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    // Image attach (Phase 21): same picker as the pairwise composer.
+    val picker = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { viewModel.attachGroupImage(groupId, it) }
+    }
 
     LaunchedEffect(rows.size) {
         if (rows.isNotEmpty()) listState.animateScrollToItem(rows.size - 1)
@@ -638,6 +643,7 @@ internal fun GroupChatScreen(
                             maxWidth = bubbleMaxWidth,
                             senderName = viewModel.memberDisplayName(row.message.senderId(meUsername), contactsState.contacts),
                             showSender = !row.message.fromMe,
+                            viewModel = viewModel,
                         )
                     }
                 }
@@ -653,12 +659,18 @@ internal fun GroupChatScreen(
             onValueChange = { viewModel.onGroupChatInputChanged(groupId, it) },
             emojiPickerVisible = false,
             onToggleEmoji = { },
-            onAttach = { },
+            onAttach = {
+                picker.launch(
+                    androidx.activity.result.PickVisualMediaRequest(
+                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                    ),
+                )
+            },
             onSend = { viewModel.sendGroupMessage(groupId, viewModel.chatInput) },
             recordingStateFlow = viewModel.voiceRecordingState,
-            onStartRecording = { false },
-            onFinishRecording = { },
-            onCancelRecording = { },
+            onStartRecording = { viewModel.startVoiceRecording() },
+            onFinishRecording = { viewModel.finishGroupVoiceRecording(groupId) },
+            onCancelRecording = { viewModel.cancelVoiceRecording() },
         )
     }
     pendingReactionMessage?.let { msg ->
@@ -729,9 +741,10 @@ private fun ChatMessage.senderId(meUsername: String): String = if (fromMe) meUse
 private fun DayChipRow(date: java.time.LocalDate) = DayChip(date)
 
 /**
- * A group chat bubble (Phase 19): the pairwise bubble plus the sender name
- * above others' bubbles and the "N read" counter replacing the read tick
- * legend — the counter is the group receipt surface (ADR-0012).
+ * A group chat bubble (Phase 19, media in Phase 21): the pairwise bubble —
+ * including IMAGE/VOICE content — plus the sender name above others' bubbles
+ * and the "N read" counter replacing the read tick legend, which is the group
+ * receipt surface (ADR-0012).
  */
 @Composable
 private fun GroupBubble(
@@ -740,6 +753,7 @@ private fun GroupBubble(
     maxWidth: Dp,
     senderName: String,
     showSender: Boolean,
+    viewModel: AppViewModel,
 ) {
     Column(
         horizontalAlignment = if (message.fromMe) Alignment.End else Alignment.Start,
@@ -762,6 +776,11 @@ private fun GroupBubble(
             shadowElevation = 1.dp,
             modifier = Modifier.widthIn(max = maxWidth),
         ) {
+            if (!message.deleted && message.type == "IMAGE" && message.mediaId != null) {
+                ImageBubbleContent(message, StringTelephoneTheme.chat, previewTimestamp(message.sentAtEpochMs), failed = false, status = "", viewModel)
+            } else if (!message.deleted && message.type == "VOICE" && message.mediaId != null) {
+                VoiceBubbleContent(message, StringTelephoneTheme.chat, previewTimestamp(message.sentAtEpochMs), failed = false, viewModel)
+            } else {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 if (message.deleted) {
                     Text(
@@ -801,6 +820,7 @@ private fun GroupBubble(
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
+            }
             }
         }
     }

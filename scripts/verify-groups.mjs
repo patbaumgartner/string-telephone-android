@@ -200,7 +200,7 @@ check('Integration — group websocket fan-out', integration.includes('`group me
 check('Integration — group reactions/deletion, pairwise rejection', integration.includes('`group reactions and deletion fan out and pairwise endpoints reject group rows`'));
 check('core — group frame parsing tested', realtimeEventTest.includes('`parses group frames into their events`') && realtimeEventTest.includes('`group frames without a groupId are dropped instead of misrouted`'));
 check('Screenshot — group captures exist', screenshotTest.includes('capture("20-groups", ScreenshotRoute.GROUPS)') && screenshotTest.includes('capture("21-group-chat", ScreenshotRoute.GROUP_CHAT)') && screenshotTest.includes('ScreenshotRoute.entries.filter { it != ScreenshotRoute.CHAT_IMAGE }'));
-check('Screenshot — routes + fixtures exist', screenshotActivity.includes('ScreenshotRoute.GROUPS') && screenshotActivity.includes('GroupChatScreen("grp-hike", viewModel)') && previewFactory.includes('PREVIEW_GROUPS') && previewFactory.includes('groups = if (groupChat) PREVIEW_GROUPS else emptyList()'));
+check('Screenshot — routes + fixtures exist', screenshotActivity.includes('ScreenshotRoute.GROUPS') && screenshotActivity.includes('GroupChatScreen("grp-hike", viewModel)') && previewFactory.includes('PREVIEW_GROUPS') && previewFactory.includes('groups = if (groupChat || groupChatMedia) PREVIEW_GROUPS else emptyList()'));
 
 // ── Docs ─────────────────────────────────────────────────────────────────────
 

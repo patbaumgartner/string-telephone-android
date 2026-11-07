@@ -14,6 +14,7 @@
 # G8: revocation disconnects an established call without manual PBX edits
 # G9: group calls bridge one active call per group over the API (ADR-0014)
 # G9b: a SIP INVITE dials a confbridge through the static dialplan pattern
+# G10: group image and voice messages authorize by membership (ADR-0012)
 #
 set -euo pipefail
 
@@ -260,6 +261,9 @@ grep -q "CALL-COMPLETE" "$CALLER_LOG" || { echo "PROTOTYPE-FAIL: bridge call nev
 rm -f "$CALLER_LOG"
 echo "G9-BRIDGE-DIAL-COMPLETE"
 
+echo "== G10: group image and voice messages authorize by membership (ADR-0012) =="
+# Runs before G8 because revocation invalidates the provisioned API tokens.
+node scripts/test-group-media.mjs "http://127.0.0.1:$ST_API_HTTP_PORT" "$STATE_FILE"
 
 echo "== G8: revocation disconnects an established call without manual PBX edits =="
 CALLEE_LOG="$(mktemp)"

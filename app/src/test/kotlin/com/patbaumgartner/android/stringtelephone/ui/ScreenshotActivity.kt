@@ -79,8 +79,10 @@ class ScreenshotActivity : ComponentActivity() {
                 lastSeen = route == ScreenshotRoute.CONTACTS_LAST_SEEN.ordinal,
                 contactPreviews = route == ScreenshotRoute.CONTACTS_PREVIEWS.ordinal,
                 groupChat = route == ScreenshotRoute.GROUP_CHAT.ordinal ||
-                    route == ScreenshotRoute.GROUP_CALL_RING.ordinal,
+                    route == ScreenshotRoute.GROUP_CALL_RING.ordinal ||
+                    route == ScreenshotRoute.GROUP_CHAT_MEDIA.ordinal,
                 groupCallRing = route == ScreenshotRoute.GROUP_CALL_RING.ordinal,
+                groupChatMedia = route == ScreenshotRoute.GROUP_CHAT_MEDIA.ordinal,
             ).apply {
                 if (intent.getBooleanExtra(EXTRA_ERROR, false)) {
                     updateIncomingCallAccess(com.patbaumgartner.android.stringtelephone.notify.IncomingCallAccess.FULL_SCREEN_OFF)
@@ -108,6 +110,7 @@ class ScreenshotActivity : ComponentActivity() {
                         ScreenshotRoute.GROUPS.ordinal -> GroupsScreen(viewModel)
                         ScreenshotRoute.GROUP_CHAT.ordinal -> GroupChatScreen("grp-hike", viewModel)
                         ScreenshotRoute.GROUP_CALL_RING.ordinal -> GroupChatScreen("grp-hike", viewModel)
+                        ScreenshotRoute.GROUP_CHAT_MEDIA.ordinal -> GroupChatScreen("grp-hike", viewModel)
                         ScreenshotRoute.CALL.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
                         ScreenshotRoute.CALL_VIDEO.ordinal -> CallScreen(peer, isIncoming = false, viewModel = viewModel)
                         else -> SettingsScreen(viewModel)
@@ -125,4 +128,4 @@ class ScreenshotActivity : ComponentActivity() {
     }
 }
 
-enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION, CHAT_VOICE, CHAT_EDITED, CALL_VIDEO, CONTACTS_LAST_SEEN, CONTACTS_PREVIEWS, CONTACTS_MANAGED, GROUPS, GROUP_CHAT, GROUP_CALL_RING }
+enum class ScreenshotRoute { ONBOARDING, CONTACTS, CHAT, CALL, SETTINGS, CHAT_SCROLLBAR, CHAT_DELIVERY_STATES, CHAT_IMAGE, CHAT_REACTIONS, CHAT_REPLY, CHAT_DELETION, CHAT_VOICE, CHAT_EDITED, CALL_VIDEO, CONTACTS_LAST_SEEN, CONTACTS_PREVIEWS, CONTACTS_MANAGED, GROUPS, GROUP_CHAT, GROUP_CALL_RING, GROUP_CHAT_MEDIA }

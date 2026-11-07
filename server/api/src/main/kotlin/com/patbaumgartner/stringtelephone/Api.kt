@@ -208,9 +208,11 @@ class ApiController(
     }
 
     /**
-     * Sends a group message (Phase 19): authorship comes from the principal
-     * (ADR-0012 constraint 4), membership is the only authorisation, and
-     * the fan-out reaches every member over the websocket.
+     * Sends a group message (Phase 19 text, Phase 21 image/voice): authorship
+     * comes from the principal (ADR-0012 constraint 4), membership is the
+     * only authorisation, and the fan-out reaches every member over the
+     * websocket. Media messages must reference an upload scoped to this group
+     * by the sender — a pairwise upload or someone else's upload is 403.
      */
     @PostMapping("/v1/groups/{groupId}/messages")
     fun sendGroupMessage(request: HttpServletRequest, @PathVariable groupId: String, @RequestBody body: SendGroupMessageRequest): ResponseEntity<MessageDto> {
@@ -220,6 +222,37 @@ class ApiController(
             val replyMsg = messages.findById(replyToId)
                 ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "reply target not found")
             if (replyMsg.groupId != groupId) throw ApiFailure(HttpStatus.BAD_REQUEST, "reply target not in this group")
+        }
+        val type = body.type.uppercase()
+        if (type == "IMAGE" || type == "VOICE") {
+            val mediaId = body.mediaId?.takeIf { it.isNotBlank() }
+                ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "mediaId required")
+            val mediaRecord = media.getRecord(mediaId)
+                ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such media")
+            if (mediaRecord.owner != me.username || mediaRecord.groupId != groupId || mediaRecord.peer != null) {
+                throw ApiFailure(HttpStatus.FORBIDDEN, "forbidden")
+            }
+            if (mediaRecord.state != "ready") {
+                throw ApiFailure(HttpStatus.BAD_REQUEST, "media not ready")
+            }
+            if (type == "VOICE") {
+                if (mediaRecord.contentType !in MediaService.AUDIO_TYPES) {
+                    throw ApiFailure(HttpStatus.BAD_REQUEST, "voice message requires audio media")
+                }
+                val durationMs = body.durationMs
+                    ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "durationMs required")
+                if (durationMs <= 0 || durationMs > 600_000) {
+                    throw ApiFailure(HttpStatus.BAD_REQUEST, "duration out of range")
+                }
+                val waveform = normalizeWaveform(body.waveform)
+                    ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "waveform required")
+                val stored = messages.insertGroupVoice(me.username, groupId, body.clientKey, mediaId, durationMs, waveform, replyToId)
+                hub.broadcastGroupMessage(stored, group.memberNames())
+                return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
+            }
+            val stored = messages.insertGroupMedia(me.username, groupId, body.clientKey, mediaId, mediaRecord, replyToId)
+            hub.broadcastGroupMessage(stored, group.memberNames())
+            return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
         }
         if (body.content.isEmpty() || body.content.toByteArray(Charsets.UTF_8).size > Messages.MAX_CONTENT_BYTES) {
             throw ApiFailure(HttpStatus.CONTENT_TOO_LARGE, "content size invalid")

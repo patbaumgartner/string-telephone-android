@@ -672,6 +672,77 @@ class StringTelephoneRepository(
     }
 
     /**
+     * Sends one group IMAGE message (Phase 21): optimistic bubble under the
+     * group id key, then the REST send — identical mechanics to [sendImage].
+     */
+    fun sendGroupImage(groupId: String, mediaId: String, width: Int?, height: Int?, replyToId: String? = null, onResult: (Boolean) -> Unit) {
+        scope.launch(sessionJob) {
+            val me = _account.value.me?.username ?: ""
+            val key = newMessageClientKey()
+            chatCache.append(groupId, ChatMessage(null, key, fromMe = true, sender = me, content = "", sentAtEpochMs = System.currentTimeMillis(), state = SendState.PENDING, type = "IMAGE", mediaId = mediaId, width = width, height = height, replyToId = replyToId, groupId = groupId))
+            onResult(deliverGroupImage(groupId, mediaId, key, replyToId))
+        }
+    }
+
+    /**
+     * Sends one group VOICE message (Phase 21): optimistic VOICE bubble, then
+     * the REST send, mirroring [sendVoice].
+     */
+    fun sendGroupVoice(groupId: String, mediaId: String, durationMs: Int, waveform: String, replyToId: String? = null, onResult: (Boolean) -> Unit) {
+        scope.launch(sessionJob) {
+            val me = _account.value.me?.username ?: ""
+            val key = newMessageClientKey()
+            chatCache.append(groupId, ChatMessage(null, key, fromMe = true, sender = me, content = "", sentAtEpochMs = System.currentTimeMillis(), state = SendState.PENDING, type = "VOICE", mediaId = mediaId, durationMs = durationMs, waveform = waveform, replyToId = replyToId, groupId = groupId))
+            onResult(deliverGroupVoice(groupId, mediaId, key, durationMs, waveform, replyToId))
+        }
+    }
+
+    /**
+     * Uploads recorded audio scoped to the group, then sends the VOICE message
+     * (Phase 21) — the group twin of [sendVoiceRecording].
+     */
+    fun sendGroupVoiceRecording(groupId: String, bytes: ByteArray, contentType: String, fileName: String, durationMs: Int, waveform: String, replyToId: String? = null, onResult: (Boolean) -> Unit) {
+        scope.launch(sessionJob) {
+            try {
+                val media = withContext(Dispatchers.IO) { uploadGroupMedia(groupId, bytes, contentType, fileName) }
+                ensureActive()
+                sendGroupVoice(groupId, media.id, durationMs, waveform, replyToId, onResult)
+            } catch (e: Exception) {
+                ensureActive()
+                onResult(false)
+            }
+        }
+    }
+
+    private suspend fun deliverGroupImage(groupId: String, mediaId: String, key: String, replyToId: String? = null): Boolean {
+        val client = apiProvider() ?: run { chatCache.markFailed(key); return false }
+        return try {
+            val sent = withContext(Dispatchers.IO) { client.sendGroupMedia(groupId, mediaId, key, replyToId = replyToId) }
+            currentCoroutineContext().ensureActive()
+            chatCache.markSent(key, sent.id)
+            true
+        } catch (_: ApiException) {
+            currentCoroutineContext().ensureActive()
+            chatCache.markFailed(key)
+            false
+        }
+    }
+
+    private suspend fun deliverGroupVoice(groupId: String, mediaId: String, key: String, durationMs: Int, waveform: String, replyToId: String? = null): Boolean {
+        val client = apiProvider() ?: run { chatCache.markFailed(key); return false }
+        return try {
+            val sent = withContext(Dispatchers.IO) { client.sendGroupVoice(groupId, mediaId, key, durationMs, waveform, replyToId) }
+            currentCoroutineContext().ensureActive()
+            chatCache.markSent(key, sent.id)
+            true
+        } catch (_: ApiException) {
+            currentCoroutineContext().ensureActive()
+            chatCache.markFailed(key)
+            false
+        }
+    }
+
+    /**
      * Marks group messages read (Phase 19): foreground group chat screen
      * only, exactly like the pairwise mark (ADR-0010).
      */
@@ -861,6 +932,12 @@ class StringTelephoneRepository(
     fun uploadMedia(peer: String, bytes: ByteArray, contentType: String, fileName: String): com.patbaumgartner.android.stringtelephone.core.MediaRecordDto {
         val client = apiProvider() ?: throw IllegalStateException("no api")
         return client.uploadMedia(peer, bytes, contentType, fileName)
+    }
+
+    /** Uploads media scoped to a group (Phase 21); every member may fetch it. */
+    fun uploadGroupMedia(groupId: String, bytes: ByteArray, contentType: String, fileName: String): com.patbaumgartner.android.stringtelephone.core.MediaRecordDto {
+        val client = apiProvider() ?: throw IllegalStateException("no api")
+        return client.uploadGroupMedia(groupId, bytes, contentType, fileName)
     }
 
     fun send(peer: String, content: String, replyToId: String? = null, onResult: (Boolean) -> Unit) {

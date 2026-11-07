@@ -5,7 +5,8 @@
 Accepted. Superseded in part by Phase 19's implementation
 (2026-10-31): the compatibility constraints held, and group *chats* are now
 built. Group *calls* (constraint 6) shipped as Phase 20 (2026-11-01) under
-their own [ADR-0014](0014-group-calls-confbridge.md).
+their own [ADR-0014](0014-group-calls-confbridge.md). Group *media* (images and
+voice messages) shipped as Phase 21 (2026-11-07) — see the note below.
 
 ## Context
 
@@ -110,5 +111,25 @@ Group chats shipped under these constraints, each one verifiably held:
    separate `group_id` column and per-kind idempotency indexes.
 6. **PBX untouched** — group calls are Phase 20 (confbridge, ADR-0014).
 7. **Roadmap** — this file (feature-plan Phase 19) records the shipped scope;
-   the deferred pieces (media/voice in groups, group calls) are Phase 20 and
-   later work.
+   the deferred pieces shipped later: group calls as Phase 20, group
+   media/voice as Phase 21.
+
+## Implementation note (Phase 21, 2026-11-07)
+
+Group image and voice messages extend the pairwise media machinery (ADR-0009,
+Phase 11) to groups without touching the constraints above:
+
+1. **One media row, one conversation** — V16 adds `media.group_id`, makes
+   `peer` nullable and enforces `peer XOR group_id` with a CHECK; pairwise
+   rows and indexes are untouched.
+2. **Membership is the authorisation** — a group upload (`POST /v1/media` with
+   `groupId` instead of `peer`) and group fetch (`/v1/media/{id}`) check
+   membership exactly like the group REST paths: non-member upload/send is 404,
+   non-member fetch is 403. A group send additionally requires the media to be
+   the sender's own upload bound to that group (403 otherwise).
+3. **Realtime needed no changes** — the `group-message` frame already carries
+   `type`/`mediaId`/`width`/`height`/`durationMs`/`waveform`; reactions,
+   replies and deletion are type-agnostic.
+4. **The app reuses the pairwise surfaces** — the group composer gets the same
+   image picker and voice recorder, and `GroupBubble` renders IMAGE/VOICE via
+   the same shared bubble composables as the pairwise chat.

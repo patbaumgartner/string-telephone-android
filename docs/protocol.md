@@ -164,23 +164,32 @@ members; names are 1–64 characters after trimming.
 
 ### `POST /v1/groups/{groupId}/messages`
 
-Sends one group text message; authorship comes from the principal, visibility
-from membership.
+Sends one group message — text (Phase 19) or image/voice (Phase 21);
+authorship comes from the principal, visibility from membership.
 
 ```json
 {"content":"trailhead at nine","clientKey":"random-per-logical-message"}
+{"content":"","clientKey":"...","type":"IMAGE","mediaId":"<upload id>"}
+{"content":"","clientKey":"...","type":"VOICE","mediaId":"<upload id>","durationMs":4200,"waveform":"10,80,40"}
 ```
 
-- `content` must be nonempty and at most 8192 UTF-8 bytes (`413`), the same
-  cap as pairwise text.
+- Text: `content` must be nonempty and at most 8192 UTF-8 bytes (`413`), the
+  same cap as pairwise text.
 - `replyToId` optionally quotes a message that must belong to the same group
   (`400` otherwise).
+- IMAGE/VOICE (Phase 21): `mediaId` must reference media the caller uploaded
+  to `POST /v1/media` **scoped to this group** (`groupId`, not `peer`) —
+  unknown media `404`, pairwise media / another group's media / another
+  member's upload `403`, not `ready` `400`, missing `mediaId` `400`. VOICE
+  additionally requires audio media (`400` otherwise), `durationMs` in
+  1–600 000 (`400`) and a numeric `waveform` (`400`), normalized exactly like
+  the pairwise voice path.
 - Idempotency is per `(sender, groupId, clientKey)` — its own partial unique
   index, never the pairwise triple. Retrying returns the original record.
 - The stored row keeps `recipient` empty and carries `group_id`; the
-  fan-out reaches every member over the websocket (`group-message`).
-- Group messages are text only in this first cut (ADR-0012): media and voice
-  keep the pairwise path.
+  fan-out reaches every member over the websocket (`group-message`, which
+  carries `type`/`mediaId`/`width`/`height`/`durationMs`/`waveform` like the
+  pairwise `new-message`).
 
 Response `201` is the pairwise message record with two group additions:
 `groupId` names the conversation and `readCount` (int) says how many members
@@ -541,9 +550,12 @@ S3-compatible object storage when enabled).
 
 ### `POST /v1/media`
 
-Authenticated multipart upload for the chat peer `{peer}` given as a form
-field. The server records ownership (`owner` = authenticated principal,
-`peer`), never client-supplied identity.
+Authenticated multipart upload scoped to exactly one conversation: the form
+carries **exactly one of** `peer` (pairwise, Phase 6/11) or `groupId` (group,
+Phase 21) — both or neither is `400`. The server records ownership (`owner` =
+authenticated principal, plus `peer` or `groupId`), never client-supplied
+identity. A group upload first checks membership like every group path: a
+non-member gets `404` ("no such group").
 
 - Content types are allow-listed: images (`image/jpeg`, `image/png`,
   `image/webp`, `image/gif`) and audio (`audio/mpeg`, `audio/ogg`,
@@ -560,6 +572,7 @@ Response `201`:
   "id":"uuid",
   "owner":"alice",
   "peer":"bob",
+  "groupId":null,
   "contentType":"image/jpeg",
   "byteSize":123456,
   "sha256":"<hex>",
@@ -569,14 +582,19 @@ Response `201`:
 }
 ```
 
-`width`/`height` are null for non-image content. Sending this `id` with
-`POST /v1/conversations/{peer}/messages` (`type=IMAGE`) attaches it to a
-message; only a participant of the owning conversation may reference it.
+`peer` is null for group media and `groupId` is null for pairwise media — a
+media row belongs to exactly one conversation (V16 CHECK). `width`/`height`
+are null for non-image content. Sending this `id` with
+`POST /v1/conversations/{peer}/messages` (`type=IMAGE`) or
+`POST /v1/groups/{groupId}/messages` attaches it to a message; only a
+participant of the owning conversation may reference it.
 
 ### `GET /v1/media/{id}`
 
-Streams the original bytes. Only the owner or the conversation peer may fetch
-(`403` otherwise, `404` unknown id). Content type and length come from the
+Streams the original bytes. Pairwise media: only the owner or the conversation
+peer may fetch. Group media: the owner or **any group member** may fetch
+(membership is the authorisation, exactly like the group REST paths). `403`
+otherwise, `404` unknown id. Content type and length come from the
 stored object; responses are `no-store` because bearer auth cannot use shared
 caches.
 

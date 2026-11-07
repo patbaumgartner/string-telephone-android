@@ -16,7 +16,10 @@ import javax.imageio.ImageIO
 data class MediaRecord(
     val id: String,
     val owner: String,
-    val peer: String,
+    /** Pairwise conversation peer; null for group media (Phase 21, V16). */
+    val peer: String?,
+    /** Group the media belongs to; null for pairwise media (Phase 21, V16). */
+    val groupId: String? = null,
     val contentType: String,
     val byteSize: Long,
     val sha256: String,
@@ -31,6 +34,8 @@ class MediaService(
     private val db: JdbcClient,
     private val store: MediaStore,
     private val clock: () -> Long = System::currentTimeMillis,
+    /** Group membership check (Phase 21): does [username] belong to [groupId]. */
+    private val groupMember: (groupId: String, username: String) -> Boolean = { _, _ -> false },
 ) {
     companion object {
         const val MAX_IMAGE_BYTES = 16L * 1024 * 1024
@@ -49,8 +54,11 @@ class MediaService(
     /**
      * Stores original bytes; for images generates a size-capped JPEG thumbnail
      * (ADR-0009). Ownership is recorded server-side (never client-supplied).
+     * The media belongs to exactly one conversation: a pairwise [peer] or a
+     * [groupId] (Phase 21, V16) — the caller has already checked membership.
      */
-    fun upload(owner: String, peer: String, contentType: String, bytes: ByteArray): MediaRecord {
+    fun upload(owner: String, peer: String?, contentType: String, bytes: ByteArray, groupId: String? = null): MediaRecord {
+        require((peer == null) != (groupId == null)) { "exactly one of peer or groupId is required" }
         if (!allowed(contentType, bytes.size.toLong())) {
             throw ApiFailure(org.springframework.http.HttpStatus.BAD_REQUEST, "unsupported or too large media")
         }
@@ -68,18 +76,33 @@ class MediaService(
 
         val now = clock()
         db.sql(
-            "INSERT INTO media(id,owner,peer,content_type,byte_size,sha256,state,thumbnail_key,created_at,width,height) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-        ).params(id, owner, peer, contentType, bytes.size.toLong(), sha, "ready", thumbKey ?: "", now, dimensions?.first ?: 0, dimensions?.second ?: 0)
+            "INSERT INTO media(id,owner,peer,group_id,content_type,byte_size,sha256,state,thumbnail_key,created_at,width,height) VALUES(:id,:owner,:peer,:groupId,:contentType,:byteSize,:sha256,:state,:thumbnailKey,:createdAt,:width,:height)",
+        ).param("id", id).param("owner", owner).param("peer", peer).param("groupId", groupId)
+            .param("contentType", contentType).param("byteSize", bytes.size.toLong()).param("sha256", sha)
+            .param("state", "ready").param("thumbnailKey", thumbKey ?: "").param("createdAt", now)
+            .param("width", dimensions?.first ?: 0).param("height", dimensions?.second ?: 0)
             .update()
-        return MediaRecord(id, owner, peer, contentType, bytes.size.toLong(), sha, "ready", thumbKey, now, dimensions?.first, dimensions?.second)
+        return MediaRecord(id, owner, peer, groupId, contentType, bytes.size.toLong(), sha, "ready", thumbKey, now, dimensions?.first, dimensions?.second)
     }
 
-    /** Only the owner or peer may fetch media for the conversation. */
+    /**
+     * Only the conversation's participants may fetch media: the owner and peer
+     * for pairwise media, every group member for group media (Phase 21 —
+     * membership is the authorisation, exactly like the group REST paths).
+     */
+    private fun authorize(record: MediaRecord, requester: String) {
+        val groupId = record.groupId
+        val allowed = if (groupId != null) {
+            requester == record.owner || groupMember(groupId, requester)
+        } else {
+            requester == record.owner || requester == record.peer
+        }
+        if (!allowed) throw ApiFailure(org.springframework.http.HttpStatus.FORBIDDEN, "forbidden")
+    }
+
     fun authorizeAndGet(id: String, requester: String): MediaObject {
         val record = mediaRecord(id) ?: throw ApiFailure(org.springframework.http.HttpStatus.NOT_FOUND, "not found")
-        if (requester != record.owner && requester != record.peer) {
-            throw ApiFailure(org.springframework.http.HttpStatus.FORBIDDEN, "forbidden")
-        }
+        authorize(record, requester)
         val key = mediaKey(id, "original")
         return store.get(key)
     }
@@ -87,9 +110,7 @@ class MediaService(
     /** Streams the server-generated thumbnail (falls back to the original for non-images). */
     fun authorizeAndGetThumbnail(id: String, requester: String): MediaObject {
         val record = mediaRecord(id) ?: throw ApiFailure(org.springframework.http.HttpStatus.NOT_FOUND, "not found")
-        if (requester != record.owner && requester != record.peer) {
-            throw ApiFailure(org.springframework.http.HttpStatus.FORBIDDEN, "forbidden")
-        }
+        authorize(record, requester)
         val key = if (record.thumbnailKey.isNullOrBlank() || record.thumbnailKey == "") {
             mediaKey(id, "original")
         } else {
@@ -99,10 +120,10 @@ class MediaService(
     }
 
     private fun mediaRecord(id: String): MediaRecord? = db.sql(
-        "SELECT id,owner,peer,content_type,byte_size,sha256,state,thumbnail_key,created_at,width,height FROM media WHERE id=?",
+        "SELECT id,owner,peer,group_id,content_type,byte_size,sha256,state,thumbnail_key,created_at,width,height FROM media WHERE id=?",
     ).params(id).query { rs, _ ->
         MediaRecord(
-            rs.getString("id"), rs.getString("owner"), rs.getString("peer"),
+            rs.getString("id"), rs.getString("owner"), rs.getString("peer"), rs.getString("group_id"),
             rs.getString("content_type"), rs.getLong("byte_size"), rs.getString("sha256"),
             rs.getString("state"), rs.getString("thumbnail_key"), rs.getLong("created_at"),
             rs.getObject("width", Integer::class.java)?.toInt()?.takeIf { it > 0 },

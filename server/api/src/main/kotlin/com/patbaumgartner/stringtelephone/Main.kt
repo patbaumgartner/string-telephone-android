@@ -88,7 +88,8 @@ class StringTelephoneServer {
     ) = GroupCallService(tx, groups, GroupCalls(jdbcClient), pbx, hub, accounts)
 
     @Bean
-    fun media(jdbcClient: JdbcClient, store: MediaStore) = MediaService(jdbcClient, store)
+    fun media(jdbcClient: JdbcClient, store: MediaStore, groups: Groups) =
+        MediaService(jdbcClient, store, groupMember = { groupId, username -> groups.isMember(groupId, username) })
 
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "st.media", name = ["enabled"], havingValue = "true")
@@ -119,7 +120,7 @@ class StringTelephoneServer {
     ) = AccountService(jdbcClient, tx, users, pbx, hub)
 
     @Bean
-    fun mediaApi(users: Users, media: MediaService) = MediaApi(users, media)
+    fun mediaApi(users: Users, media: MediaService, groups: Groups) = MediaApi(users, media, groups)
 
     /**
      * Boundary for background scheduling: the PBX reconciler and the presence

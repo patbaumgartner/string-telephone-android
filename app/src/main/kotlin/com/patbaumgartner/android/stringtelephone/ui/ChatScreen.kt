@@ -771,7 +771,7 @@ private fun MessageWithMeta(text: String, modifier: Modifier = Modifier, meta: @
 }
 
 @Composable
-private fun ImageBubbleContent(message: ChatMessage, colors: com.patbaumgartner.android.stringtelephone.ui.theme.ChatColors, time: String, failed: Boolean, status: String, viewModel: AppViewModel?) {
+internal fun ImageBubbleContent(message: ChatMessage, colors: com.patbaumgartner.android.stringtelephone.ui.theme.ChatColors, time: String, failed: Boolean, status: String, viewModel: AppViewModel?) {
     val baseUrl = viewModel?.mediaBaseUrl()
     val token = viewModel?.mediaToken()
     val thumbUrl = if (baseUrl != null && message.mediaId != null) "$baseUrl/v1/media/${message.mediaId}/thumbnail" else ""
@@ -838,7 +838,7 @@ private fun ImageBubbleContent(message: ChatMessage, colors: com.patbaumgartner.
  * the screen stops the audio.
  */
 @Composable
-private fun VoiceBubbleContent(
+internal fun VoiceBubbleContent(
     message: ChatMessage,
     colors: com.patbaumgartner.android.stringtelephone.ui.theme.ChatColors,
     time: String,
