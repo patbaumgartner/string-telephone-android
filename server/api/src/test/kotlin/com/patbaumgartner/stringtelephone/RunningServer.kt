@@ -106,9 +106,16 @@ class RunningServer(extra: Map<String, String> = emptyMap(), val http: HttpClien
     }
 
     /** Multipart upload with raw bytes (used for media uploads); returns the raw body bytes. */
-    fun postMultipart(path: String, peer: String, fileName: String, contentType: String, bytes: ByteArray, bearer: String): HttpResponse<ByteArray> {
+    fun postMultipart(path: String, peer: String, fileName: String, contentType: String, bytes: ByteArray, bearer: String): HttpResponse<ByteArray> =
+        postMultipartFields(path, listOf("peer" to peer), fileName, contentType, bytes, bearer)
+
+    /** Multipart upload scoped to a group (Phase 21): the form carries groupId instead of peer. */
+    fun postMultipartGroup(path: String, groupId: String, fileName: String, contentType: String, bytes: ByteArray, bearer: String): HttpResponse<ByteArray> =
+        postMultipartFields(path, listOf("groupId" to groupId), fileName, contentType, bytes, bearer)
+
+    private fun postMultipartFields(path: String, fields: List<Pair<String, String>>, fileName: String, contentType: String, bytes: ByteArray, bearer: String): HttpResponse<ByteArray> {
         val boundary = "----stit" + System.nanoTime()
-        val head = ("--$boundary\r\nContent-Disposition: form-data; name=\"peer\"\r\n\r\n$peer\r\n" +
+        val head = (fields.joinToString("") { "--$boundary\r\nContent-Disposition: form-data; name=\"${it.first}\"\r\n\r\n${it.second}\r\n" } +
             "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n" +
             "Content-Type: $contentType\r\n\r\n").toByteArray(Charsets.ISO_8859_1)
         val tail = "\r\n--$boundary--\r\n".toByteArray()

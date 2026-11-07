@@ -348,6 +348,7 @@ object PreviewFactory {
         contactPreviews: Boolean = false,
         groupChat: Boolean = false,
         groupCallRing: Boolean = false,
+        groupChatMedia: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
         val conversation: List<Triple<Boolean, String, String>> = when {
@@ -406,6 +407,46 @@ object PreviewFactory {
                     ),
                 )
             }
+        }
+        if (groupChatMedia) {
+            // Phase 21: a group image from bob and a voice message from
+            // alice render through the same bubble content as pairwise.
+            cache.append(
+                "grp-hike",
+                com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
+                    serverId = "group-media-image",
+                    clientKey = "group-media-image",
+                    fromMe = false,
+                    sender = "bob",
+                    content = "",
+                    sentAtEpochMs = java.time.Instant.parse("2025-06-13T08:24:00Z").toEpochMilli(),
+                    state = com.patbaumgartner.android.stringtelephone.chat.SendState.SENT,
+                    type = "IMAGE",
+                    mediaId = "group-media-image-1",
+                    width = 4032,
+                    height = 3024,
+                    groupId = "grp-hike",
+                    readCount = 2,
+                    readBy = setOf("alice", "carol"),
+                ),
+            )
+            cache.append(
+                "grp-hike",
+                com.patbaumgartner.android.stringtelephone.chat.ChatMessage(
+                    serverId = "group-media-voice",
+                    clientKey = "group-media-voice",
+                    fromMe = true,
+                    sender = "alice",
+                    content = "",
+                    sentAtEpochMs = java.time.Instant.parse("2025-06-13T08:25:00Z").toEpochMilli(),
+                    state = com.patbaumgartner.android.stringtelephone.chat.SendState.SENT,
+                    type = "VOICE",
+                    mediaId = "group-media-voice-1",
+                    durationMs = 42_000,
+                    waveform = VOICE_WAVEFORM,
+                    groupId = "grp-hike",
+                ),
+            )
         }
         if (chatImage) {
             cache.append(
@@ -511,7 +552,7 @@ object PreviewFactory {
         )
         container.repository.seedForPreviews(
             me = com.patbaumgartner.android.stringtelephone.network.MeResult("alice", "Alice"),
-            groups = if (groupChat) PREVIEW_GROUPS else emptyList(),
+            groups = if (groupChat || groupChatMedia) PREVIEW_GROUPS else emptyList(),
             contacts = if (contactsManaged) {
                 // Phase 18: pin/mute/archive flags baked into the contact
                 // rows; the ordering logic splits the list client-side.

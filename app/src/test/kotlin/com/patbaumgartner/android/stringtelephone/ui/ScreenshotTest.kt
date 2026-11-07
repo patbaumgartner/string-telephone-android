@@ -163,6 +163,12 @@ class ScreenshotTest {
         capture("22-group-call-ring", ScreenshotRoute.GROUP_CALL_RING)
     }
 
+    /** A group chat with an image and a voice message from members (Phase 21). */
+    @Test
+    fun captureGroupChatMedia() {
+        capture("23-group-chat-media", ScreenshotRoute.GROUP_CHAT_MEDIA)
+    }
+
     @Test
     fun captureSettings() {
         capture("05-settings", ScreenshotRoute.SETTINGS)

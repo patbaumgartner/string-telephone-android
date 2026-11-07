@@ -1,7 +1,7 @@
 # String Telephone — Feature Roadmap
 
 Date: 2026-10-25
-Status: All 20 phases done (see the table below)
+Status: All 21 phases done (see the table below)
 
 This document captures feature requests, the decisions behind them, and the
 planned phases. It is a working document; status updates live in GitHub issues
@@ -49,10 +49,10 @@ Phases land in this order. Each is small enough for one focused review.
 | 18 | Chat list management (pin/mute/archive) | Medium | Done (2026-10-30) | `V13__conversation_state.sql` |
 | 19 | Group chats | Large | Done (2026-10-31) | Phase 3 |
 | 20 | Group calls (confbridge) | Large | Done (2026-11-01) | Phase 19, [ADR-0014](adr/0014-group-calls-confbridge.md) |
+| 21 | Group image & voice messages | Medium | Done (2026-11-07) | Phase 19, [ADR-0012](adr/0012-group-chat-scope.md) |
 
 Deferred indefinitely: end-to-end encryption, push notifications. The group-chat
-scope is captured in [ADR-0012](adr/0012-group-chat-scope.md); group media and
-voice in group chats (deferred pieces) move to Phase 21.
+scope is captured in [ADR-0012](adr/0012-group-chat-scope.md).
 
 ---
 
@@ -966,6 +966,44 @@ frames → last-leave bridge destroy → fresh call gets a new bridge.
 
 ---
 
+### Phase 21 — Group image & voice messages
+
+**Effort:** Medium
+**Status:** Done (2026-11-07)
+**Depends on:** Phase 19 (groups), Phases 6+11 (pairwise media), [ADR-0012](adr/0012-group-chat-scope.md)
+
+The last deferred ADR-0012 piece: image and voice messages inside group chats,
+reusing the pairwise media machinery end to end.
+
+- **One media row, one conversation** (V16): `media` gains `group_id`, `peer`
+  becomes nullable, and a CHECK enforces exactly one of the two — pairwise
+  rows and indexes are untouched.
+- **Upload**: `POST /v1/media` takes `peer` XOR `groupId`; a group upload
+  checks membership like every group path (non-member → 404).
+- **Send**: `POST /v1/groups/{id}/messages` accepts `type: IMAGE|VOICE` with
+  `mediaId` (+ `durationMs`/`waveform` for VOICE); the media must be the
+  sender's own upload bound to that group (pairwise media, another group's
+  media or another member's upload → 403). Fan-out rides the existing
+  `group-message` frame, which already carries the media fields.
+- **Fetch**: `/v1/media/{id}` authorizes group media by membership (owner or
+  any member; outsider → 403), pairwise by owner/peer as before.
+- **App**: the group composer gains the image picker and voice recording; the
+  group bubble renders IMAGE/VOICE through the same shared composables as the
+  pairwise chat (reactions, replies, deletion are type-agnostic and come
+  free).
+
+Shipped: V16 migration (`V16__group_media.sql`), `MediaService` membership
+callback + shared `authorize()`, `MediaApi` peer|groupId upload,
+`sendGroupMessage` media branch, `insertGroupMedia`/`insertGroupVoice`, core
+DTOs, app ApiClient/repository/ViewModel paths, `GroupsUi` picker + composer +
+media bubbles, screenshot route `23-group-chat-media`, oracle
+`scripts/verify-group-media.mjs`, prototype G10 (`scripts/test-group-media.mjs`),
+protocol.md group-media contract. Integration test
+(`GroupMediaIntegrationTest`) proves member send/history/WS fan-out/fetch,
+outsider 404/403, cross-binding 403s, validation 400s and idempotent resend.
+
+---
+
 ## Deferred indefinitely
 
 | Feature | Reason |
@@ -983,7 +1021,7 @@ frames → last-leave bridge destroy → fresh call gets a new bridge.
 | [ADR-0009](adr/0009-media-storage-s3.md) | Media storage — Garage default, S3-compatible interface | Accepted |
 | [ADR-0010](adr/0010-message-delivery-states.md) | Read receipts (always-on) | Accepted |
 | [ADR-0011](adr/0011-message-extras.md) | Reactions, replies, deletion semantics | Accepted (planned) |
-| [ADR-0012](adr/0012-group-chat-scope.md) | Group chats — scope and one-to-one compatibility constraints | Accepted; shipped as Phase 19 (group calls deferred to Phase 20) |
+| [ADR-0012](adr/0012-group-chat-scope.md) | Group chats — scope and one-to-one compatibility constraints | Accepted; shipped as Phase 19, group media as Phase 21 (group calls deferred to Phase 20) |
 | [ADR-0014](adr/0014-group-calls-confbridge.md) | Group calls — per-call confbridge bridges over AMI | Accepted; implementation as Phase 20 |
 
 ---

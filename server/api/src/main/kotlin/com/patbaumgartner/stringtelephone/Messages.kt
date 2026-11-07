@@ -206,6 +206,48 @@ class Messages(
     }
 
     /**
+     * Stores a group IMAGE message (Phase 21): like [insertMedia] but the
+     * conversation is the group — `recipient` stays '' and `group_id` carries
+     * it. The caller must already be validated as a member and the media row
+     * must already be scoped to this group.
+     */
+    fun insertGroupMedia(sender: String, groupId: String, clientKey: String, mediaId: String, media: MediaRecord, replyTo: String? = null): MessageRecord {
+        val id = newId()
+        val now = System.currentTimeMillis()
+        val inserted = db.sql(
+            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, media_id, width, height, reply_to, group_id) " +
+                "VALUES(:id, :sender, '', '', :createdAt, :clientKey, 'IMAGE', :mediaId, :width, :height, :replyTo, :groupId) ON CONFLICT DO NOTHING",
+        ).param("id", id).param("sender", sender)
+            .param("createdAt", now).param("clientKey", clientKey)
+            .param("mediaId", mediaId).param("width", media.width).param("height", media.height)
+            .param("replyTo", replyTo).param("groupId", groupId).update()
+        val stored = findInGroup(sender, groupId, clientKey)
+            ?: error("stored group message disappeared after insert")
+        if (inserted > 0) onNewMessage(stored)
+        return stored
+    }
+
+    /**
+     * Stores a group VOICE message (Phase 21): the group-scoped twin of
+     * [insertVoice] with the recorded duration and waveform.
+     */
+    fun insertGroupVoice(sender: String, groupId: String, clientKey: String, mediaId: String, durationMs: Int, waveform: String, replyTo: String? = null): MessageRecord {
+        val id = newId()
+        val now = System.currentTimeMillis()
+        val inserted = db.sql(
+            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, media_id, duration_ms, waveform, reply_to, group_id) " +
+                "VALUES(:id, :sender, '', '', :createdAt, :clientKey, 'VOICE', :mediaId, :durationMs, :waveform, :replyTo, :groupId) ON CONFLICT DO NOTHING",
+        ).param("id", id).param("sender", sender)
+            .param("createdAt", now).param("clientKey", clientKey)
+            .param("mediaId", mediaId).param("durationMs", durationMs).param("waveform", waveform)
+            .param("replyTo", replyTo).param("groupId", groupId).update()
+        val stored = findInGroup(sender, groupId, clientKey)
+            ?: error("stored group message disappeared after insert")
+        if (inserted > 0) onNewMessage(stored)
+        return stored
+    }
+
+    /**
      * Group message history (Phase 19): newest first, cursor semantics
      * identical to the pairwise [page], scoped to one group. Membership is
      * the caller's responsibility (the endpoint checks it before paging).

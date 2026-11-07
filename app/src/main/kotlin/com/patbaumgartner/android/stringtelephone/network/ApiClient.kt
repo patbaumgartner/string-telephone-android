@@ -271,11 +271,21 @@ class CompanionApiClient(
      * Uploads a media blob (image) to the companion API. Returns the server
      * record, whose [MediaRecord.id] is referenced when sending the message.
      */
-    fun uploadMedia(peer: String, bytes: ByteArray, contentType: String, fileName: String): com.patbaumgartner.android.stringtelephone.core.MediaRecordDto = request {
+    fun uploadMedia(peer: String, bytes: ByteArray, contentType: String, fileName: String): com.patbaumgartner.android.stringtelephone.core.MediaRecordDto =
+        uploadMediaFor(peer = peer, groupId = null, bytes, contentType, fileName)
+
+    /**
+     * Uploads a media blob scoped to a group (Phase 21): the form carries
+     * `groupId` instead of `peer`, so every member may later fetch the bytes.
+     */
+    fun uploadGroupMedia(groupId: String, bytes: ByteArray, contentType: String, fileName: String): com.patbaumgartner.android.stringtelephone.core.MediaRecordDto =
+        uploadMediaFor(peer = null, groupId = groupId, bytes, contentType, fileName)
+
+    private fun uploadMediaFor(peer: String?, groupId: String?, bytes: ByteArray, contentType: String, fileName: String): com.patbaumgartner.android.stringtelephone.core.MediaRecordDto = request {
         val boundary = "----StringTelephone" + System.currentTimeMillis()
         val body = okhttp3.MultipartBody.Builder(boundary)
             .setType(okhttp3.MultipartBody.FORM)
-            .addFormDataPart("peer", peer)
+            .apply { if (peer != null) addFormDataPart("peer", peer) else addFormDataPart("groupId", groupId.orEmpty()) }
             .addFormDataPart("file", fileName, bytes.toRequestBody(contentType.toMediaType()))
             .build()
         val response = http.newCall(
@@ -731,6 +741,63 @@ class CompanionApiClient(
                 401, 403 -> throw ApiException.Auth
                 404 -> throw ApiException.Protocol("no such group")
                 413 -> throw ApiException.Protocol("content too large")
+                400 -> throw ApiException.Protocol("invalid message")
+                in 200..299 -> {
+                    val m = json.decodeFromString(MessageDto.serializer(), r.body.string())
+                    return@request toMessageResult(m)
+                }
+                else -> throw ApiException.Unexpected(r.code)
+            }
+        }
+    }
+
+    /**
+     * Sends a group IMAGE message (Phase 21): the media must have been
+     * uploaded with this group's id; the server re-checks that binding.
+     */
+    fun sendGroupMedia(groupId: String, mediaId: String, clientKey: String, width: Int? = null, height: Int? = null, replyToId: String? = null): MessageResult = request {
+        val payload = json.encodeToString(
+            SendGroupMessageRequest.serializer(),
+            SendGroupMessageRequest("", clientKey, replyToId, type = "IMAGE", mediaId = mediaId),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/messages")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when (r.code) {
+                401, 403 -> throw ApiException.Auth
+                404 -> throw ApiException.Protocol("no such group or media")
+                400 -> throw ApiException.Protocol("invalid message")
+                in 200..299 -> {
+                    val m = json.decodeFromString(MessageDto.serializer(), r.body.string())
+                    return@request toMessageResult(m)
+                }
+                else -> throw ApiException.Unexpected(r.code)
+            }
+        }
+    }
+
+    /** Sends a group VOICE message (Phase 21) with duration and waveform. */
+    fun sendGroupVoice(groupId: String, mediaId: String, clientKey: String, durationMs: Int, waveform: String, replyToId: String? = null): MessageResult = request {
+        val payload = json.encodeToString(
+            SendGroupMessageRequest.serializer(),
+            SendGroupMessageRequest("", clientKey, replyToId, type = "VOICE", mediaId = mediaId, durationMs = durationMs, waveform = waveform),
+        )
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/messages")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when (r.code) {
+                401, 403 -> throw ApiException.Auth
+                404 -> throw ApiException.Protocol("no such group or media")
                 400 -> throw ApiException.Protocol("invalid message")
                 in 200..299 -> {
                     val m = json.decodeFromString(MessageDto.serializer(), r.body.string())

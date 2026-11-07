@@ -9,6 +9,12 @@ No public release has been published yet.
 
 ### Changed
 
+- Group image and voice messages (Phase 21). In a group chat, the attach
+  button opens the image picker and the microphone records a voice message,
+  exactly like one-to-one chats. Uploaded media is scoped to the group, so
+  every member can view images and play voice messages; people outside the
+  group can neither upload nor fetch them. Reactions, replies and deletion
+  work on media bubbles unchanged.
 - Group calls (Phase 20). Any group member can start a voice or video call
   from the group chat; every other member's devices ring at once through a
   notification and an in-chat banner. The call is an Asterisk confbridge
