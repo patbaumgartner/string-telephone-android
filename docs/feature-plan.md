@@ -1,7 +1,7 @@
 # String Telephone — Feature Roadmap
 
 Date: 2026-10-25
-Status: In progress (phases 1 to 3, 5 to 11 done; see the table below)
+Status: All 20 phases done (see the table below)
 
 This document captures feature requests, the decisions behind them, and the
 planned phases. It is a working document; status updates live in GitHub issues
@@ -17,10 +17,9 @@ behaviour, tests, protocol documentation and screenshots are merged.
 
 1. [Phase overview](#planned-phases)
 2. [Phase details](#phase-details)
-3. [Planned later phases](#planned-later-phases)
-4. [Deferred indefinitely](#deferred-indefinitely)
-5. [Architecture decisions](#architecture-decisions)
-6. [Open decisions](#open-decisions)
+3. [Deferred indefinitely](#deferred-indefinitely)
+4. [Architecture decisions](#architecture-decisions)
+5. [Open decisions](#open-decisions)
 
 ---
 
@@ -48,11 +47,12 @@ Phases land in this order. Each is small enough for one focused review.
 | 16 | Message search | Medium | Done (2026-10-28) | `V11__message_search.sql` |
 | 17 | Message editing | Medium | Done (2026-10-30) | `V12__message_editing.sql` |
 | 18 | Chat list management (pin/mute/archive) | Medium | Done (2026-10-30) | `V13__conversation_state.sql` |
-| 19 | Group chats | Large | Planned | Phase 3 |
+| 19 | Group chats | Large | Done (2026-10-31) | Phase 3 |
+| 20 | Group calls (confbridge) | Large | Done (2026-11-01) | Phase 19, [ADR-0014](adr/0014-group-calls-confbridge.md) |
 
 Deferred indefinitely: end-to-end encryption, push notifications. The group-chat
-scope is captured in [ADR-0012](adr/0012-group-chat-scope.md); this roadmap now
-includes a Phase 19 implementation. See [Phase 19](#phase-19--group-chats).
+scope is captured in [ADR-0012](adr/0012-group-chat-scope.md); group media and
+voice in group chats (deferred pieces) move to Phase 21.
 
 ---
 
