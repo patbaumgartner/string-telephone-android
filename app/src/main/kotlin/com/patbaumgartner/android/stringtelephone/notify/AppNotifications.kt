@@ -118,6 +118,36 @@ object AppNotifier {
     }
 
     /**
+     * Shows the ringing group call (Phase 20, ADR-0014). Tapping opens the
+     * group chat (the ring banner with Answer lives there); answering via
+     * the notification action still goes through MainActivity so the
+     * microphone permission gate applies.
+     */
+    fun notifyGroupCall(context: Context, groupId: String, displayGroup: String, starter: String, withVideo: Boolean = false) {
+        if (!canPost(context)) return
+        ensureChannels(context)
+        val show = activityIntent(context, MainActivity.ACTION_SHOW_CALL, groupId, REQUEST_SHOW_CALL, isGroup = true)
+        val answer = activityIntent(context, MainActivity.ACTION_ANSWER_CALL, groupId, REQUEST_ANSWER, isGroup = true)
+        val builder = NotificationCompat.Builder(context, INCOMING_CALL_CHANNEL_ID)
+            .setSmallIcon(if (withVideo) R.drawable.ic_videocam else R.drawable.ic_call)
+            .setColor(context.getColor(R.color.notification_accent))
+            .setContentTitle(context.getString(if (withVideo) R.string.notification_group_call_video_title else R.string.notification_group_call_title))
+            .setContentText(context.getString(if (withVideo) R.string.notification_group_call_video_text else R.string.notification_group_call_text, displayGroup))
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .setAutoCancel(true)
+            .setContentIntent(show)
+        val canUseFullScreen = canUseFullScreenIntent(context)
+        if (canUseFullScreen) builder.setFullScreenIntent(show, true)
+        val notification = builder
+            .addAction(0, context.getString(R.string.call_answer), answer)
+            .build()
+        post(context, null, INCOMING_CALL_NOTIFICATION_ID, notification)
+    }
+
+    /**
      * Shows the ringing call with Answer and Decline. Answer opens the app so
      * the microphone permission gate still applies. On locked devices the
      * full-screen intent shows the call screen when the OS allows it.

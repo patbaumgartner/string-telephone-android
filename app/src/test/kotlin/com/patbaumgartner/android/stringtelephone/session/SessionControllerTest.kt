@@ -156,4 +156,58 @@ class SessionControllerTest {
         }
         assertTrue(condition(), "Condition did not hold within five seconds")
     }
+
+    /** Emits a group-call invite on the realtime stream (Phase 20, ADR-0014). */
+    private fun emitRing(
+        groupId: String = "grp-1",
+        bridgeId: String = "conf-abc",
+        starter: String = "bob",
+        withVideo: Boolean = false,
+    ) {
+        repository.startRealtime()
+        runBlocking {
+            stream.flow.emit(
+                RealtimeEvent.GroupCallInvite(groupId, bridgeId, starter, withVideo),
+            )
+        }
+        idle()
+    }
+
+    @Test
+    fun `group call invite rings through a notification while the app is closed`() {
+        controller.onAppHidden()
+        emitRing()
+        await { controller.groupCallRing.value != null }
+        val incoming = notifications.single { it.notification.channelId == AppNotifier.INCOMING_CALL_CHANNEL_ID }
+        assertEquals(Notification.CATEGORY_CALL, incoming.notification.category)
+
+        // Someone answered: the ring stops on every device.
+        runBlocking {
+            stream.flow.emit(RealtimeEvent.GroupCallState("grp-1", "conf-abc", "joined", "carol", listOf("bob", "carol"), null))
+        }
+        await { notifications.none { it.notification.channelId == AppNotifier.INCOMING_CALL_CHANNEL_ID } }
+        await { controller.groupCallRing.value == null }
+    }
+
+    @Test
+    fun `a busy device does not ring for a group call`() {
+        engine.setState(CallSessionInfo("bob", CallState.ACTIVE))
+        controller.onAppHidden()
+        emitRing()
+        idle()
+        assertTrue(notifications.isEmpty())
+        assertNull(controller.groupCallRing.value)
+    }
+
+    @Test
+    fun `the ended fan-out clears a ring that no answer stopped`() {
+        controller.onAppHidden()
+        emitRing()
+        await { notifications.isNotEmpty() }
+        runBlocking {
+            stream.flow.emit(RealtimeEvent.GroupCallState("grp-1", "conf-abc", "ended", "bob", emptyList(), "last-member-left"))
+        }
+        await { notifications.isEmpty() }
+        await { controller.groupCallRing.value == null }
+    }
 }

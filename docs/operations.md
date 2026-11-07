@@ -208,6 +208,13 @@ Sizing:
   backgrounded video call continues as audio and resumes video only when the
   user turns the camera back on, so no background camera permission is
   required.
+- **Group calls** (Phase 20, [ADR-0014](adr/0014-group-calls-confbridge.md))
+  add one audio stream **per participant** to the bridge, so a group call
+  costs the host N streams at once (plus VP8 per sending member when video
+  is on). The `10000-10100/UDP` range stays sufficient for typical groups:
+  Asterisk allocates ports per channel, not per bridge. Bridges live only
+  for the call and are destroyed when the last member leaves; a bridge whose
+  destroy failed is reclaimed by the PBX retry loop.
 
 ### Private LAN audio (development only)
 

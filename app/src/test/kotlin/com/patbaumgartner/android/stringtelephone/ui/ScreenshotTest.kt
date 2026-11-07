@@ -157,6 +157,12 @@ class ScreenshotTest {
         capture("21-group-chat", ScreenshotRoute.GROUP_CHAT)
     }
 
+    /** The group-call ring banner (Phase 20): a member started a group call. */
+    @Test
+    fun captureGroupCallRing() {
+        capture("22-group-call-ring", ScreenshotRoute.GROUP_CALL_RING)
+    }
+
     @Test
     fun captureSettings() {
         capture("05-settings", ScreenshotRoute.SETTINGS)

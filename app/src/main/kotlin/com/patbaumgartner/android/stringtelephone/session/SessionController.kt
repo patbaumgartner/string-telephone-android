@@ -6,6 +6,7 @@ import com.patbaumgartner.android.stringtelephone.call.CallEvent
 import com.patbaumgartner.android.stringtelephone.call.CallForegroundService
 import com.patbaumgartner.android.stringtelephone.call.EngineConfig
 import com.patbaumgartner.android.stringtelephone.core.CallState
+import com.patbaumgartner.android.stringtelephone.core.RealtimeEvent
 import com.patbaumgartner.android.stringtelephone.core.deriveSipTarget
 import com.patbaumgartner.android.stringtelephone.data.IncomingMessage
 import com.patbaumgartner.android.stringtelephone.data.SignInError
@@ -52,6 +53,13 @@ class SessionController(
     /** True after SIP registration failed while the API session is fine. */
     val registrationFailed: StateFlow<Boolean> = _registrationFailed.asStateFlow()
 
+    /**
+     * The group call ringing on this device (Phase 20, ADR-0014); the
+     * ViewModel navigates, the session owns the notification side effect.
+     */
+    private val _groupCallRing = MutableStateFlow<RealtimeEvent.GroupCallInvite?>(null)
+    val groupCallRing: StateFlow<RealtimeEvent.GroupCallInvite?> = _groupCallRing.asStateFlow()
+
     /** Starts observing engine, sign-in and message events; safe to call repeatedly. */
     fun start() {
         if (started) return
@@ -60,6 +68,8 @@ class SessionController(
         scope.launch { repository.signIn.collect { onSignInState(it) } }
         scope.launch { repository.incomingMessages.collect { onIncomingMessage(it) } }
         scope.launch { repository.readElsewhere.collect { onReadElsewhere(it) } }
+        scope.launch { repository.groupCallRing.collect { onGroupCallRing(it) } }
+        scope.launch { repository.groupCallState.collect { onGroupCallState(it) } }
     }
 
     /** Verifies freshly entered credentials; a rejection clears them. */
@@ -95,6 +105,7 @@ class SessionController(
         credentialStore.clear()
         credentialsPendingVerification = false
         awaitingIncomingPeer = null
+        _groupCallRing.value = null
         recentMessages.clear()
         _registrationFailed.value = false
         AppNotifier.cancelAll(context)
@@ -226,6 +237,58 @@ class SessionController(
 
     private fun showIncomingCall(peer: String, withVideo: Boolean = false) {
         AppNotifier.notifyIncomingCall(context, peer, displayNameOf(peer), withVideo)
+    }
+
+    // ── Group calls (Phase 20, ADR-0014) ────────────────────────────────────
+
+    /**
+     * A member started a group call. Busy devices (any ongoing or ringing
+     * call) auto-decline silently — the existing one-call policy (ADR-0006);
+     * everyone else rings through the notification (the UI ring comes from
+     * the ViewModel's navigation on the same flow).
+     */
+    private fun onGroupCallRing(invite: RealtimeEvent.GroupCallInvite) {
+        if (engine.state.value.state != CallState.IDLE) return
+        val group = repository.groups.value.firstOrNull { it.id == invite.groupId }
+        val display = group?.name ?: invite.groupId
+        _groupCallRing.value = invite
+        if (!appVisible) {
+            AppNotifier.notifyGroupCall(context, invite.groupId, display, invite.starter, invite.withVideo)
+        }
+    }
+
+    /** The user answered in the UI: the ring is over. */
+    fun onGroupCallAnswered() {
+        _groupCallRing.value = null
+        AppNotifier.cancelIncomingCall(context)
+    }
+
+    /** The user dismissed the ring from the banner; keep the notification consistent. */
+    fun dismissGroupCallRing(bridgeId: String) {
+        if (_groupCallRing.value?.bridgeId == bridgeId) {
+            _groupCallRing.value = null
+            AppNotifier.cancelIncomingCall(context)
+        }
+    }
+
+    /**
+     * Preview/test seeding (Phase 20): sets the ringing invite directly so
+     * screenshots render the banner without any network or SIP involvement.
+     */
+    fun seedGroupCallRing(invite: RealtimeEvent.GroupCallInvite?) {
+        _groupCallRing.value = invite
+    }
+
+    /**
+     * Someone answered (stop ringing), left, or the call ended: the ring is
+     * over on every device. `joined` with me as joiner is handled by
+     * [onGroupCallAnswered].
+     */
+    private fun onGroupCallState(event: RealtimeEvent.GroupCallState) {
+        if (_groupCallRing.value?.bridgeId != event.bridgeId) return
+        if (event.state == "joined" && event.by == repository.account.value.me?.username) return
+        _groupCallRing.value = null
+        AppNotifier.cancelIncomingCall(context)
     }
 
     /**

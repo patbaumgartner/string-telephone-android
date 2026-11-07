@@ -920,19 +920,49 @@ scope (ADR-0012 constraints) — group calls move to Phase 20.
 ### Phase 20 — Group calls (confbridge)
 
 **Effort:** Large
-**Status:** Planned
-**Depends on:** Phase 19 (groups), ADR-0012 constraint 6 (PBX stays pairwise
-until a call-phase decision)
+**Status:** Done (2026-11-01)
+**Depends on:** Phase 19 (groups), ADR-0012 constraint 6, [ADR-0014](adr/0014-group-calls-confbridge.md)
 
-Group voice calls over an Asterisk **confbridge** bridge (needs its own ADR,
-planned as ADR-0014):
+Group calls over an Asterisk **confbridge** bridge per call (ADR-0014):
 
-- The API creates a conference per group call and tears it down when the
-  last participant leaves; SIP REGISTER/INVITE flows stay unchanged.
-- The app's call engine dials the conference instead of the peer's SIP URI;
-  pairwise calls are unaffected.
-- Busy/ringing semantics for N participants, and which member may start a
-  call (admin? any member?) need the ADR's decisions before implementation.
+- **Any member may start a call**; the bridge is created on demand
+  (`conf-<uuid>`) and destroyed when the last participant leaves.
+- The dialplan gains one static generic pattern; per-group PBX state does
+  not exist. Membership is the only authorisation (server-side, 404).
+- **Ring all at once** through a `group-call-invite` realtime frame; busy
+  members auto-decline with `Busy` (existing one-call policy), first answer
+  stops the ringing (`group-call-state` frames).
+- **Voice + video**: VP8 relayed by the bridge (`video_mode=sfu`); active
+  speaker full-bleed, no layout grid; `video = none` deployments and
+  permission/background rules degrade exactly like ADR-0013.
+- Pairwise calls are untouched; background/permission rules carry over
+  (ADR-0006).
+
+Shipped: V15 migration (`V15__group_calls.sql`: `group_calls` keyed by
+`bridge_id` with `ended_at` as the one-call rule, `group_call_participants`
+with re-join revival), `GroupCalls` store, `GroupCallService` (PBX action
+first under the reconcile lock, then a narrow transaction; failed row insert
+destroys the bridge; failed destroy stays visibly pending; state fan-out to
+every group member so the first answer stops ringing everywhere), REST
+endpoints (`POST /v1/groups/{id}/calls` → 201 created / 200 existing,
+`GET .../calls/active` → literal null when none, `POST .../join`,
+`POST .../leave` with last-leave bridge destroy + `ended`/`last-member-left`
+frame), `PbxGateway` confbridge trio (open = bridge-id validation only —
+the bridge materializes on the first channel's INVITE — destroy via CLI
+`confbridge kick <bridge> all` confirmed empty, members read from
+`CoreShowChannels` Confbridge channels, ids validated before any network
+access), one static dialplan pattern
+(`exten => _[c][o][n][f]-.,1,Confbridge(${EXTEN})`), `WsHub`
+`broadcastGroupCallInvite`/`broadcastGroupCallState`, core events + parser
+branches, app surface (ApiClient call methods, repository ring/state flows,
+SessionController ring notification with busy auto-decline and
+ring-stop-on-first-answer, ViewModel start/join that dial the bridge after
+navigation and record the leave on hang-up, group chat call button with
+microphone gate, ringing banner, group-call notification, call screen shows
+the group's name), oracle `scripts/verify-group-calls.mjs`, protocol.md
+group-call contract. Integration test proves the lifecycle: start → invite
+fan-out → duplicate start idempotent → outsider 404 everywhere → join/left
+frames → last-leave bridge destroy → fresh call gets a new bridge.
 
 ---
 
@@ -954,6 +984,7 @@ planned as ADR-0014):
 | [ADR-0010](adr/0010-message-delivery-states.md) | Read receipts (always-on) | Accepted |
 | [ADR-0011](adr/0011-message-extras.md) | Reactions, replies, deletion semantics | Accepted (planned) |
 | [ADR-0012](adr/0012-group-chat-scope.md) | Group chats — scope and one-to-one compatibility constraints | Accepted; shipped as Phase 19 (group calls deferred to Phase 20) |
+| [ADR-0014](adr/0014-group-calls-confbridge.md) | Group calls — per-call confbridge bridges over AMI | Accepted; implementation as Phase 20 |
 
 ---
 

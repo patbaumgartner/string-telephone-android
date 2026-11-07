@@ -761,6 +761,80 @@ class ApiIntegrationTest {
             .map { it.jsonObject }.single { it.getValue("id").jsonPrimitive.content == id }
 
     @Test
+    fun `group calls bridge one active call per group with invite fan out and end on last leave`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        val carol = server.create("carol", "Carol").getValue("apiToken").jsonPrimitive.content
+        val outsider = server.create("mallory", "Mallory").getValue("apiToken").jsonPrimitive.content
+        val groupId = createGroup(alice, "Callers", listOf("bob", "carol")).getValue("id").jsonPrimitive.content
+
+        // Alice and Carol listen before the call starts: ring all at once.
+        val aliceEvents = SocketListener()
+        val aliceSocket = connect(alice, aliceEvents)
+        val carolEvents = SocketListener()
+        val carolSocket = connect(carol, carolEvents)
+
+        // Starting a call opens a PBX bridge and records it; any member may start.
+        val started = server.post("/v1/groups/$groupId/calls", """{"withVideo":true}""", bob)
+        assertEquals(201, started.statusCode(), started.body())
+        val call = Json.parseToJsonElement(started.body()).jsonObject
+        val bridgeId = call.getValue("bridgeId").jsonPrimitive.content
+        assertTrue(bridgeId.startsWith("conf-"), "bridge id must be in the conf- namespace")
+        assertEquals("bob", call.getValue("starter").jsonPrimitive.content)
+        assertTrue(server.pbx.conferences.containsKey(bridgeId), "the bridge must exist on the PBX")
+
+        // Every member except the starter receives the invite.
+        for (listener in listOf(aliceEvents, carolEvents)) {
+            val payload = Json.parseToJsonElement(listener.next("group-call-invite").getValue("payload").jsonPrimitive.content).jsonObject
+            assertEquals(groupId, payload.getValue("groupId").jsonPrimitive.content)
+            assertEquals(bridgeId, payload.getValue("bridgeId").jsonPrimitive.content)
+            assertEquals("bob", payload.getValue("starter").jsonPrimitive.content)
+            assertEquals(true, payload.getValue("withVideo").jsonPrimitive.boolean)
+        }
+
+        // One active call per group: a second starter gets the running call
+        // back idempotently (200, same bridge) — the bridge is the call.
+        val duplicate = server.post("/v1/groups/$groupId/calls", "{}", alice)
+        assertEquals(200, duplicate.statusCode(), duplicate.body())
+        assertEquals(bridgeId, Json.parseToJsonElement(duplicate.body()).jsonObject.getValue("bridgeId").jsonPrimitive.content)
+
+        // Non-members get 404 on every call path, like every group path.
+        assertEquals(404, server.post("/v1/groups/$groupId/calls", "{}", outsider).statusCode())
+        assertEquals(404, server.get("/v1/groups/$groupId/calls/active", outsider).statusCode())
+        assertEquals(404, server.post("/v1/groups/$groupId/calls/$bridgeId/join", "", outsider).statusCode())
+        assertEquals(404, server.post("/v1/groups/$groupId/calls/$bridgeId/leave", "", outsider).statusCode())
+
+        // Members learn about the running call and join it.
+        val active = Json.parseToJsonElement(server.get("/v1/groups/$groupId/calls/active", carol).body()).jsonObject
+        assertEquals(bridgeId, active.getValue("bridgeId").jsonPrimitive.content)
+        assertEquals(200, server.post("/v1/groups/$groupId/calls/$bridgeId/join", "", carol).statusCode())
+        val joined = Json.parseToJsonElement(aliceEvents.next("group-call-state").getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals("joined", joined.getValue("state").jsonPrimitive.content)
+        assertEquals("carol", joined.getValue("by").jsonPrimitive.content)
+
+        // Carol and Bob leave. Alice was listening the whole time; when the
+        // last participant leaves, the bridge is destroyed and the call ends.
+        assertEquals(200, server.post("/v1/groups/$groupId/calls/$bridgeId/leave", "", carol).statusCode())
+        val left = Json.parseToJsonElement(aliceEvents.next("group-call-state").getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals("left", left.getValue("state").jsonPrimitive.content)
+        assertEquals(200, server.post("/v1/groups/$groupId/calls/$bridgeId/leave", "", bob).statusCode())
+        val ended = Json.parseToJsonElement(aliceEvents.next("group-call-state").getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals("ended", ended.getValue("state").jsonPrimitive.content)
+        assertEquals("last-member-left", ended.getValue("reason").jsonPrimitive.content)
+        assertFalse(server.pbx.conferences.containsKey(bridgeId), "the last leave must destroy the bridge")
+
+        // The group can call again afterwards: the lifecycle is complete.
+        val again = server.post("/v1/groups/$groupId/calls", "{}", alice)
+        assertEquals(201, again.statusCode(), again.body())
+        assertTrue(Json.parseToJsonElement(again.body()).jsonObject.getValue("bridgeId").jsonPrimitive.content != bridgeId)
+        server.pbx.destroyConference(Json.parseToJsonElement(again.body()).jsonObject.getValue("bridgeId").jsonPrimitive.content)
+
+        aliceSocket.abort()
+        carolSocket.abort()
+    }
+
+    @Test
     fun `conversation state pins mutes archives and caps pins per user`() {
         server.login()
         val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content

@@ -22,6 +22,7 @@ const required = [
   { pattern: /^\d{4}-message-extras/, area: 'message reactions replies deletion' },
   { pattern: /^\d{4}-group-chat/, area: 'group chat scope' },
   { pattern: /^\d{4}-video-calls/, area: 'video calls' },
+  { pattern: /^\d{4}-group-calls/, area: 'group calls' },
 ];
 
 let files;

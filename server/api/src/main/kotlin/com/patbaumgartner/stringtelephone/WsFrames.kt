@@ -68,6 +68,21 @@ object WsFrames {
             WsTypingEvent(from, typing, groupId),
         )))
 
+    /** Group-call invite (Phase 20, ADR-0014): ring every member except the starter. */
+    fun groupCallInvite(groupId: String, bridgeId: String, starter: String, withVideo: Boolean): String =
+        Json.encodeToString(WsMessageDto("group-call-invite", Json.encodeToString(
+            WsGroupCallInviteEvent(groupId, bridgeId, starter, withVideo),
+        )))
+
+    /**
+     * Group-call state (Phase 20): `joined`, `left` or `ended`; `members`
+     * names who is on the bridge now, `reason` explains an end.
+     */
+    fun groupCallState(groupId: String, bridgeId: String, state: String, by: String, members: List<String>, reason: String?): String =
+        Json.encodeToString(WsMessageDto("group-call-state", Json.encodeToString(
+            WsGroupCallStateEvent(groupId, bridgeId, state, by, members, reason),
+        )))
+
     /** Read receipt (ADR-0010): the reader opened these messages in the conversation. */
     fun messageRead(mark: ReadMark): String =
         Json.encodeToString(WsMessageDto("message-read", Json.encodeToString(

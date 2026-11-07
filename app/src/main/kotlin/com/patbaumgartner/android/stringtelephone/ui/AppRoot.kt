@@ -45,6 +45,16 @@ internal fun AppRoot(viewModel: AppViewModel) {
             }
         }
     }
+    // Group-call Answer (Phase 20): the same microphone gate joins the bridge.
+    LaunchedEffect(viewModel.pendingGroupAnswer) {
+        if (viewModel.pendingGroupAnswer) {
+            viewModel.consumePendingGroupAnswer()
+            val ring = viewModel.groupCallRing.value
+            if (ring != null) {
+                requestMicrophone { viewModel.joinGroupCall(ring) }
+            }
+        }
+    }
     BackHandler(enabled = screen is AppScreen.Chat || screen is AppScreen.Settings || screen is AppScreen.GroupChat || screen is AppScreen.GroupDetail) {
         if (screen is AppScreen.GroupDetail) viewModel.backToContacts() else viewModel.backToContacts()
     }
@@ -64,6 +74,7 @@ internal fun AppRoot(viewModel: AppViewModel) {
             is AppScreen.GroupChat -> GroupChatScreen(
                 groupId = current.groupId,
                 viewModel = viewModel,
+                requestMicrophone = requestMicrophone,
             )
             is AppScreen.Chat -> ChatScreen(
                 peer = current.peer,

@@ -228,6 +228,39 @@ sync.
 - The pairwise endpoints (`/v1/conversations/{peer}/...`) reject group
   messages with `404` — a group row is never reachable through a peer path.
 
+### Group calls (`/v1/groups/{groupId}/calls`)
+
+One active call per group — the **bridge is the call** (Phase 20,
+[ADR-0014](adr/0014-group-calls-confbridge.md)). The API opens a confbridge
+bridge over AMI (`conf-<uuid>`, generated server-side, never client-supplied)
+and destroys it when the last participant leaves. Membership is the only
+authorisation; non-members get `404` on every path, like all group endpoints.
+Any member may start a call.
+
+| Route | Body | Effect |
+| --- | --- | --- |
+| `POST /v1/groups/{groupId}/calls` | `{"withVideo":false}` (optional) | Starts a call: opens the bridge, records it, fans `group-call-invite` to every member except the starter. `201` with the call; a call already running returns `200` with the same bridge (idempotent). PBX failure is an explicit `503`. |
+| `GET /v1/groups/{groupId}/calls/active` | none | The group's active call, or literal `null` when none is running. |
+| `POST /v1/groups/{groupId}/calls/{bridgeId}/join` | none | Records a member joining the bridge their device just dialled; fans `group-call-state` (`joined`) to every group member. `404` for non-members or unknown bridge. |
+| `POST /v1/groups/{groupId}/calls/{bridgeId}/leave` | none | Records a member leaving and fans `group-call-state` (`left`); the **last leave** destroys the bridge, ends the call and fans `ended` with `reason:"last-member-left"`. Idempotent re-leave is harmless. |
+
+```json
+{
+  "bridgeId":"conf-c353a2e5-8d11-4074-9905-17a929446b34",
+  "groupId":"grp-uuid",
+  "starter":"bob",
+  "withVideo":true,
+  "startedAt":1760000000000
+}
+```
+
+**Media path** (unchanged SIP flows): the app dials `sip:conf-<bridgeId>@…`
+through its normal registration; Asterisk's static dialplan pattern
+`exten => _[c][o][n][f]-.,1,Confbridge(${EXTEN})` routes any bridge. Busy members
+are handled client-side: a device already in a call auto-declines (the
+existing one-call policy, ADR-0006), which reads to the caller as
+"unavailable". Video inside the bridge is VP8 relayed like pairwise calls.
+
 ### `POST /v1/conversations/{peer}/messages`
 
 ```json
@@ -571,9 +604,13 @@ SRTP in release builds) and media is relayed by Asterisk
   visible); **leaving the call screen** re-INVITEs with video disabled
   entirely while audio keeps running.
 - The RTP range is `10000-10100/UDP` for both streams of a video call (audio
-  and video, each with RTCP). Nothing about calls is stored by the API; the
-  server only provisions SIP identities and records call state for
+  and video, each with RTCP). Nothing about pairwise calls is stored by the
+  API; the server only provisions SIP identities and records call state for
   administration.
+- **Group calls** (Phase 20, [ADR-0014](adr/0014-group-calls-confbridge.md))
+  dial a confbridge bridge (`conf-<uuid>`) through the same registration;
+  the bridge lifecycle, membership checks and fan-out frames are API-side
+  (see the group calls section above). Pairwise flows are untouched.
 
 ## Realtime stream (`/v1/ws`)
 
@@ -643,6 +680,19 @@ Invalid credentials close with `1008` immediately after upgrade.
   "deletedAt":1760000000000}`. `peer` is empty for group events; `groupId`
   names the conversation. REST history remains authoritative after a
   reconnect, as with the pairwise tombstone.
+- `{"type":"group-call-invite","payload":"<JSON string>"}` (Phase 20) rings
+  every member except the starter:
+  `{"groupId":"grp-uuid","bridgeId":"conf-<uuid>","starter":"bob",
+  "withVideo":false}`. A device already in a call auto-declines silently
+  (the one-call policy); everyone else rings. Nothing is persisted — the
+  call state lives in the `group_calls` rows and the bridge.
+- `{"type":"group-call-state","payload":"<JSON string>"}` (Phase 20) is the
+  call's lifecycle fan-out to **every** group member:
+  `{"groupId":"grp-uuid","bridgeId":"conf-<uuid>","state":"joined|left|ended",
+  "by":"carol","members":["bob","carol"],"reason":null}`. `members` names
+  the group for state targeting and who is on the bridge after the change;
+  `reason` (`"last-member-left"`) is present only on `ended`. The first
+  `joined` is what stops the ringing on every other device.
 - `{"type":"message-reaction","payload":"<JSON string>"}` (Phase 8) is a
   durable fan-out of a reaction change. Both conversation participants
   receive it; the client applies the add or remove to the cached message so

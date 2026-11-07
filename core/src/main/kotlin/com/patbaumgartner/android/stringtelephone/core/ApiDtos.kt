@@ -158,6 +158,22 @@ data class AddGroupMemberRequest(val username: String)
 @Serializable
 data class GroupMessagesPageDto(val messages: List<MessageDto>, val nextCursor: String?)
 
+// ── Group calls (Phase 20, ADR-0014) ────────────────────────────────────────
+
+/** One group call as the REST surface returns it; [bridgeId] is the SIP target. */
+@Serializable
+data class GroupCallDto(
+    val bridgeId: String,
+    val groupId: String,
+    val starter: String,
+    val withVideo: Boolean = false,
+    val startedAt: Long,
+)
+
+/** Starts a group call; the response's bridgeId is what the engine dials. */
+@Serializable
+data class StartGroupCallRequest(val withVideo: Boolean = false)
+
 /** Sends one group message: no recipient, authorship comes from the principal. */
 @Serializable
 data class SendGroupMessageRequest(
@@ -231,6 +247,26 @@ data class WsMessageReadDto(val messageIds: List<String> = emptyList(), val read
 /** Typing indicator event payload: peer started or stopped composing (Phase 7). */
 @Serializable
 data class WsTypingDto(val peer: String, val typing: Boolean, val groupId: String? = null)
+
+/** Group-call invite payload (Phase 20, ADR-0014): ring, the starter has opened a bridge. */
+@Serializable
+data class WsGroupCallInviteDto(
+    val groupId: String,
+    val bridgeId: String,
+    val starter: String,
+    val withVideo: Boolean = false,
+)
+
+/** Group-call state payload (Phase 20): joined/left/ended with the live member list. */
+@Serializable
+data class WsGroupCallStateDto(
+    val groupId: String,
+    val bridgeId: String,
+    val state: String,
+    val by: String,
+    val members: List<String> = emptyList(),
+    val reason: String? = null,
+)
 
 /** Reaction event payload (ADR-0011, Phase 8). */
 @Serializable
@@ -393,6 +429,27 @@ sealed interface RealtimeEvent {
         val typing: Boolean,
     ) : RealtimeEvent
 
+    /** A member started a group call: ring (unless already in a call, ADR-0014). */
+    data class GroupCallInvite(
+        val groupId: String,
+        val bridgeId: String,
+        val starter: String,
+        val withVideo: Boolean,
+    ) : RealtimeEvent
+
+    /**
+     * Group-call state changed: `joined` (stop ringing, someone answered),
+     * `left`, or `ended` (call over); [members] is who is on the bridge now.
+     */
+    data class GroupCallState(
+        val groupId: String,
+        val bridgeId: String,
+        val state: String,
+        val by: String,
+        val members: List<String>,
+        val reason: String?,
+    ) : RealtimeEvent
+
     data class Unknown(val type: String) : RealtimeEvent
 }
 
@@ -508,6 +565,14 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 deletedBy = event.deletedBy,
                 deletedAtEpochMs = event.deletedAt,
             )
+        }.getOrNull()
+        "group-call-invite" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsGroupCallInviteDto.serializer(), envelope.payload)
+            RealtimeEvent.GroupCallInvite(event.groupId, event.bridgeId, event.starter, event.withVideo)
+        }.getOrNull()
+        "group-call-state" -> runCatching {
+            val event = realtimeJson.decodeFromString(WsGroupCallStateDto.serializer(), envelope.payload)
+            RealtimeEvent.GroupCallState(event.groupId, event.bridgeId, event.state, event.by, event.members, event.reason)
         }.getOrNull()
         else -> RealtimeEvent.Unknown(envelope.type)
     }

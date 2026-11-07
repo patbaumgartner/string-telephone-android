@@ -19,6 +19,21 @@ interface PbxGateway {
     fun isCurrent(accounts: List<PbxAccount>, settings: PbxSettings): Boolean
     fun disconnect(username: String)
     fun status(): PbxStatus
+
+    /**
+     * Confirms the bridge id is well-formed. The bridge itself materializes
+     * when the first channel enters `Confbridge(<name>)` (Asterisk 22 has no
+     * create action), so "opening" is DB-side bookkeeping; the PBX side is
+     * just validation. Idempotent by construction, so a retried request
+     * cannot wedge the PBX.
+     */
+    fun openConference(bridgeId: String, withVideo: Boolean)
+
+    /** Destroys the confbridge, ending every remaining participant's channel. */
+    fun destroyConference(bridgeId: String)
+
+    /** Usernames with a live channel on the bridge (no stale participants). */
+    fun conferenceMembers(bridgeId: String): List<String>
 }
 
 class AsteriskGateway(
@@ -90,6 +105,80 @@ class AsteriskGateway(
         val channels = action(mapOf("Action" to "CoreShowChannels"), "CoreShowChannelsComplete")
             .count { it["Event"] == "CoreShowChannel" }
         PbxStatus(endpoints, channels)
+    }
+
+    /**
+     * Confirms the bridge id is well-formed. The bridge itself materializes
+     * when the first channel enters `Confbridge(<name>)` — Asterisk 22 has no
+     * create action, so "opening" is DB-side bookkeeping and the PBX side is
+     * just validation (`withVideo` documents intent; an sfu bridge relays
+     * whatever the endpoints negotiate). Idempotent by construction, so a
+     * retried request cannot wedge the PBX.
+     */
+    override fun openConference(bridgeId: String, withVideo: Boolean): Unit = boundary {
+        validateBridgeId(bridgeId)
+    }
+
+    /**
+     * Ends every remaining participant's channel: the CLI `confbridge kick
+     * <bridge> all` is the Asterisk 22 way (there is no `ConfbridgeStop` AMI
+     * action); an empty confbridge destroys itself. Confirmed by re-listing.
+     */
+    override fun destroyConference(bridgeId: String): Unit = boundary {
+        validateBridgeId(bridgeId)
+        cli("confbridge kick $bridgeId all")
+        repeat(20) {
+            if (liveBridgeChannelCount(bridgeId) == 0) return@boundary
+            Thread.sleep(50)
+        }
+        throw PbxUnavailable("PBX has not confirmed bridge destruction for $bridgeId. Reconciliation will retry.")
+    }
+
+    /**
+     * The bridge's live participants. Asterisk 22 reports confbridge
+     * membership only as channel names inside the CLI table, so this reads
+     * `CoreShowChannels` for PJSIP legs (their dialled extension was the
+     * bridge) — the API's `group_call_participants` rows stay the effective
+     * participant record; this list is the PBX-truth cross-check. An unknown
+     * bridge reads as empty (the bridge is gone), never as a failure.
+     */
+    override fun conferenceMembers(bridgeId: String): List<String> = boundary {
+        validateBridgeId(bridgeId)
+        action(mapOf("Action" to "CoreShowChannels"), "CoreShowChannelsComplete")
+            .filter { it["Event"] == "CoreShowChannel" }
+            .filter { it["Application"] == "Confbridge" && it["ApplicationData"]?.startsWith(bridgeId) == true }
+            .mapNotNull { it["Channel"] }
+            .filter { it.startsWith("PJSIP/") }
+            .map { it.removePrefix("PJSIP/").substringBeforeLast("-") }
+            .distinct()
+    }
+
+    /** PJSIP channels still alive on the bridge (the `conf-<id>` extension). */
+    private fun liveBridgeChannelCount(bridgeId: String): Int = action(
+        mapOf("Action" to "CoreShowChannels"),
+        "CoreShowChannelsComplete",
+    ).count { frame ->
+        frame["Event"] == "CoreShowChannel" &&
+            frame["Application"] == "Confbridge" &&
+            frame["ApplicationData"]?.startsWith(bridgeId) == true
+    }
+
+    /**
+     * Runs one CLI command through the AMI `Command` action and returns its
+     * output; a rejected command is a PBX failure, never a silent success.
+     */
+    private fun cli(command: String): String {
+        val output = action(mapOf("Action" to "Command", "Command" to command))
+            .flatMap { it.values }.joinToString("\n")
+        if (listOf("No such command", "Unable to", "Error", "failed").any { output.contains(it, ignoreCase = true) }) {
+            throw PbxUnavailable("PBX rejected $command. Check Asterisk logs and retry.")
+        }
+        return output
+    }
+
+    /** Bridge ids are generated here; rejecting foreign shapes early keeps AMI injection impossible. */
+    private fun validateBridgeId(bridgeId: String) {
+        require(bridgeId.matches(Regex("[a-zA-Z0-9-]{1,80}"))) { "Invalid bridge id" }
     }
 
     private fun atomicWrite(name: String, content: String) {

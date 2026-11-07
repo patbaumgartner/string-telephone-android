@@ -118,6 +118,13 @@ Compose -> AppViewModel -> CallEngine -> liblinphone -> Asterisk -> peer
                               +-> call state -> UI / foreground service
 ```
 
+Group calls (Phase 20, [ADR-0014](adr/0014-group-calls-confbridge.md)) reuse
+the same engine path: the app dials the group's confbridge bridge
+(`conf-<uuid>`) instead of a peer endpoint. The API creates and destroys
+bridges over AMI and fans `group-call-invite` / `group-call-state` frames
+through the `WsHub`, so every member's device rings and stops ringing
+together; pairwise flows are untouched.
+
 The API derives authorship from the authenticated principal, not a sender field
 provided by the client. WebSocket events accelerate updates; persisted messages
 and cursor sync provide catch-up. Messages are not end-to-end encrypted.

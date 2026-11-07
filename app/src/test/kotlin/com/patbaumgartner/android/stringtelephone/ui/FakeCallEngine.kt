@@ -347,6 +347,7 @@ object PreviewFactory {
         contactsManaged: Boolean = false,
         contactPreviews: Boolean = false,
         groupChat: Boolean = false,
+        groupCallRing: Boolean = false,
     ): AppViewModel {
         val cache = ChatCache()
         val conversation: List<Triple<Boolean, String, String>> = when {
@@ -543,6 +544,16 @@ object PreviewFactory {
             },
             unread = mapOf("carol" to 2),
         )
+        if (groupCallRing) {
+            container.session.seedGroupCallRing(
+                com.patbaumgartner.android.stringtelephone.core.RealtimeEvent.GroupCallInvite(
+                    groupId = "grp-hike",
+                    bridgeId = "conf-preview",
+                    starter = "bob",
+                    withVideo = false,
+                ),
+            )
+        }
         val viewModel = AppViewModel(container)
         return viewModel
     }

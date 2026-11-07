@@ -18,7 +18,9 @@ import com.patbaumgartner.android.stringtelephone.chat.ImageDownscale
 import com.patbaumgartner.android.stringtelephone.core.CallState
 import com.patbaumgartner.android.stringtelephone.core.ContactDto
 import com.patbaumgartner.android.stringtelephone.core.ConversationStateDto
+import com.patbaumgartner.android.stringtelephone.core.GroupCallDto
 import com.patbaumgartner.android.stringtelephone.core.GroupDto
+import com.patbaumgartner.android.stringtelephone.core.RealtimeEvent
 import com.patbaumgartner.android.stringtelephone.core.ServerUrlValidation
 import com.patbaumgartner.android.stringtelephone.core.validateServerUrl
 import com.patbaumgartner.android.stringtelephone.data.AccountState
@@ -96,6 +98,18 @@ class AppViewModel(
         private set
 
     /**
+     * Set when the user tapped Answer on a group-call notification (Phase
+     * 20): the group chat screen shows the join surface and runs the
+     * microphone gate, then dials the bridge.
+     */
+    var pendingGroupAnswer by mutableStateOf(false)
+        private set
+
+    fun consumePendingGroupAnswer() {
+        pendingGroupAnswer = false
+    }
+
+    /**
      * The message the user is replying to (ADR-0011, Phase 9); shown as a
      * banner above the composer and cleared when the reply is sent or dismissed.
      */
@@ -163,6 +177,66 @@ class AppViewModel(
     private val _callState = MutableStateFlow(CallSessionInfo(remoteUser = "", state = CallState.IDLE))
     val callState: StateFlow<CallSessionInfo> = _callState.asStateFlow()
 
+    // ── Group calls (Phase 20, ADR-0014) ────────────────────────────────────
+
+    /**
+     * The group call currently ringing on this device, or null. Navigation
+     * is the ViewModel's job; the notification lives in the session layer.
+     */
+    val groupCallRing: StateFlow<RealtimeEvent.GroupCallInvite?> = session.groupCallRing
+
+    /**
+     * The group call this device is on, or the last one: keyed by bridge id
+     * so the call screen can show the group while the SIP peer is the bridge.
+     */
+    var activeGroupCall by mutableStateOf<GroupCallDto?>(null)
+        private set
+
+    /** Joins a running call: dial the bridge, then record the join. */
+    fun joinGroupCall(invite: RealtimeEvent.GroupCallInvite) {
+        if (engine.state.value.state in ONGOING_CALL_STATES) return
+        session.onGroupCallAnswered()
+        activeGroupCall = GroupCallDto(
+            bridgeId = invite.bridgeId,
+            groupId = invite.groupId,
+            starter = invite.starter,
+            withVideo = invite.withVideo,
+            startedAt = System.currentTimeMillis(),
+        )
+        // Navigate first, like startCall: a failing dial must find the screen.
+        _screen.value = AppScreen.Call(invite.bridgeId, incoming = false)
+        engine.call(remoteUser = invite.bridgeId, withVideo = invite.withVideo)
+        if (callFailure == null && engine.state.value.state == CallState.OUTGOING) startCallService(invite.bridgeId)
+        repository.joinGroupCall(invite.groupId, invite.bridgeId)
+    }
+
+    /** Starts (or joins-in-place) the group's call from the group chat screen. */
+    fun startGroupCall(groupId: String, withVideo: Boolean) {
+        if (engine.state.value.state in ONGOING_CALL_STATES) return
+        repository.startGroupCall(groupId, withVideo) { call ->
+            if (call == null) return@startGroupCall
+            activeGroupCall = call
+            _screen.value = AppScreen.Call(call.bridgeId, incoming = false)
+            engine.call(remoteUser = call.bridgeId, withVideo = withVideo)
+            if (callFailure == null && engine.state.value.state == CallState.OUTGOING) startCallService(call.bridgeId)
+        }
+    }
+
+    /** Group-call ended (or ringing stopped): clear the call surface state. */
+    fun onGroupCallState(event: RealtimeEvent.GroupCallState) {
+        val active = activeGroupCall ?: return
+        if (event.bridgeId != active.bridgeId) return
+        if (event.state == "ended") activeGroupCall = null
+    }
+
+    /** The banner observes the ring; the session keeps the notification. */
+    fun activeGroupCallState(): StateFlow<RealtimeEvent.GroupCallInvite?> = session.groupCallRing
+
+    /** The user dismissed the ring from the banner; stop it here (state fan-out re-checks). */
+    fun dismissGroupCallRing(ring: RealtimeEvent.GroupCallInvite) {
+        session.dismissGroupCallRing(ring.bridgeId)
+    }
+
     init {
         session.start()
         viewModelScope.launch {
@@ -173,6 +247,9 @@ class AppViewModel(
         }
         viewModelScope.launch {
             session.registrationFailed.collect { callRegistrationFailed = it }
+        }
+        viewModelScope.launch {
+            repository.groupCallState.collect { onGroupCallState(it) }
         }
         viewModelScope.launch {
             _screen.collect { screen ->
@@ -217,10 +294,12 @@ class AppViewModel(
                 } else if (screen is AppScreen.Call) {
                     _screen.value = AppScreen.Contacts
                 }
+                activeGroupCall = null
             }
             is CallEvent.CallEnded -> {
                 pendingAnswer = false
                 clearCallFailure()
+                activeGroupCall = null
                 if (_screen.value is AppScreen.Call) _screen.value = AppScreen.Contacts
             }
             else -> Unit
@@ -254,6 +333,14 @@ class AppViewModel(
         if (!repository.signIn.value.success) return
         when (action) {
             MainActivity.ACTION_SHOW_CALL, MainActivity.ACTION_ANSWER_CALL -> {
+                // Group calls (Phase 20): the ring carries the group id; the
+                // invite flow navigates to the group chat where Answer lives.
+                val ring = session.groupCallRing.value
+                if (isGroup && ring != null) {
+                    openGroupChat(ring.groupId)
+                    if (action == MainActivity.ACTION_ANSWER_CALL) pendingGroupAnswer = true
+                    return
+                }
                 val call = engine.state.value
                 if (call.state in ONGOING_CALL_STATES) {
                     val ringing = call.state == CallState.RINGING
@@ -470,6 +557,15 @@ class AppViewModel(
 
     /** Display name of a group member; contacts first, fallback to the username. */
     fun memberDisplayName(username: String, contacts: List<ContactDto>): String = displayNameOf(username, contacts)
+
+    /**
+     * Title on the call screen (Phase 20): a group call's SIP peer is the
+     * bridge id, so the screen shows the group's name instead of `conf-…`.
+     */
+    fun callTitleOf(peer: String, contacts: List<ContactDto>): String =
+        activeGroupCall?.takeIf { it.bridgeId == peer }
+            ?.let { repository.groups.value.firstOrNull { g -> g.id == it.groupId }?.name }
+            ?: displayNameOf(peer, contacts)
 
     fun buildInfo(): com.patbaumgartner.android.stringtelephone.di.BuildInfo = container.buildInfo
 
@@ -781,6 +877,9 @@ class AppViewModel(
             return
         }
         if (_callState.value.state == CallState.RINGING) session.onCallDeclined()
+        // A group call's SIP leg hangs up like any call; the leave record
+        // tells the server so the bridge can end on the last member.
+        activeGroupCall?.let { repository.leaveGroupCall(it.groupId, it.bridgeId) }
         engine.hangUp()
     }
 

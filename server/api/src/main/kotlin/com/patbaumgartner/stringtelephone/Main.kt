@@ -78,6 +78,16 @@ class StringTelephoneServer {
     fun groups(jdbcClient: JdbcClient) = Groups(jdbcClient)
 
     @Bean
+    fun groupCalls(
+        jdbcClient: JdbcClient,
+        tx: TransactionTemplate,
+        groups: Groups,
+        pbx: PbxGateway,
+        hub: WsHub,
+        accounts: AccountService,
+    ) = GroupCallService(tx, groups, GroupCalls(jdbcClient), pbx, hub, accounts)
+
+    @Bean
     fun media(jdbcClient: JdbcClient, store: MediaStore) = MediaService(jdbcClient, store)
 
     @Bean

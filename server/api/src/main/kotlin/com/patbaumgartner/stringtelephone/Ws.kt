@@ -140,6 +140,23 @@ class WsHub(
         sessions.sendTo((members.toSet() - from), WsFrames.groupTyping(groupId, from, typing))
 
     /**
+     * Group-call invite fan-out (Phase 20, ADR-0014): every member except
+     * the starter rings. The starter dials the bridge themselves.
+     */
+    fun broadcastGroupCallInvite(groupId: String, bridgeId: String, starter: String, members: List<String>, withVideo: Boolean) =
+        sessions.sendTo(members.toSet(), WsFrames.groupCallInvite(groupId, bridgeId, starter, withVideo))
+
+    /**
+     * Group-call state fan-out (Phase 20): joined/left/ended so every device
+     * stops ringing on first answer and shows the call's liveness.
+     */
+    fun broadcastGroupCallState(groupId: String, bridgeId: String, state: String, by: String, members: List<String>, reason: String? = null) =
+        sessions.sendTo(
+            if (state == "ended") (members.toSet() + by) else members.toSet(),
+            WsFrames.groupCallState(groupId, bridgeId, state, by, members, reason),
+        )
+
+    /**
      * Fan-out for a reaction change (ADR-0011, Phase 8): both participants
      * receive the frame, so each device can update its chips immediately.
      */

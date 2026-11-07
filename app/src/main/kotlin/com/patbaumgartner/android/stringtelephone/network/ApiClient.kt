@@ -6,6 +6,7 @@ import com.patbaumgartner.android.stringtelephone.core.ContactsDto
 import com.patbaumgartner.android.stringtelephone.core.ConversationStateDto
 import com.patbaumgartner.android.stringtelephone.core.CreateGroupRequest
 import com.patbaumgartner.android.stringtelephone.core.GroupDto
+import com.patbaumgartner.android.stringtelephone.core.GroupCallDto
 import com.patbaumgartner.android.stringtelephone.core.GroupMessagesPageDto
 import com.patbaumgartner.android.stringtelephone.core.MarkReadRequest
 import com.patbaumgartner.android.stringtelephone.core.MarkReadResponseDto
@@ -14,6 +15,7 @@ import com.patbaumgartner.android.stringtelephone.core.MessageDto
 import com.patbaumgartner.android.stringtelephone.core.MessagesPageDto
 import com.patbaumgartner.android.stringtelephone.core.RenameGroupRequest
 import com.patbaumgartner.android.stringtelephone.core.SendGroupMessageRequest
+import com.patbaumgartner.android.stringtelephone.core.StartGroupCallRequest
 import com.patbaumgartner.android.stringtelephone.core.SendMessageRequest
 import com.patbaumgartner.android.stringtelephone.core.SetReactionRequest
 import com.patbaumgartner.android.stringtelephone.core.UpdateConversationStateRequest
@@ -620,6 +622,91 @@ class CompanionApiClient(
             when {
                 r.code == 401 || r.code == 403 -> throw ApiException.Auth
                 r.code == 404 -> throw ApiException.Protocol("no such group")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> Unit
+            }
+        }
+    }
+
+    // ── Group calls (Phase 20, ADR-0014) ────────────────────────────────────
+
+    /**
+     * Starts (or joins-in-place) the group's call: `201` created, `200` when
+     * a call already runs (same bridge). The response's bridgeId is what the
+     * call engine dials (`conf-<uuid>`).
+     */
+    fun startGroupCall(groupId: String, withVideo: Boolean): GroupCallDto = request {
+        val payload = json.encodeToString(StartGroupCallRequest.serializer(), StartGroupCallRequest(withVideo))
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/calls")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such group")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(GroupCallDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /** The group's active call, when one is running. */
+    fun activeGroupCall(groupId: String): GroupCallDto? = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/calls/active")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such group")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> r.body.string().takeIf { it != "null" }?.let {
+                    json.decodeFromString(GroupCallDto.serializer(), it)
+                }
+            }
+        }
+    }
+
+    /** Records the join after the engine dialled the bridge. */
+    fun joinGroupCall(groupId: String, bridgeId: String): GroupCallDto = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/calls/$bridgeId/join")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post("{}".toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such call")
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(GroupCallDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /** Records the leave; the server destroys the bridge on the last leave. */
+    fun leaveGroupCall(groupId: String, bridgeId: String) = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/groups/$groupId/calls/$bridgeId/leave")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .post("{}".toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> throw ApiException.Protocol("no such call")
                 !r.isSuccessful -> throw ApiException.Unexpected(r.code)
                 else -> Unit
             }
