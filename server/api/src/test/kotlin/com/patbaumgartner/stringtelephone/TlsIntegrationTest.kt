@@ -37,7 +37,13 @@ class TlsIntegrationTest {
                 val listener = SocketListener()
                 val socket = http.newWebSocketBuilder().header("Authorization", "Bearer $bob")
                     .buildAsync(URI("wss://localhost:$port/v1/ws"), listener).join()
-                assertEquals(201, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"secure","clientKey":"tls1"}""", alice).statusCode())
+                // TEXT is encrypted (ADR-0015): the body carries envelopes for peer and author.
+                val env = { user: String -> "3:" + java.util.Base64.getEncoder().encodeToString("ct:$user".toByteArray(Charsets.UTF_8)) }
+                assertEquals(201, server.post(
+                    "/v1/conversations/bob/messages",
+                    """{"recipient":"bob","content":"secure","clientKey":"tls1","envelopes":{"bob":"${env("bob")}","alice":"${env("alice")}"}}""",
+                    alice,
+                ).statusCode())
                 assertTrue(assertNotNull(listener.messages.poll(5, TimeUnit.SECONDS)).contains("new-message"))
                 socket.abort()
             }

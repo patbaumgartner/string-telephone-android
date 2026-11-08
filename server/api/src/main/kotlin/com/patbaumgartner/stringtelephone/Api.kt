@@ -23,6 +23,7 @@ class ApiController(
     private val conversationStates: ConversationStates,
     private val groups: Groups,
     private val groupCalls: GroupCallService,
+    private val keys: Keys,
 ) {
     @GetMapping("/health")
     fun health() = mapOf("status" to "ok")
@@ -254,12 +255,22 @@ class ApiController(
             hub.broadcastGroupMessage(stored, group.memberNames())
             return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
         }
-        if (body.content.isEmpty() || body.content.toByteArray(Charsets.UTF_8).size > Messages.MAX_CONTENT_BYTES) {
-            throw ApiFailure(HttpStatus.CONTENT_TOO_LARGE, "content size invalid")
+        // TEXT is always end-to-end encrypted (ADR-0015, Phase 22): the
+        // server stores no plaintext, so every member — including the
+        // author, so their own history decrypts — must have an envelope.
+        val envelopes = body.envelopes
+        if (envelopes == null || envelopes.keys != group.memberNames().toSet()) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "envelopes required for every group member")
         }
-        val stored = messages.insertGroupText(me.username, groupId, body.content, body.clientKey, replyToId)
+        val stored = try {
+            messages.insertGroupText(me.username, groupId, body.content, body.clientKey, replyToId, envelopes)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "malformed envelope")
+        }
         hub.broadcastGroupMessage(stored, group.memberNames())
-        return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+            messageDto(stored, envelope = messages.envelopeFor(stored.id, me.username)),
+        )
     }
 
     /**
@@ -273,7 +284,7 @@ class ApiController(
         @RequestParam(required = false) cursor: String?,
         @RequestParam(defaultValue = "50") limit: Int,
     ): GroupMessagesPageDto {
-        val (_, _) = memberGroup(request, groupId)
+        val (me, _) = memberGroup(request, groupId)
         val before = cursor?.let {
             decodeMessageCursor(it) ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "invalid cursor")
         }
@@ -281,8 +292,9 @@ class ApiController(
         val messageIds = rows.map { it.id }
         val reactionsMap = if (messageIds.isNotEmpty()) reactions.listForMessages(messageIds) else emptyMap()
         val readCounts = if (messageIds.isNotEmpty()) messages.groupReadCounts(messageIds) else emptyMap()
+        val envelopes = messages.envelopesFor(messageIds, me.username)
         return GroupMessagesPageDto(
-            rows.map { record -> messageDto(record, reactionsMap[record.id] ?: emptyList(), readCounts[record.id] ?: 0) },
+            rows.map { record -> messageDto(record, reactionsMap[record.id] ?: emptyList(), readCounts[record.id] ?: 0, envelope = envelopes[record.id]) },
             rows.lastOrNull()?.let { encodeMessageCursor(it.createdAt, it.id) },
         )
     }
@@ -321,36 +333,11 @@ class ApiController(
         val rows = messages.page(me.username, peer, before, limit)
         val messageIds = rows.map { it.id }
         val reactionsMap = if (messageIds.isNotEmpty()) reactions.listForMessages(messageIds) else emptyMap()
+        // Encrypted messages (ADR-0015) are personalized per requester: each
+        // row carries the caller's own envelope, never the peer's copy.
+        val envelopes = messages.envelopesFor(messageIds, me.username)
         return MessagesPageDto(
-            rows.map { messageDto(it, reactionsMap[it.id].orEmpty()) },
-            rows.lastOrNull()?.let { encodeMessageCursor(it.createdAt, it.id) },
-        )
-    }
-
-    /**
-     * Full-text search within one conversation (Phase 16). The scoping is
-     * identical to the history endpoint, so a caller only ever searches
-     * their own conversations; pagination and cursor semantics match too.
-     */
-    @GetMapping("/v1/conversations/{peer}/search")
-    fun search(
-        request: HttpServletRequest,
-        @PathVariable peer: String,
-        @RequestParam q: String,
-        @RequestParam(required = false) cursor: String?,
-        @RequestParam(defaultValue = "50") limit: Int,
-    ): MessagesPageDto {
-        val me = principal(request)
-        if (users.find(peer) == null) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
-        if (q.isBlank()) throw ApiFailure(HttpStatus.BAD_REQUEST, "empty query")
-        val before = cursor?.let {
-            decodeMessageCursor(it) ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "invalid cursor")
-        }
-        val rows = messages.search(me.username, peer, q, before, limit)
-        val messageIds = rows.map { it.id }
-        val reactionsMap = if (messageIds.isNotEmpty()) reactions.listForMessages(messageIds) else emptyMap()
-        return MessagesPageDto(
-            rows.map { messageDto(it, reactionsMap[it.id].orEmpty()) },
+            rows.map { messageDto(it, reactionsMap[it.id].orEmpty(), envelope = envelopes[it.id]) },
             rows.lastOrNull()?.let { encodeMessageCursor(it.createdAt, it.id) },
         )
     }
@@ -402,11 +389,20 @@ class ApiController(
             val stored = messages.insertMedia(me.username, peer, body.clientKey, mediaId, mediaRecord, replyToId)
             return ResponseEntity.status(HttpStatus.CREATED).body(messageDto(stored))
         }
-        if (body.content.isEmpty() || body.content.toByteArray(Charsets.UTF_8).size > Messages.MAX_CONTENT_BYTES) {
-            throw ApiFailure(HttpStatus.CONTENT_TOO_LARGE, "content size invalid")
+        // TEXT is always end-to-end encrypted (ADR-0015, Phase 22): the
+        // server rejects plaintext text, so the request must carry an
+        // envelope for the peer and a self-copy for the author.
+        val envelopes = body.envelopes
+        if (envelopes == null || envelopes[peer].isNullOrBlank() || envelopes[me.username].isNullOrBlank()) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "envelopes required for recipient and author")
+        }
+        val stored = try {
+            messages.insert(me.username, peer, body.content, body.clientKey, replyToId, envelopes)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "malformed envelope")
         }
         return ResponseEntity.status(HttpStatus.CREATED)
-            .body(messageDto(messages.insert(me.username, peer, body.content, body.clientKey, replyToId)))
+            .body(messageDto(stored, envelope = messages.envelopeFor(stored.id, me.username)))
     }
 
     /**
@@ -666,16 +662,79 @@ class ApiController(
         if (message.type != "TEXT") {
             throw ApiFailure(HttpStatus.CONFLICT, "only text messages can be edited")
         }
-        val edited = messages.edit(messageId, me.username, body.content)
-            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
+        // An encrypted message (ADR-0015) must be re-encrypted on edit: the
+        // new ciphertext rides in `envelopes` (peer + author), plaintext
+        // edits of encrypted rows are rejected — the server never sees text.
+        if (message.encrypted && (body.envelopes == null || body.envelopes[peer].isNullOrBlank() || body.envelopes[me.username].isNullOrBlank())) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "envelopes required to edit an encrypted message")
+        }
+        val edited = try {
+            messages.edit(messageId, me.username, body.content, message.encrypted, body.envelopes)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "malformed envelope")
+        } ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no such message")
         hub.broadcastMessageEdited(edited)
-        return messageDto(edited)
+        return messageDto(edited, envelope = if (edited.encrypted) messages.envelopeFor(edited.id, me.username) else null)
+    }
+
+    // ── E2EE key directory (ADR-0015, Phase 22) ─────────────────────────────
+
+    /**
+     * Publishes (or tops up) the caller's E2EE key bundle: identity key,
+     * signed prekey, Kyber last-resort prekey and fresh one-time prekeys.
+     * The server stores the blobs opaquely; private halves never leave the
+     * device. Idempotent: re-publishing replaces identity/signed/Kyber and
+     * only adds new one-time prekeys.
+     */
+    @PutMapping("/v1/keys")
+    fun publishKeys(request: HttpServletRequest, @RequestBody body: KeyBundleDto): ResponseEntity<Map<String, String>> {
+        val me = principal(request)
+        try {
+            keys.publish(me.username, body)
+        } catch (_: IllegalArgumentException) {
+            throw ApiFailure(HttpStatus.BAD_REQUEST, "invalid key bundle")
+        }
+        return ResponseEntity.ok(mapOf("status" to "published"))
+    }
+
+    /** The caller's own published bundle + remaining one-time prekey count (top-up signal). */
+    @GetMapping("/v1/keys/me")
+    fun myKeys(request: HttpServletRequest): OwnKeyBundleDto {
+        val me = principal(request)
+        return keys.ownBundle(me.username)
+            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no keys published yet")
+    }
+
+    /**
+     * A peer's published bundle, as a sender needs it to establish a session.
+     * 404 when the peer never published keys (pre-E2EE peer).
+     */
+    @GetMapping("/v1/keys/{peer}")
+    fun peerKeys(request: HttpServletRequest, @PathVariable peer: String): PeerKeyBundleDto {
+        principal(request)
+        if (users.find(peer)?.active != true) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
+        return keys.peerBundle(peer)
+            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "peer has no published keys")
+    }
+
+    /**
+     * Atomically consumes one of the peer's one-time prekeys
+     * (`DELETE ... RETURNING`): a prekey is handed to exactly one sender.
+     * 404 when none remain — senders then use signed + Kyber prekeys only.
+     */
+    @GetMapping("/v1/keys/{peer}/one-time")
+    fun consumePeerOneTimePreKey(request: HttpServletRequest, @PathVariable peer: String): OneTimePreKeyDto {
+        principal(request)
+        if (users.find(peer)?.active != true) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")
+        return keys.consumeOneTimePreKey(peer)
+            ?: throw ApiFailure(HttpStatus.NOT_FOUND, "no one-time prekeys left")
     }
 }
 
-private fun messageDto(record: MessageRecord, reactions: List<ReactionDto> = emptyList(), readCount: Int? = null) =
+private fun messageDto(record: MessageRecord, reactions: List<ReactionDto> = emptyList(), readCount: Int? = null, envelope: String? = null) =
     MessageDto(record.id, record.sender, record.recipient, record.content, record.createdAt, record.clientKey, record.readAt, record.type, record.mediaId, record.width, record.height,
-        if (reactions.isEmpty()) null else reactions, record.replyTo, record.deletedAt, record.deletedBy, record.durationMs, record.waveform, record.editedAt, record.groupId, readCount)
+        if (reactions.isEmpty()) null else reactions, record.replyTo, record.deletedAt, record.deletedBy, record.durationMs, record.waveform, record.editedAt, record.groupId, readCount,
+        record.encrypted, if (record.encrypted) envelope else null)
 
 /**
  * Normalizes the client's waveform sample list (Phase 11): keeps numeric

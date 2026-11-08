@@ -40,6 +40,14 @@ class ApiExceptionHandler {
     fun badParameter(error: Exception): ResponseEntity<ProblemDetail> =
         problem(HttpStatus.BAD_REQUEST, "invalid or missing parameter")
 
+    /**
+     * A route that no longer exists (Phase 22 removed `/v1/conversations/{peer}/search`
+     * with ADR-0015) is a 404, not a 500 — unknown API paths must not look like crashes.
+     */
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException::class)
+    fun noSuchRoute(error: Exception): ResponseEntity<ProblemDetail> =
+        problem(HttpStatus.NOT_FOUND, "no such route")
+
     /** Unhandled errors: log with a trace, answer without one. */
     @ExceptionHandler(Exception::class)
     fun unexpected(error: Exception): ResponseEntity<ProblemDetail> {

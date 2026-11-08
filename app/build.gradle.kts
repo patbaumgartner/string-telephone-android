@@ -88,6 +88,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     packaging {
@@ -107,6 +108,10 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.linphone.sdk)
+    // Signal protocol (PQXDH + Double Ratchet) for E2EE text (ADR-0015, Phase 22).
+    // AGPL-3.0 like linphone: the app module stays GPL-compatible (ADR-0004).
+    implementation(libs.libsignal.android)
+    coreLibraryDesugaring(libs.desugaring.lib)
     implementation(libs.androidx.security.crypto)
     implementation(libs.core.telecom)
 

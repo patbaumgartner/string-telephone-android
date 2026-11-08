@@ -49,8 +49,14 @@ class StringTelephoneServer {
     fun presence(pbx: PbxGateway, sessions: WsSessions, users: Users) = Presence(pbx, sessions, users)
 
     @Bean
-    fun messages(jdbcClient: JdbcClient, hub: WsHub, conversationStates: ConversationStates, groups: Groups) =
-        Messages(jdbcClient, onNewMessage = { stored: MessageRecord ->
+    fun messages(
+        jdbcClient: JdbcClient,
+        tx: TransactionTemplate,
+        hub: WsHub,
+        conversationStates: ConversationStates,
+        groups: Groups,
+    ) =
+        Messages(jdbcClient, tx, onNewMessage = { stored: MessageRecord ->
             // A new incoming message un-archives the conversation for the
             // recipient (Phase 18, WhatsApp behaviour) so every device
             // converges without a client-side round trip. Group messages
@@ -76,6 +82,14 @@ class StringTelephoneServer {
 
     @Bean
     fun groups(jdbcClient: JdbcClient) = Groups(jdbcClient)
+
+    /**
+     * The E2EE key directory (ADR-0015, Phase 22). Stores and relays published
+     * public key blobs opaquely; envelope storage in Messages commits through
+     * the same shared [TransactionTemplate].
+     */
+    @Bean
+    fun keys(jdbcClient: JdbcClient, tx: TransactionTemplate) = Keys(jdbcClient, tx)
 
     @Bean
     fun groupCalls(

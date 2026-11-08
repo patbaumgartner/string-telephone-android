@@ -74,6 +74,18 @@ data class MessageDto(
     val groupId: String? = null,
     /** How many members read this group message (Phase 19); null for pairwise. */
     val readCount: Int? = null,
+    /**
+     * True when the message is end-to-end encrypted (ADR-0015, Phase 22):
+     * `content` is then empty server-side and the plaintext lives only inside
+     * [envelope]. Legacy rows stay `false` and readable.
+     */
+    val encrypted: Boolean = false,
+    /**
+     * The caller's own ciphertext envelope for an encrypted message
+     * (`"<type>:<base64>"`, type 2 = ratchet, 3 = prekey), personalized per
+     * requester; null for plaintext or media messages.
+     */
+    val envelope: String? = null,
 )
 
 /** One emoji reaction: who reacted and when (ADR-0011, Phase 8). */
@@ -97,14 +109,28 @@ data class SendMessageRequest(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 11); required for VOICE. */
     val waveform: String? = null,
+    /**
+     * E2EE envelopes (ADR-0015, Phase 22): per-recipient ciphertext
+     * `"<type>:<base64>"`, keyed by username. Mandatory for TEXT — the peer
+     * *and* the sender (self-copy, so the author reads their own history).
+     * Optional for IMAGE/VOICE until Phase 23.
+     */
+    val envelopes: Map<String, String>? = null,
 )
 
 @Serializable
 data class MessagesPageDto(val messages: List<MessageDto>, val nextCursor: String?)
 
-/** Re-stores the content of one message (Phase 17). */
+/**
+ * Re-stores the content of one message (Phase 17). For an encrypted message
+ * (ADR-0015, Phase 22) `content` may be blank and the new ciphertext rides in
+ * [envelopes], keyed like on send (peer + author for pairwise).
+ */
 @Serializable
-data class EditMessageRequest(val content: String)
+data class EditMessageRequest(
+    val content: String = "",
+    val envelopes: Map<String, String>? = null,
+)
 
 @Serializable
 data class MediaRecordDto(
@@ -191,6 +217,11 @@ data class SendGroupMessageRequest(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 21); required for VOICE. */
     val waveform: String? = null,
+    /**
+     * E2EE envelopes (ADR-0015, Phase 22): per-member ciphertext, one entry
+     * per group member including the author. Mandatory for group TEXT.
+     */
+    val envelopes: Map<String, String>? = null,
 )
 
 /** Per-member group read fan-out payload (Phase 19). */
@@ -241,6 +272,13 @@ data class WsNewMessageDto(
     val editedAt: Long? = null,
     /** Group conversation this message belongs to (Phase 19); null for pairwise. */
     val groupId: String? = null,
+    /** True when end-to-end encrypted (ADR-0015, Phase 22); `content` is then empty. */
+    val encrypted: Boolean = false,
+    /**
+     * The receiving user's own ciphertext envelope for an encrypted message;
+     * personalized per recipient on the fan-out. Null for plaintext or media.
+     */
+    val envelope: String? = null,
 )
 
 @Serializable
@@ -309,6 +347,65 @@ data class WsMessageEditedDto(
     val peer: String,
     val content: String,
     val editedAt: Long,
+    /**
+     * The receiving user's ciphertext envelope when the message is encrypted
+     * (ADR-0015, Phase 22); personalized per recipient on the fan-out.
+     * Null for plaintext edits.
+     */
+    val envelope: String? = null,
+)
+
+// ── E2EE key directory (ADR-0015, Phase 22) ─────────────────────────────────
+
+/** A signed prekey as published and relayed: id + public key + identity signature (base64). */
+@Serializable
+data class SignedPreKeyDto(val id: Int, val publicKey: String, val signature: String)
+
+/** The Kyber (PQXDH) last-resort prekey: id + public key + identity signature (base64). */
+@Serializable
+data class KyberPreKeyDto(val id: Int, val publicKey: String, val signature: String)
+
+/** A one-time prekey: id + public key (base64); no signature needed for EC prekeys. */
+@Serializable
+data class OneTimePreKeyDto(val id: Int, val publicKey: String)
+
+/**
+ * The bundle published with `PUT /v1/keys`: identity key and registration
+ * id, the current signed prekey, the Kyber last-resort prekey, and a batch
+ * of fresh one-time prekeys (top-up; existing ids are ignored server-side).
+ */
+@Serializable
+data class KeyBundleDto(
+    val registrationId: Int,
+    val identityKey: String,
+    val signedPreKey: SignedPreKeyDto,
+    val kyberPreKey: KyberPreKeyDto,
+    val oneTimePreKeys: List<OneTimePreKeyDto> = emptyList(),
+)
+
+/**
+ * Another user's published bundle as `GET /v1/keys/{peer}` returns it —
+ * everything a sender needs to run X3DH/PQXDH, plus how many one-time
+ * prekeys remain (fetch one via `GET /v1/keys/{peer}/one-time` first).
+ */
+@Serializable
+data class PeerKeyBundleDto(
+    val username: String,
+    val registrationId: Int,
+    val identityKey: String,
+    val signedPreKey: SignedPreKeyDto,
+    val kyberPreKey: KyberPreKeyDto,
+    val oneTimePrekeyCount: Int,
+)
+
+/** The caller's own bundle as `GET /v1/keys/me` returns it (top-up signal). */
+@Serializable
+data class OwnKeyBundleDto(
+    val registrationId: Int,
+    val identityKey: String,
+    val signedPreKey: SignedPreKeyDto,
+    val kyberPreKey: KyberPreKeyDto,
+    val oneTimePrekeyCount: Int,
 )
 
 /** Decoded realtime frame; unknown types are reported, malformed frames dropped. */
@@ -330,6 +427,10 @@ sealed interface RealtimeEvent {
         val durationMs: Int? = null,
         /** Comma-separated waveform amplitudes 0-100 (Phase 11); null for non-voice messages. */
         val waveform: String? = null,
+        /** True when end-to-end encrypted (ADR-0015, Phase 22); `content` is then empty. */
+        val encrypted: Boolean = false,
+        /** This device's own ciphertext envelope; null for plaintext or media messages. */
+        val envelope: String? = null,
     ) : RealtimeEvent
 
     data class Presence(
@@ -387,6 +488,11 @@ sealed interface RealtimeEvent {
         val peer: String,
         val content: String,
         val editedAtEpochMs: Long,
+        /**
+         * This device's own ciphertext envelope when the message is encrypted
+         * (ADR-0015, Phase 22); null for plaintext edits.
+         */
+        val envelope: String? = null,
     ) : RealtimeEvent
 
     // ── Group chats (Phase 19, ADR-0012) ────────────────────────────────────
@@ -406,6 +512,10 @@ sealed interface RealtimeEvent {
         val replyToId: String? = null,
         val durationMs: Int? = null,
         val waveform: String? = null,
+        /** True when end-to-end encrypted (ADR-0015, Phase 22); `content` is then empty. */
+        val encrypted: Boolean = false,
+        /** This device's own ciphertext envelope; null for plaintext or media messages. */
+        val envelope: String? = null,
     ) : RealtimeEvent
 
     /** A member read group messages up to [messageIds] (per-member receipts). */
@@ -489,6 +599,8 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 replyToId = event.replyToId,
                 durationMs = event.durationMs,
                 waveform = event.waveform,
+                encrypted = event.encrypted,
+                envelope = event.envelope,
             )
         }.getOrNull()
         "presence" -> runCatching {
@@ -534,6 +646,7 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 peer = event.peer,
                 content = event.content,
                 editedAtEpochMs = event.editedAt,
+                envelope = event.envelope,
             )
         }.getOrNull()
         "group-message" -> runCatching {
@@ -552,6 +665,8 @@ fun parseRealtimeEvent(frame: String): RealtimeEvent? {
                 replyToId = event.replyToId,
                 durationMs = event.durationMs,
                 waveform = event.waveform,
+                encrypted = event.encrypted,
+                envelope = event.envelope,
             )
         }.getOrNull()
         "group-message-read" -> runCatching {

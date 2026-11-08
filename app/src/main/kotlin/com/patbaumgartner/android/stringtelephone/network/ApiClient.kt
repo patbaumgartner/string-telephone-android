@@ -8,11 +8,15 @@ import com.patbaumgartner.android.stringtelephone.core.CreateGroupRequest
 import com.patbaumgartner.android.stringtelephone.core.GroupDto
 import com.patbaumgartner.android.stringtelephone.core.GroupCallDto
 import com.patbaumgartner.android.stringtelephone.core.GroupMessagesPageDto
+import com.patbaumgartner.android.stringtelephone.core.KeyBundleDto
 import com.patbaumgartner.android.stringtelephone.core.MarkReadRequest
 import com.patbaumgartner.android.stringtelephone.core.MarkReadResponseDto
 import com.patbaumgartner.android.stringtelephone.core.MeDto
 import com.patbaumgartner.android.stringtelephone.core.MessageDto
 import com.patbaumgartner.android.stringtelephone.core.MessagesPageDto
+import com.patbaumgartner.android.stringtelephone.core.OneTimePreKeyDto
+import com.patbaumgartner.android.stringtelephone.core.OwnKeyBundleDto
+import com.patbaumgartner.android.stringtelephone.core.PeerKeyBundleDto
 import com.patbaumgartner.android.stringtelephone.core.RenameGroupRequest
 import com.patbaumgartner.android.stringtelephone.core.SendGroupMessageRequest
 import com.patbaumgartner.android.stringtelephone.core.StartGroupCallRequest
@@ -70,6 +74,16 @@ data class MessageResult(
     val groupId: String? = null,
     /** How many members read this group message (Phase 19); null for pairwise. */
     val readCount: Int? = null,
+    /**
+     * True when end-to-end encrypted (ADR-0015, Phase 22): `content` is then
+     * empty server-side and the plaintext lives only inside [envelope].
+     */
+    val encrypted: Boolean = false,
+    /**
+     * The caller's own ciphertext envelope for an encrypted message
+     * (`"<type>:<base64>"`), personalized per requester; null otherwise.
+     */
+    val envelope: String? = null,
 )
 
 data class MessagesPage(val messages: List<MessageResult>, val nextCursor: String?)
@@ -78,7 +92,7 @@ data class MessagesPage(val messages: List<MessageResult>, val nextCursor: Strin
 private fun toMessageResult(m: MessageDto) = MessageResult(
     m.id, m.sender, m.recipient, m.content, m.createdAt, m.clientKey, m.readAt, m.type, m.mediaId,
     m.width, m.height, m.reactions ?: emptyList(), m.replyToId, m.deletedAt, m.deletedBy, m.durationMs, m.waveform, m.editedAt,
-    m.groupId, m.readCount,
+    m.groupId, m.readCount, m.encrypted, m.envelope,
 )
 
 class CompanionApiClient(
@@ -194,11 +208,17 @@ class CompanionApiClient(
         }
     }
 
-    fun sendMessage(recipient: String, content: String, clientKey: String, replyToId: String? = null): MessageResult = sendText(recipient, content, clientKey, replyToId)
-    fun sendText(recipient: String, content: String, clientKey: String, replyToId: String? = null): MessageResult = request {
+    fun sendMessage(recipient: String, content: String, clientKey: String, replyToId: String? = null, envelopes: Map<String, String>? = null): MessageResult = sendText(recipient, content, clientKey, replyToId, envelopes)
+
+    /**
+     * Sends one pairwise message. When [envelopes] is given (ADR-0015, Phase
+     * 22) the body carries an empty `content` plus one ciphertext envelope
+     * per recipient — the plaintext never leaves the device.
+     */
+    fun sendText(recipient: String, content: String, clientKey: String, replyToId: String? = null, envelopes: Map<String, String>? = null): MessageResult = request {
         val payload = json.encodeToString(
             SendMessageRequest.serializer(),
-            SendMessageRequest(recipient, content, clientKey, replyToId = replyToId),
+            SendMessageRequest(recipient, if (envelopes != null) "" else content, clientKey, replyToId = replyToId, envelopes = envelopes),
         )
         val response = http.newCall(
             Request.Builder()
@@ -328,32 +348,89 @@ class CompanionApiClient(
         }
     }
 
-    /**
-     * Full-text search within one conversation (Phase 16). Same page shape
-     * as [messages]; the server scopes to the authenticated pair, matches
-     * case-insensitively (simple tsvector config) and paginates oldest-first
-     * pages going back in time via [cursor].
-     */
-    fun search(peer: String, query: String, cursor: String?, limit: Int = 50): MessagesPage = request {
-        val url = buildString {
-            append("$baseUrl/v1/conversations/$peer/search?limit=$limit&q=")
-                .append(java.net.URLEncoder.encode(query, "UTF-8"))
-            if (cursor != null) append("&cursor=").append(java.net.URLEncoder.encode(cursor, "UTF-8"))
-        }
-        val response = http.newCall(Request.Builder().url(url).header("Authorization", "Bearer ${tokenProvider()}").get().build()).execute()
+    // ── E2EE key directory (ADR-0015, Phase 22) ────────────────────────────
+    //
+    // The server-side search endpoint is gone with E2EE: it could only ever
+    // search plaintext rows, so in-chat search moved client-side over the
+    // decrypted local cache (see StringTelephoneRepository.search).
+
+    /** Publishes (or tops up) the caller's key bundle; idempotent server-side. */
+    fun publishKeys(bundle: KeyBundleDto): Unit = request {
+        val payload = json.encodeToString(KeyBundleDto.serializer(), bundle)
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/keys")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .put(payload.toRequestBody(jsonMedia))
+                .build(),
+        ).execute()
         response.use { r ->
             when {
                 r.code == 401 || r.code == 403 -> throw ApiException.Auth
-                r.code == 404 -> throw ApiException.Protocol("unknown peer")
-                r.code == 400 -> throw ApiException.Protocol("invalid query or cursor")
+                r.code == 400 -> throw ApiException.Protocol("invalid key bundle")
                 !r.isSuccessful -> throw ApiException.Unexpected(r.code)
-                else -> {
-                    val page = json.decodeFromString(MessagesPageDto.serializer(), r.body.string())
-                    return@request MessagesPage(
-                        messages = page.messages.map { toMessageResult(it) },
-                        nextCursor = page.nextCursor,
-                    )
-                }
+                else -> Unit
+            }
+        }
+    }
+
+    /** The caller's own published bundle; null when never published. */
+    fun ownKeys(): OwnKeyBundleDto? = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/keys/me")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> null
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(OwnKeyBundleDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /** Another user's published bundle; null when the peer never published (pre-E2EE peer). */
+    fun peerKeys(peer: String): PeerKeyBundleDto? = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/keys/$peer")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> null
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(PeerKeyBundleDto.serializer(), r.body.string())
+            }
+        }
+    }
+
+    /**
+     * Atomically consumes one of the peer's one-time prekeys (server-side
+     * DELETE ... RETURNING); null when none remain — the sender then falls
+     * back to the signed + Kyber prekeys alone.
+     */
+    fun consumeOneTimePreKey(peer: String): OneTimePreKeyDto? = request {
+        val response = http.newCall(
+            Request.Builder()
+                .url("$baseUrl/v1/keys/$peer/one-time")
+                .header("Authorization", "Bearer ${tokenProvider()}")
+                .get()
+                .build(),
+        ).execute()
+        response.use { r ->
+            when {
+                r.code == 401 || r.code == 403 -> throw ApiException.Auth
+                r.code == 404 -> null
+                !r.isSuccessful -> throw ApiException.Unexpected(r.code)
+                else -> json.decodeFromString(OneTimePreKeyDto.serializer(), r.body.string())
             }
         }
     }
@@ -433,12 +510,14 @@ class CompanionApiClient(
     /**
      * Re-stores the content of one message (Phase 17): PUT with the new
      * text. The server enforces author-only, no time window, and 409 for
-     * tombstones; the response is the updated record.
+     * tombstones; the response is the updated record. For an encrypted
+     * message (ADR-0015, Phase 22) [envelopes] carries the new ciphertext
+     * and [content] stays blank.
      */
-    fun editMessage(peer: String, messageId: String, content: String): MessageResult = request {
+    fun editMessage(peer: String, messageId: String, content: String, envelopes: Map<String, String>? = null): MessageResult = request {
         val payload = json.encodeToString(
             com.patbaumgartner.android.stringtelephone.core.EditMessageRequest.serializer(),
-            com.patbaumgartner.android.stringtelephone.core.EditMessageRequest(content),
+            com.patbaumgartner.android.stringtelephone.core.EditMessageRequest(if (envelopes != null) "" else content, envelopes),
         )
         val response = http.newCall(
             Request.Builder()
@@ -723,11 +802,16 @@ class CompanionApiClient(
         }
     }
 
-    /** Sends one group text message; authorship comes from the server principal. */
-    fun sendGroupMessage(groupId: String, content: String, clientKey: String, replyToId: String? = null): MessageResult = request {
+    /**
+     * Sends one group text message; authorship comes from the server
+     * principal. With [envelopes] (ADR-0015, Phase 22) the body carries an
+     * empty `content` plus one ciphertext per group member including the
+     * author.
+     */
+    fun sendGroupMessage(groupId: String, content: String, clientKey: String, replyToId: String? = null, envelopes: Map<String, String>? = null): MessageResult = request {
         val payload = json.encodeToString(
             SendGroupMessageRequest.serializer(),
-            SendGroupMessageRequest(content, clientKey, replyToId),
+            SendGroupMessageRequest(if (envelopes != null) "" else content, clientKey, replyToId, envelopes = envelopes),
         )
         val response = http.newCall(
             Request.Builder()

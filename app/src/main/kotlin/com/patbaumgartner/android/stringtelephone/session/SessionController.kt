@@ -147,6 +147,9 @@ class SessionController(
             cancelRetry()
             startEngine(force = false)
             KeepAliveService.start(context)
+            // Publish/top up the E2EE key bundle (ADR-0015 §4); a failed
+            // attempt simply retries on the next sign-in.
+            repository.publishE2eeKeys()
             return
         }
         val error = state.error ?: return

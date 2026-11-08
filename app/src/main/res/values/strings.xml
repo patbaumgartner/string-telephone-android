@@ -244,4 +244,15 @@
     <string name="cancel">Cancel</string>
     <string name="save">Save</string>
     <string name="chat_read_count">%1$d read</string>
+
+    <!-- E2EE (ADR-0015, Phase 22) -->
+    <string name="cd_encryption_details">Encryption details</string>
+    <string name="e2ee_locked_subtitle">End-to-end encrypted</string>
+    <string name="e2ee_safety_number_title">Safety number</string>
+    <string name="e2ee_safety_number_hint">Compare this number with %1$s on their device — the numbers must match exactly. If they differ, someone may be intercepting your messages.</string>
+    <string name="e2ee_safety_number_unavailable">No encrypted session with %1$s yet — the number appears after the first message is exchanged.</string>
+    <string name="e2ee_view">View</string>
+    <string name="e2ee_identity_changed_title">Security warning</string>
+    <string name="e2ee_identity_changed_text">%1$s\'s security key has changed. Compare safety numbers to make sure no one is intercepting your messages.</string>
+    <string name="e2ee_acknowledge">I verified it</string>
 </resources>

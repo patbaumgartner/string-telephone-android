@@ -61,6 +61,18 @@ data class MessageDto(
      * pairwise messages, where the read receipt is a timestamp instead.
      */
     val readCount: Int? = null,
+    /**
+     * True when the message is end-to-end encrypted (ADR-0015, Phase 22):
+     * `content` is then empty server-side and the plaintext is only inside
+     * [envelope]. Legacy rows stay `false` and readable.
+     */
+    val encrypted: Boolean = false,
+    /**
+     * The caller's own ciphertext envelope for an encrypted message
+     * (`"<type>:<base64>"`, type 2 = ratchet, 3 = prekey), personalized per
+     * requester; null for plaintext or media messages.
+     */
+    val envelope: String? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -77,6 +89,15 @@ data class SendMessageRequest(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 11); required for VOICE. */
     val waveform: String? = null,
+    /**
+     * E2EE envelopes (ADR-0015, Phase 22): per-recipient ciphertext
+     * `"<type>:<base64>"`. Mandatory for TEXT (the server never stores
+     * plaintext text), keyed by recipient username — for a pairwise message
+     * that is the peer *and* the sender (self-copy, so the author can read
+     * their own history); for a group message every member including the
+     * author. Optional for IMAGE/VOICE until Phase 23.
+     */
+    val envelopes: Map<String, String>? = null,
 )
 
 /** Marks the peer's messages read; `upToMessageId` bounds the mark to one point in the history. */
@@ -101,6 +122,11 @@ data class SendGroupMessageRequest(
     val durationMs: Int? = null,
     /** Comma-separated waveform amplitudes 0-100 (Phase 21); required for VOICE. */
     val waveform: String? = null,
+    /**
+     * E2EE envelopes (ADR-0015, Phase 22): per-member ciphertext, one entry
+     * per group member including the author. Mandatory for group TEXT.
+     */
+    val envelopes: Map<String, String>? = null,
 )
 
 @kotlinx.serialization.Serializable
@@ -179,6 +205,14 @@ data class WsNewMessageEvent(
     val editedAt: Long? = null,
     /** Group conversation this message belongs to (Phase 19); null for pairwise. */
     val groupId: String? = null,
+    /** True when end-to-end encrypted (ADR-0015, Phase 22); `content` is then empty. */
+    val encrypted: Boolean = false,
+    /**
+     * The receiving user's own ciphertext envelope for an encrypted message;
+     * personalized per recipient on the fan-out, so each device gets exactly
+     * its copy. Null for plaintext or media messages.
+     */
+    val envelope: String? = null,
 )
 
 /** Read-receipt event pushed on /v1/ws as `{"type":"message-read"}` (ADR-0010). */
@@ -231,10 +265,16 @@ data class WsGroupMessageReadEvent(
     val readAt: Long,
 )
 
-/** Re-stores the content of one message (Phase 17). */
+/**
+ * Re-stores the content of one message (Phase 17). For an encrypted message
+ * (ADR-0015, Phase 22) `content` may be blank and the new ciphertext rides in
+ * [envelopes] — keyed like on send (peer + author for pairwise), because the
+ * server never sees the edited plaintext either.
+ */
 @kotlinx.serialization.Serializable
 data class EditMessageRequest(
-    @field:jakarta.validation.constraints.NotBlank val content: String,
+    val content: String = "",
+    val envelopes: Map<String, String>? = null,
 )
 
 // ── Group chats (Phase 19, ADR-0012) ────────────────────────────────────────
@@ -341,4 +381,64 @@ data class WsMessageEditedEvent(
     val peer: String,   // the conversation peer of the message (other than the author)
     val content: String,
     val editedAt: Long,
+    /**
+     * The receiving user's ciphertext envelope when the message is encrypted
+     * (ADR-0015, Phase 22); the fan-out personalizes this per recipient.
+     * Null for plaintext edits.
+     */
+    val envelope: String? = null,
+)
+
+// ── E2EE key directory (ADR-0015, Phase 22) ─────────────────────────────────
+
+/** A signed prekey as published and relayed: id + public key + identity signature (base64). */
+@kotlinx.serialization.Serializable
+data class SignedPreKeyDto(val id: Int, val publicKey: String, val signature: String)
+
+/** The Kyber (PQXDH) last-resort prekey: id + public key + identity signature (base64). */
+@kotlinx.serialization.Serializable
+data class KyberPreKeyDto(val id: Int, val publicKey: String, val signature: String)
+
+/** A one-time prekey: id + public key (base64); the signature is not needed for EC prekeys. */
+@kotlinx.serialization.Serializable
+data class OneTimePreKeyDto(val id: Int, val publicKey: String)
+
+/**
+ * The bundle a client publishes with `PUT /v1/keys`: identity key and
+ * registration id, the current signed prekey, the Kyber last-resort prekey,
+ * and a batch of fresh one-time prekeys (top-up; existing ids are ignored).
+ */
+@kotlinx.serialization.Serializable
+data class KeyBundleDto(
+    val registrationId: Int,
+    val identityKey: String,
+    val signedPreKey: SignedPreKeyDto,
+    val kyberPreKey: KyberPreKeyDto,
+    val oneTimePreKeys: List<OneTimePreKeyDto> = emptyList(),
+)
+
+/**
+ * Another user's published bundle as `GET /v1/keys/{peer}` returns it —
+ * everything a sender needs to run X3DH/PQXDH, plus how many one-time
+ * prekeys remain (fetch one via `GET /v1/keys/{peer}/one-time` before
+ * establishing a session).
+ */
+@kotlinx.serialization.Serializable
+data class PeerKeyBundleDto(
+    val username: String,
+    val registrationId: Int,
+    val identityKey: String,
+    val signedPreKey: SignedPreKeyDto,
+    val kyberPreKey: KyberPreKeyDto,
+    val oneTimePrekeyCount: Int,
+)
+
+/** The caller's own bundle as `GET /v1/keys/me` returns it (top-up signal). */
+@kotlinx.serialization.Serializable
+data class OwnKeyBundleDto(
+    val registrationId: Int,
+    val identityKey: String,
+    val signedPreKey: SignedPreKeyDto,
+    val kyberPreKey: KyberPreKeyDto,
+    val oneTimePrekeyCount: Int,
 )

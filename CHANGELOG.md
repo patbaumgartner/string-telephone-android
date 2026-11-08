@@ -9,6 +9,15 @@ No public release has been published yet.
 
 ### Changed
 
+- End-to-end encryption (Phase 22, ADR-0015). One-to-one TEXT messages are
+  encrypted per recipient with Signal's PQXDH + Double Ratchet: the server is a
+  ciphertext relay (`content` stored empty, per-recipient envelopes in
+  `message_envelopes`, personalized WebSocket fan-out), the client encrypts a
+  self-copy so its own history decrypts, missing sessions fail the send
+  honestly, identity changes surface a safety-number warning, and the retired
+  server-side search endpoint (404) is replaced by client-side search over the
+  decrypted cache. Calls stay PBX-relayed; reactions/replies/deletion stay
+  plaintext metadata; media encryption is deferred to Phase 23.
 - Group image and voice messages (Phase 21). In a group chat, the attach
   button opens the image picker and the microphone records a voice message,
   exactly like one-to-one chats. Uploaded media is scoped to the group, so
