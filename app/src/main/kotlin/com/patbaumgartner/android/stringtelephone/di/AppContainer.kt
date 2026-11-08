@@ -4,11 +4,14 @@ import android.content.Context
 import com.patbaumgartner.android.stringtelephone.call.CallEngine
 import com.patbaumgartner.android.stringtelephone.call.LinphoneCallEngine
 import com.patbaumgartner.android.stringtelephone.chat.ChatCache
+import com.patbaumgartner.android.stringtelephone.core.e2ee.E2eeEngine
 import com.patbaumgartner.android.stringtelephone.data.StringTelephoneRepository
+import com.patbaumgartner.android.stringtelephone.e2ee.LibsignalEngine
 import com.patbaumgartner.android.stringtelephone.network.CompanionApiClient
 import com.patbaumgartner.android.stringtelephone.network.RealtimeClient
 import com.patbaumgartner.android.stringtelephone.security.CredentialStore
 import com.patbaumgartner.android.stringtelephone.security.SecureCredentialStore
+import com.patbaumgartner.android.stringtelephone.security.SecureKeyValueStore
 import com.patbaumgartner.android.stringtelephone.session.SessionController
 
 /**
@@ -48,11 +51,21 @@ class AppContainer(
         )
     }
 
+    /**
+     * The E2EE engine (ADR-0015, Phase 22): libsignal protocol records
+     * persist in an EncryptedSharedPreferences file via the Android Keystore.
+     * Lazy so previews and tests that inject a repository never touch it.
+     */
+    val e2eeEngine: E2eeEngine by lazy {
+        LibsignalEngine(SecureKeyValueStore(context, "string_telephone_e2ee"))
+    }
+
     val repository: StringTelephoneRepository by lazy {
         repositoryOverride ?: StringTelephoneRepository(
             apiProvider = { apiClient() },
             chatCache = chatCache,
             realtimeFactory = { realtimeClient() },
+            e2ee = e2eeEngine,
         )
     }
 

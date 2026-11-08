@@ -2,6 +2,11 @@
 -keep class org.linphone.** { *; }
 -dontwarn org.linphone.**
 
+# Keep the libsignal JNI surface (ADR-0015, Phase 22): native code calls these
+# reflectively through NativeHandleGuard.
+-keep class org.signal.** { *; }
+-dontwarn org.signal.**
+
 # Tink (via androidx.security:security-crypto) references error-prone annotations
 # that are compile-only; they never appear at runtime.
 -dontwarn com.google.errorprone.annotations.**

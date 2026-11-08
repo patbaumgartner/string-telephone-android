@@ -50,9 +50,9 @@ Phases land in this order. Each is small enough for one focused review.
 | 19 | Group chats | Large | Done (2026-10-31) | Phase 3 |
 | 20 | Group calls (confbridge) | Large | Done (2026-11-01) | Phase 19, [ADR-0014](adr/0014-group-calls-confbridge.md) |
 | 21 | Group image & voice messages | Medium | Done (2026-11-07) | Phase 19, [ADR-0012](adr/0012-group-chat-scope.md) |
+| 22 | End-to-end encryption (Signal Protocol) | Large | Done (2026-11-08) | Phase 21, [ADR-0015](adr/0015-e2ee-signal-protocol.md) |
 
-Deferred indefinitely: end-to-end encryption, push notifications. The group-chat
-scope is captured in [ADR-0012](adr/0012-group-chat-scope.md).
+Deferred indefinitely: push notifications.
 
 ---
 
@@ -1004,11 +1004,38 @@ outsider 404/403, cross-binding 403s, validation 400s and idempotent resend.
 
 ---
 
+### Phase 22 — End-to-end encryption (Signal Protocol)
+
+**Effort:** Large
+**Status:** Done (2026-11-08)
+**Depends on:** Phase 21, [ADR-0015](adr/0015-e2ee-signal-protocol.md)
+
+One-to-one TEXT messages are encrypted with Signal's PQXDH + Double Ratchet
+(libsignal-android 0.86.5, AGPL-3.0; the app module stays GPL-compatible per
+ADR-0004). The server is a ciphertext relay: each TEXT is encrypted per
+recipient (peer plus a self-copy so the author reads their own history) and
+stored with `content = ''`; the per-recipient ciphertext envelopes live in the
+`message_envelopes` table and are fanned out personalized over WebSocket.
+Groups fan out to every member including the author. Edits on encrypted rows
+require fresh envelopes; a missing or failed session fails the send honestly
+(markFailed / edit rollback) instead of leaking plaintext. Identity changes
+surface a safety-number warning banner until the user compares safety numbers
+and acknowledges. The server-side search endpoint is retired (404); search is
+client-side over each device's cached, decrypted history. Calls stay PBX-relayed
+(liblinphone), reactions/replies/deletion stay plaintext metadata, and media
+encryption is deferred to Phase 23.
+
+- **Keys**: `Keys` directory (`publish`/`peerBundle`/`ownBundle`/`consumeOneTimePreKey`) exposed through `Api.kt` `/v1/keys*` endpoints; `V17` migration creates `message_envelopes`, `identity_keys`, `signed_prekeys`, `one_time_prekeys`, `kyber_prekeys` plus `messages.encrypted`.
+- **Repository**: `encryptEnvelopes`/`decryptContent`/`decryptResult`/`ensureSession`/`publishE2eeKeys`/`e2eeSafetyNumber`/`acknowledgeIdentityChange`; `identityWarnings: StateFlow<Set<String>>`; honest failure on unreachable sessions; client-side `search` over decrypted cache; `UNDECRYPTABLE_CONTENT` placeholder.
+- **App**: `LibsignalEngine` over `SecureKeyValueStore` (EncryptedSharedPreferences), wired via `AppContainer`; `SessionController` publishes/tops up keys on sign-in; `AppViewModel` exposes `e2eeActive()`/`identityWarnings()`/`e2eeSafetyNumber()`/`acknowledgeIdentityChange()`; `ChatScreen` shows a lock icon, an identity-warning banner, and a safety-number dialog.
+- **Tests**: `:core:test` `LibsignalE2eeTest` PQXDH/Double-Ratchet round trips (58 total), new `StringTelephoneRepositoryE2eeTest` (7 checks), `scripts/verify-e2ee.mjs` oracle appended to `run-session-verify.sh`, `scripts/test-e2e-session.mjs` drives envelopes and the retired search endpoint.
+
+---
+
 ## Deferred indefinitely
 
 | Feature | Reason |
 |---------|--------|
-| **End-to-end encryption** | Signal Protocol changes client, server and protocol fundamentally. Would need its own ADR before any work; revisit only when there is demand. |
 | **Push notifications (FCM)** | Requires Google Play Services, conflicting with the self-hosted rule; would need its own ADR. Background delivery remains documented as a limitation. |
 
 ---

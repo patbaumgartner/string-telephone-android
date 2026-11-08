@@ -165,6 +165,20 @@ class AppViewModel(
         _searching.value = false
     }
 
+    // ── E2EE (ADR-0015, Phase 22) ───────────────────────────────────────────
+
+    /** True in production (engine wired); false in previews/tests, so those UIs stay unchanged. */
+    fun e2eeActive(): Boolean = repository.e2eeActive
+
+    /** Peers whose identity key changed since it was last trusted; the chat shows a banner until acknowledged. */
+    fun identityWarnings(): StateFlow<Set<String>> = repository.identityWarnings
+
+    /** The 60-digit safety number with [peer], or null while no session exists yet (ADR-0015 §3). */
+    fun e2eeSafetyNumber(peer: String): String? = repository.e2eeSafetyNumber(peer)
+
+    /** Acknowledges the identity-change warning for [peer] after the user compared safety numbers. */
+    fun acknowledgeIdentityChange(peer: String) = repository.acknowledgeIdentityChange(peer)
+
     /** Why the last outgoing call failed; the call screen explains it before returning. */
     var callFailure by mutableStateOf<CallFailure?>(null)
         private set

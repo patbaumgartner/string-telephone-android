@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,7 +81,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -124,7 +127,9 @@ internal fun ChatScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
     val searching by viewModel.searching.collectAsState()
+    val identityWarnings by viewModel.identityWarnings().collectAsState()
     var searchOpen by remember { mutableStateOf(false) }
+    var safetyDialogOpen by remember { mutableStateOf(false) }
     val rows = remember(messages) { chatTimeline(messages, ZoneId.systemDefault()) }
     val listState = rememberLazyListState()
     val jumpScope = rememberCoroutineScope()
@@ -181,7 +186,19 @@ internal fun ChatScreen(
             },
             onCall = { onCall(peer) },
             onVideoCall = { onVideoCall(peer) },
+            // The lock only appears with a wired engine (production); previews
+            // and tests keep the plaintext header unchanged (ADR-0015).
+            onShowEncryption = if (viewModel.e2eeActive()) ({ safetyDialogOpen = true }) else null,
         )
+        // Identity-change warning (ADR-0015 §3): stays until the user compared
+        // safety numbers and acknowledged.
+        if (peer in identityWarnings) {
+            IdentityWarningBanner(
+                peerName = viewModel.displayNameOf(peer, contactsState.contacts),
+                onView = { safetyDialogOpen = true },
+                onAcknowledge = { viewModel.acknowledgeIdentityChange(peer) },
+            )
+        }
         if (searchOpen) {
             ChatSearchBar(
                 query = searchQuery,
@@ -337,6 +354,13 @@ internal fun ChatScreen(
             onDismiss = { replySheetMessage = null },
         )
     }
+    if (safetyDialogOpen) {
+        SafetyNumberDialog(
+            peerName = viewModel.displayNameOf(peer, contactsState.contacts),
+            safetyNumber = viewModel.e2eeSafetyNumber(peer),
+            onDismiss = { safetyDialogOpen = false },
+        )
+    }
 }
 
 @Composable
@@ -350,6 +374,7 @@ private fun ChatHeader(
     onBack: () -> Unit,
     onCall: () -> Unit,
     onVideoCall: () -> Unit,
+    onShowEncryption: (() -> Unit)? = null,
 ) {
     Surface(color = MaterialTheme.colorScheme.background, shadowElevation = 2.dp) {
         Row(
@@ -391,6 +416,15 @@ private fun ChatHeader(
                     }
                 }
             }
+            if (onShowEncryption != null) {
+                IconButton(onClick = onShowEncryption) {
+                    Icon(
+                        StringTelephoneIcons.Lock,
+                        contentDescription = stringResource(R.string.cd_encryption_details),
+                        tint = StringTelephoneTheme.accents.brand,
+                    )
+                }
+            }
             IconButton(onClick = onCall) {
                 Icon(
                     StringTelephoneIcons.Call,
@@ -416,6 +450,85 @@ private fun ChatHeader(
             }
         }
     }
+}
+
+/**
+ * Identity-change warning (ADR-0015 §3): shown while [peerName]'s key changed
+ * since it was last trusted. "View" opens the safety number; "I verified it"
+ * acknowledges after an out-of-band comparison.
+ */
+@Composable
+private fun IdentityWarningBanner(
+    peerName: String,
+    onView: () -> Unit,
+    onAcknowledge: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.e2ee_identity_changed_text, peerName),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onView) { Text(stringResource(R.string.e2ee_view)) }
+            TextButton(onClick = onAcknowledge) { Text(stringResource(R.string.e2ee_acknowledge)) }
+        }
+    }
+}
+
+/**
+ * Safety-number dialog (ADR-0015 §3): the 60-digit number derived from both
+ * identity keys, already grouped by 5 by the engine. Null while no session
+ * with the peer exists yet.
+ */
+@Composable
+private fun SafetyNumberDialog(
+    peerName: String,
+    safetyNumber: String?,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.e2ee_safety_number_title)) },
+        text = {
+            Column {
+                Text(
+                    stringResource(R.string.e2ee_locked_subtitle),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = StringTelephoneTheme.accents.brand,
+                )
+                Spacer(Modifier.height(8.dp))
+                if (safetyNumber != null) {
+                    Text(
+                        safetyNumber,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.e2ee_safety_number_hint, peerName),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    Text(
+                        stringResource(R.string.e2ee_safety_number_unavailable, peerName),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cd_close)) }
+        },
+    )
 }
 
 /**

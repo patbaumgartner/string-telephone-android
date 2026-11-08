@@ -7,7 +7,9 @@ import com.patbaumgartner.android.stringtelephone.core.ContactDto
 import com.patbaumgartner.android.stringtelephone.core.ConversationStateDto
 import com.patbaumgartner.android.stringtelephone.core.GroupDto
 import com.patbaumgartner.android.stringtelephone.core.GroupCallDto
+import com.patbaumgartner.android.stringtelephone.core.PeerKeyBundleDto
 import com.patbaumgartner.android.stringtelephone.core.RealtimeEvent
+import com.patbaumgartner.android.stringtelephone.core.e2ee.E2eeEngine
 import com.patbaumgartner.android.stringtelephone.core.newMessageClientKey
 import com.patbaumgartner.android.stringtelephone.network.ApiException
 import com.patbaumgartner.android.stringtelephone.network.CompanionApiClient
@@ -73,6 +75,11 @@ class StringTelephoneRepository(
     private val apiProvider: () -> CompanionApiClient?,
     private val chatCache: ChatCache,
     private val realtimeFactory: () -> RealtimeStream? = { null },
+    /**
+     * The E2EE engine (ADR-0015, Phase 22). Null in previews and tests:
+     * sends then go out plaintext, exactly as before the phase.
+     */
+    private val e2ee: E2eeEngine? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -154,6 +161,13 @@ class StringTelephoneRepository(
     /** The peer who is currently composing; cleared by a 5-second expiry. */
     private val _typingPeer = MutableStateFlow<String?>(null)
     val typingPeer: StateFlow<String?> = _typingPeer.asStateFlow()
+
+    /**
+     * Peers whose identity key changed since it was last trusted (ADR-0015 §3):
+     * the chat shows a safety-number warning banner until acknowledged.
+     */
+    private val _identityWarnings = MutableStateFlow<Set<String>>(emptySet())
+    val identityWarnings: StateFlow<Set<String>> = _identityWarnings.asStateFlow()
 
     private var typingExpiryJob: Job? = null
 
@@ -271,6 +285,122 @@ class StringTelephoneRepository(
         realtime = null
     }
 
+    // ── E2EE (ADR-0015, Phase 22) ───────────────────────────────────────────
+
+    /**
+     * Decrypts an incoming message body. Plaintext (legacy rows, media) passes
+     * through; encrypted rows open under the pairwise session of [cryptoPeer] —
+     * the author for incoming messages, this device for its own self-copy
+     * fan-out. A failed decrypt never renders garbage: the placeholder shows.
+     */
+    private fun decryptContent(cryptoPeer: String, content: String, encrypted: Boolean, envelope: String?): String {
+        if (!encrypted) return content
+        val engine = e2ee ?: return UNDECRYPTABLE_CONTENT
+        val plaintext = envelope?.let { engine.decrypt(cryptoPeer, it) }
+        if (engine.identityChanged(cryptoPeer)) _identityWarnings.update { it + cryptoPeer }
+        return plaintext ?: UNDECRYPTABLE_CONTENT
+    }
+
+    /** Decrypts one history row in place; self-sent rows use the self session. */
+    private fun decryptResult(m: MessageResult, myUsername: String): MessageResult {
+        if (!m.encrypted) return m
+        val cryptoPeer = if (m.sender == myUsername) myUsername else m.sender
+        return m.copy(content = decryptContent(cryptoPeer, m.content, encrypted = true, m.envelope))
+    }
+
+    /**
+     * Establishes a Double Ratchet session with [peer] on first use
+     * (ADR-0015 §4): fetches their published key bundle, consumes one of
+     * their one-time prekeys when one is left, and runs PQXDH. The self-copy
+     * session uses the caller's own bundle. Returns false when the peer has
+     * no published keys (a pre-E2EE peer) or the handshake fails — the send
+     * then fails honestly instead of leaking plaintext.
+     */
+    private suspend fun ensureSession(client: CompanionApiClient, peer: String): Boolean {
+        val engine = e2ee ?: return false
+        if (engine.hasSession(peer)) return true
+        val me = _account.value.me?.username ?: return false
+        val bundle: PeerKeyBundleDto = try {
+            if (peer == me) {
+                client.ownKeys()?.let { own ->
+                    PeerKeyBundleDto(me, own.registrationId, own.identityKey, own.signedPreKey, own.kyberPreKey, own.oneTimePrekeyCount)
+                } ?: return false
+            } else {
+                client.peerKeys(peer) ?: return false
+            }
+        } catch (_: ApiException) {
+            return false
+        }
+        // A stored identity that differs from the freshly published one is a
+        // safety-number change: warn even though the new session processes.
+        val changed = !engine.isIdentityTrusted(peer, bundle.identityKey)
+        val oneTime = if (peer == me) null else runCatching { client.consumeOneTimePreKey(peer) }.getOrNull()
+        val ok = engine.processPeerBundle(peer, bundle, oneTime).isSuccess
+        if (ok && changed) _identityWarnings.update { it + peer }
+        return ok
+    }
+
+    /**
+     * Encrypts [plaintext] for every [recipients] member (ADR-0015 §5):
+     * pairwise sends carry the peer plus a self-copy so the author's own
+     * history decrypts; group sends fan out to every member including the
+     * author. Returns the wire envelope map, or null when any recipient has
+     * no reachable session — TEXT requires envelopes server-side, so the
+     * caller fails the send instead of sending plaintext.
+     */
+    private suspend fun encryptEnvelopes(client: CompanionApiClient, recipients: List<String>, plaintext: String): Map<String, String>? {
+        val engine = e2ee ?: return null
+        val envelopes = LinkedHashMap<String, String>()
+        for (recipient in recipients.distinct()) {
+            if (!ensureSession(client, recipient)) return null
+            val envelope = engine.encrypt(recipient, plaintext).getOrNull() ?: return null
+            envelopes[recipient] = envelope
+        }
+        return envelopes
+    }
+
+    /** Member usernames of [groupId] including the signed-in user; empty when the group is unknown. */
+    private fun groupRecipients(groupId: String): List<String> {
+        val me = _account.value.me?.username.orEmpty()
+        val members = _groups.value.firstOrNull { it.id == groupId }?.members?.map { it.username } ?: emptyList()
+        return (members + me).distinct()
+    }
+
+    /**
+     * Publishes the E2EE key bundle after sign-in and tops up one-time
+     * prekeys when the server reports a low count (ADR-0015 §4). Publishing
+     * is idempotent server-side; a failed attempt retries on the next
+     * sign-in. Called by SessionController — background work never lives in
+     * the ViewModel.
+     */
+    fun publishE2eeKeys() {
+        val engine = e2ee ?: return
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: return@launch
+            try {
+                val own = withContext(Dispatchers.IO) { client.ownKeys() }
+                ensureActive()
+                if (own != null && own.oneTimePrekeyCount >= ONE_TIME_PREKEY_FLOOR) return@launch
+                val bundle = engine.buildKeyBundle(ONE_TIME_PREKEY_BATCH)
+                withContext(Dispatchers.IO) { client.publishKeys(bundle) }
+            } catch (_: ApiException) {
+                ensureActive()
+            }
+        }
+    }
+
+    /** True when this repository runs with an E2EE engine (production); false in previews/tests. */
+    val e2eeActive: Boolean get() = e2ee != null
+
+    /** The 60-digit safety number for [peer], or null while no session exists yet (ADR-0015 §3). */
+    fun e2eeSafetyNumber(peer: String): String? = e2ee?.safetyNumber(peer)
+
+    /** Acknowledges the identity-change warning for [peer] after comparing safety numbers. */
+    fun acknowledgeIdentityChange(peer: String) {
+        e2ee?.clearIdentityChange(peer)
+        _identityWarnings.update { it - peer }
+    }
+
     private fun onRealtimeEvent(event: RealtimeEvent) {
         when (event) {
             is RealtimeEvent.NewMessage -> onNewMessage(event)
@@ -311,9 +441,19 @@ class StringTelephoneRepository(
         chatCache.applyDeleted(event.messageId, event.deletedAtEpochMs, event.deletedBy)
     }
 
-    /** Applies an edit (Phase 17) to the cached bubble: new content + hint timestamp. */
+    /**
+     * Applies an edit (Phase 17) to the cached bubble: new content + hint
+     * timestamp. For an encrypted message (ADR-0015) the frame carries this
+     * device's new envelope instead of plaintext; the frame's `peer` is always
+     * the recipient, so the author — and with it the crypto session — comes
+     * from the cached message itself.
+     */
     private fun onMessageEdited(event: RealtimeEvent.MessageEdited) {
-        chatCache.applyEdited(event.messageId, event.content, event.editedAtEpochMs)
+        val author = chatCache.findByServerId(event.messageId)?.sender
+        val me = _account.value.me?.username
+        val cryptoPeer = author ?: if (event.peer == me) me ?: event.peer else event.peer
+        val content = decryptContent(cryptoPeer, event.content, event.envelope != null, event.envelope)
+        chatCache.applyEdited(event.messageId, content, event.editedAtEpochMs)
     }
 
     /** Resets the 5-second UI expiry whenever a new typing signal arrives. */
@@ -365,12 +505,16 @@ class StringTelephoneRepository(
     private fun onNewMessage(event: RealtimeEvent.NewMessage) {
         val me = _account.value.me?.username ?: return
         val peer = if (event.sender == me) event.recipient else event.sender
+        // Encrypted rows (ADR-0015) decrypt under the author's session; the
+        // self fan-out copy decrypts under this device's own session.
+        val cryptoPeer = if (event.sender == me) me else event.sender
+        val content = decryptContent(cryptoPeer, event.content, event.encrypted, event.envelope)
         val message = ChatMessage.fromServer(
             MessageResult(
                 id = event.id,
                 sender = event.sender,
                 recipient = event.recipient,
-                content = event.content,
+                content = content,
                 createdAt = event.createdAtEpochMs,
                 clientKey = event.clientKey,
                 type = event.type,
@@ -380,6 +524,8 @@ class StringTelephoneRepository(
                 replyToId = event.replyToId,
                 durationMs = event.durationMs,
                 waveform = event.waveform,
+                encrypted = event.encrypted,
+                envelope = event.envelope,
             ),
             me,
         )
@@ -398,7 +544,7 @@ class StringTelephoneRepository(
         if (peer != activeConversation) {
             _unread.update { it + (peer to (it[peer] ?: 0) + 1) }
         }
-        _incoming.tryEmit(IncomingMessage(peer, event.content, event.createdAtEpochMs))
+        _incoming.tryEmit(IncomingMessage(peer, content, event.createdAtEpochMs))
     }
 
     /** Marks [peer] as the visible conversation (or none) and clears its unread count. */
@@ -417,12 +563,15 @@ class StringTelephoneRepository(
      */
     private fun onGroupMessage(event: RealtimeEvent.GroupMessage) {
         val me = _account.value.me?.username ?: return
+        // Each member receives their own envelope (ADR-0015 §5), encrypted
+        // under the author's session — own messages under the self session.
+        val content = decryptContent(event.sender, event.content, event.encrypted, event.envelope)
         val message = ChatMessage.fromServer(
             MessageResult(
                 id = event.id,
                 sender = event.sender,
                 recipient = "",
-                content = event.content,
+                content = content,
                 createdAt = event.createdAtEpochMs,
                 clientKey = event.clientKey,
                 type = event.type,
@@ -433,6 +582,8 @@ class StringTelephoneRepository(
                 durationMs = event.durationMs,
                 waveform = event.waveform,
                 groupId = event.groupId,
+                encrypted = event.encrypted,
+                envelope = event.envelope,
             ),
             me,
         )
@@ -442,7 +593,7 @@ class StringTelephoneRepository(
         if (key != activeConversation) {
             _unread.update { it + (key to (it[key] ?: 0) + 1) }
         }
-        _incoming.tryEmit(IncomingMessage(key, event.content, event.createdAtEpochMs, sender = event.sender, groupId = event.groupId))
+        _incoming.tryEmit(IncomingMessage(key, content, event.createdAtEpochMs, sender = event.sender, groupId = event.groupId))
     }
 
     /**
@@ -639,7 +790,8 @@ class StringTelephoneRepository(
                 val page = withContext(Dispatchers.IO) { client.groupMessages(groupId, null) }
                 ensureActive()
                 for (m in page.messages) {
-                    chatCache.append(groupId, ChatMessage.fromServer(m, myUsername))
+                    // Group rows decrypt under the author's session (ADR-0015 §5).
+                    chatCache.append(groupId, ChatMessage.fromServer(decryptResult(m, myUsername), myUsername))
                 }
             } catch (_: ApiException) {
                 ensureActive()
@@ -658,8 +810,15 @@ class StringTelephoneRepository(
             val key = newMessageClientKey()
             chatCache.append(groupId, ChatMessage(null, key, fromMe = true, sender = me, content, System.currentTimeMillis(), SendState.PENDING, replyToId = replyToId))
             val client = apiProvider() ?: run { chatCache.markFailed(key); onResult(false); return@launch }
+            // E2EE (ADR-0015 §5): fan the ciphertext out to every member,
+            // including the author's self copy. When any session is missing
+            // the send fails honestly — TEXT requires envelopes server-side.
+            val envelopes = if (e2ee != null) {
+                encryptEnvelopes(client, groupRecipients(groupId), content)
+                    ?: run { chatCache.markFailed(key); onResult(false); return@launch }
+            } else null
             try {
-                val sent = withContext(Dispatchers.IO) { client.sendGroupMessage(groupId, content, key, replyToId) }
+                val sent = withContext(Dispatchers.IO) { client.sendGroupMessage(groupId, content, key, replyToId, envelopes) }
                 ensureActive()
                 chatCache.markSent(key, sent.id)
                 onResult(true)
@@ -896,7 +1055,9 @@ class StringTelephoneRepository(
                 val page = withContext(Dispatchers.IO) { client.messages(peer, null) }
                 ensureActive()
                 for (m in page.messages) {
-                    chatCache.append(peer, ChatMessage.fromServer(m, myUsername))
+                    // Encrypted history rows (ADR-0015) decrypt per row: under
+                    // the sender's session, or the self session for own rows.
+                    chatCache.append(peer, ChatMessage.fromServer(decryptResult(m, myUsername), myUsername))
                 }
             } catch (_: ApiException) {
                 ensureActive()
@@ -1008,8 +1169,15 @@ class StringTelephoneRepository(
 
     private suspend fun deliver(peer: String, content: String, key: String, replyToId: String? = null): Boolean {
         val client = apiProvider() ?: run { chatCache.markFailed(key); return false }
+        // E2EE (ADR-0015): encrypt for the peer plus a self copy so the
+        // author's own history decrypts. No reachable session means an honest
+        // failure — the server rejects plaintext TEXT, and we never leak it.
+        val envelopes = if (e2ee != null) {
+            val me = _account.value.me?.username ?: run { chatCache.markFailed(key); return false }
+            encryptEnvelopes(client, listOf(peer, me), content) ?: run { chatCache.markFailed(key); return false }
+        } else null
         return try {
-            val sent = withContext(Dispatchers.IO) { client.sendMessage(peer, content, key, replyToId) }
+            val sent = withContext(Dispatchers.IO) { client.sendMessage(peer, content, key, replyToId, envelopes) }
             currentCoroutineContext().ensureActive()
             chatCache.markSent(key, sent.id)
             true
@@ -1122,8 +1290,19 @@ class StringTelephoneRepository(
         chatCache.applyEdited(serverId, newContent, System.currentTimeMillis())
         scope.launch(sessionJob) {
             val client = apiProvider() ?: return@launch
+            // E2EE (ADR-0015): an encrypted row's edit needs fresh envelopes
+            // for both participants; without a reachable session the edit is
+            // rolled back instead of leaking plaintext.
+            val envelopes = if (e2ee != null) {
+                val me = _account.value.me?.username ?: return@launch
+                encryptEnvelopes(client, listOf(peer, me), newContent)
+            } else null
+            if (e2ee != null && envelopes == null) {
+                chatCache.applyEdited(serverId, message.content, 0L)
+                return@launch
+            }
             try {
-                withContext(Dispatchers.IO) { client.editMessage(peer, serverId, newContent) }
+                withContext(Dispatchers.IO) { client.editMessage(peer, serverId, newContent, envelopes) }
                 ensureActive()
             } catch (_: ApiException) {
                 ensureActive()
@@ -1137,38 +1316,14 @@ class StringTelephoneRepository(
     fun history(peer: String): List<ChatMessage> = chatCache.history(peer)
 
     /**
-     * Full-text search in one conversation (Phase 16). Results come back
-     * newest-first from the server; the UI shows them newest-first and jumps
-     * to the tapped message in the timeline. The query must be non-blank;
-     * the scope is the authenticated pair, enforced server-side.
+     * In-conversation search (Phase 16, client-side since Phase 22): the
+     * server no longer indexes message text (ADR-0015 retires the
+     * server-side endpoint — it cannot search what it never sees), so the
+     * query runs over this device's cached, decrypted history, newest
+     * first. Tombstones are excluded; the UI jumps to the tapped result.
      */
-    /**
-     * Full-text search in one conversation (Phase 16). Results come back
-     * newest-first from the server; the UI shows them newest-first and jumps
-     * to the tapped message in the timeline. The query must be non-blank;
-     * the scope is the authenticated pair, enforced server-side. All pages
-     * are fetched before returning — search results are a one-shot list,
-     * not an incremental stream.
-     */
-    /**
-     * Full-text search in one conversation (Phase 16). Results come back
-     * newest-first from the server; the UI shows them newest-first and jumps
-     * to the tapped message in the timeline. The query must be non-blank;
-     * the scope is the authenticated pair, enforced server-side. All pages
-     * are fetched before returning — search results are a one-shot list,
-     * not an incremental stream.
-     */
-    suspend fun search(peer: String, query: String): List<ChatMessage> {
-        val client = apiProvider() ?: return emptyList()
-        val all = ArrayList<ChatMessage>()
-        var cursor: String? = null
-        while (true) {
-            val page = runCatching { withContext(Dispatchers.IO) { client.search(peer, query, cursor) } }.getOrNull() ?: break
-            for (m in page.messages) all += ChatMessage.fromServer(m, _account.value.me?.username ?: "")
-            cursor = page.nextCursor ?: break
-        }
-        return all
-    }
+    suspend fun search(peer: String, query: String): List<ChatMessage> =
+        chatCache.history(peer).asReversed().filter { !it.deleted && it.content.contains(query, ignoreCase = true) }
 
     /**
      * Conversation previews (Phase 15): one [ChatMessage] per peer — the
@@ -1235,6 +1390,7 @@ class StringTelephoneRepository(
         _unread.value = emptyMap()
         _previews.value = emptyMap()
         _typingPeer.value = null
+        _identityWarnings.value = emptySet()
         typingExpiryJob?.cancel()
         typingExpiryJob = null
         _groups.value = emptyList()
@@ -1251,5 +1407,14 @@ class StringTelephoneRepository(
     companion object {
         /** Typing indicators expire when no refresh arrives within this window. */
         const val TYPING_EXPIRY_MS = 5_000L
+
+        /** One-time prekeys published per top-up (ADR-0015 §4). */
+        const val ONE_TIME_PREKEY_BATCH = 50
+
+        /** Below this server-side count the client tops up on the next sign-in. */
+        const val ONE_TIME_PREKEY_FLOOR = 10
+
+        /** Placeholder shown when an envelope cannot be decrypted (ADR-0015 §3). */
+        const val UNDECRYPTABLE_CONTENT = "Unable to decrypt this message"
     }
 }

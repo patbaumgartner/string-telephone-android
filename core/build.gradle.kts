@@ -21,4 +21,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
+    // JVM reference implementation of the E2EE seam (ADR-0015): proves the real
+    // Signal-protocol crypto round trip on the host JVM. The app module binds
+    // the Android AAR instead; the engine interface lives in core main.
+    testImplementation(libs.libsignal.client)
 }

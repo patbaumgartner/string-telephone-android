@@ -15,20 +15,26 @@ object WsFrames {
             WsPresenceEvent(username, snapshot.presence, snapshot.observedAtEpochMs, snapshot.lastSeenAtEpochMs),
         )))
 
-    fun newMessage(message: MessageRecord): String =
+    /**
+     * Pairwise new-message frame. For an encrypted message (ADR-0015) the
+     * frame is personalized per recipient: [envelope] is that user's own
+     * ciphertext copy and `content` stays empty server-side.
+     */
+    fun newMessage(message: MessageRecord, envelope: String? = null): String =
         Json.encodeToString(WsMessageDto("new-message", Json.encodeToString(
-            WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo, message.deletedAt, message.deletedBy, message.durationMs, message.waveform, message.editedAt),
+            WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo, message.deletedAt, message.deletedBy, message.durationMs, message.waveform, message.editedAt, null, message.encrypted, envelope),
         )))
 
     /**
      * Group message fan-out (Phase 19): pushed to every member when a group
      * message is stored. Mirrors `new-message` with a `groupId` field;
      * `recipient` stays empty in the payload (ADR-0012 constraint 3 — the
-     * event names its conversation explicitly).
+     * event names its conversation explicitly). [envelope] is the receiving
+     * member's own ciphertext copy for encrypted messages (ADR-0015).
      */
-    fun groupNewMessage(message: MessageRecord): String =
+    fun groupNewMessage(message: MessageRecord, envelope: String? = null): String =
         Json.encodeToString(WsMessageDto("group-message", Json.encodeToString(
-            WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo, message.deletedAt, message.deletedBy, message.durationMs, message.waveform, message.editedAt, message.groupId),
+            WsNewMessageEvent(message.id, message.sender, message.recipient, message.content, message.createdAt, message.clientKey, message.type, message.mediaId, message.width, message.height, message.replyTo, message.deletedAt, message.deletedBy, message.durationMs, message.waveform, message.editedAt, message.groupId, message.encrypted, envelope),
         )))
 
     /** Per-member group read fan-out (Phase 19): each member sees only their own reads. */
@@ -130,15 +136,18 @@ object WsFrames {
      * Edited content (Phase 17). Both participants receive the frame; the
      * payload carries the new content so the peer's devices re-render the
      * bubble without a history refresh, mirroring `message-deleted`. Only
-     * the author may edit, so the peer is always the recipient.
+     * the author may edit, so the peer is always the recipient. For an
+     * encrypted message (ADR-0015) [envelope] is the receiving user's new
+     * ciphertext copy, personalized per recipient on the fan-out.
      */
-    fun messageEdited(message: MessageRecord): String =
+    fun messageEdited(message: MessageRecord, envelope: String? = null): String =
         Json.encodeToString(WsMessageDto("message-edited", Json.encodeToString(
             WsMessageEditedEvent(
                 messageId = message.id,
                 peer = message.recipient,
                 content = message.content,
                 editedAt = message.editedAt ?: 0L,
+                envelope = envelope,
             ),
         )))
 }

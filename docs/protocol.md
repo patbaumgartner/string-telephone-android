@@ -777,8 +777,37 @@ values generate a random secret. API tokens always remain generated.
 The same lifecycle is available through `stringtelephone-provision`, which
 authenticates to the running server. See [operations](operations.md).
 
+## End-to-end encryption (ADR-0015, Phase 22)
+
+One-to-one `TEXT` messages are end-to-end encrypted with Signal's PQXDH +
+Double Ratchet. The server is a ciphertext relay and never sees plaintext:
+
+- `PUT /v1/keys` publishes the caller's key bundle (identity, signed prekey,
+  Kyber last-resort prekey, one-time prekeys); `GET /v1/keys/me` returns the
+  caller's own bundle; `GET /v1/keys/{peer}` returns a peer's bundle (null if
+  never published); `DELETE /v1/keys/{peer}/one-time` atomically consumes one
+  one-time prekey (404 when none remain). The `V17` migration creates the key
+  directory tables and `message_envelopes`.
+- An encrypted TEXT is stored with `content = ''` and one envelope per
+  recipient (`"2:<base64>"` for an established session, `"3:<base64>"` for a
+  fresh PQXDH session), each envelope `"<type>:<base64>"` capped at 16384 chars
+  and validated against `^[23]:[A-Za-z0-9+/]+={0,2}$`. The sender also
+  encrypts a self-copy so its own history decrypts. Groups fan one envelope out
+  to every member including the author.
+- WebSocket fan-out is personalized: each recipient device receives the frame
+  carrying *its own* envelope (for edits, the author is derived from the
+  cached message because the wire `peer` is always the recipient).
+- A missing or failed session fails the send honestly instead of leaking
+  plaintext; undecryptable envelopes render a placeholder. Identity changes
+  surface a safety-number warning until acknowledged. The server-side search
+  endpoint is retired (`404`); search is client-side over each device's cached,
+  decrypted history.
+- Calls stay PBX-relayed (liblinphone); reactions/replies/deletion stay
+  plaintext metadata; media encryption is deferred to Phase 23.
+
 ## Not included
 
-No end-to-end message encryption, remote message deletion, PSTN/trunk
-management, or push delivery to a phone whose app process is not running. Local app clearing does not delete
-server history. See [operations](operations.md) for failure recovery.
+Remote message deletion (tombstones exist but are metadata-only), PSTN/trunk
+management, or push delivery to a phone whose app process is not running. Local
+app clearing does not delete server history. See [operations](operations.md)
+for failure recovery.

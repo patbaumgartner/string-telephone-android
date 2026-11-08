@@ -28,6 +28,12 @@ data class MessageRecord(
     val editedAt: Long? = null,
     /** Group this message belongs to (Phase 19); null for pairwise messages. */
     val groupId: String? = null,
+    /**
+     * True when the message is end-to-end encrypted (ADR-0015, Phase 22):
+     * `content` is stored empty and the per-recipient ciphertext lives in
+     * `message_envelopes`. Legacy plaintext rows stay false.
+     */
+    val encrypted: Boolean = false,
 ) {
     /** True when the message is a tombstone; the content is cleared server-side. */
     val deleted: Boolean get() = deletedAt != null
@@ -38,16 +44,37 @@ data class ReadMark(val messageIds: List<String>, val readAt: Long)
 
 class Messages(
     private val db: JdbcClient,
+    private val tx: org.springframework.transaction.support.TransactionTemplate,
     private val onNewMessage: (MessageRecord) -> Unit = {},
 ) {
 
     companion object {
         const val MAX_CONTENT_BYTES = 8192
         const val MAX_PAGE = 200
+        /**
+         * Upper bound for one envelope string on the wire (ADR-0015):
+         * `"<type>:<base64>"` — a 8 KiB plaintext encrypts to well under
+         * 12 KiB of base64, so 16 KiB leaves headroom without letting a
+         * client stuff arbitrary data into the relay.
+         */
+        const val MAX_ENVELOPE_CHARS = 16384
+        /** Envelope wire shape: ciphertext type (2 = ratchet, 3 = prekey) + base64 payload. */
+        val ENVELOPE_PATTERN = Regex("^[23]:[A-Za-z0-9+/]+={0,2}$")
 
         /** Every persisted column, in [fromRow] order. */
         private const val SELECT_COLUMNS =
-            "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to, deleted_at, deleted_by, duration_ms, waveform, edited_at, group_id"
+            "id, sender, recipient, content, created_at, client_key, read_at, type, media_id, width, height, reply_to, deleted_at, deleted_by, duration_ms, waveform, edited_at, group_id, encrypted"
+
+        /** Validates an envelope map: shape and size of every value (ADR-0015). */
+        fun requireValidEnvelopes(envelopes: Map<String, String>) {
+            require(envelopes.isNotEmpty()) { "envelopes must not be empty" }
+            for ((user, envelope) in envelopes) {
+                require(user.isNotBlank()) { "envelope recipient must not be blank" }
+                require(envelope.length <= MAX_ENVELOPE_CHARS && ENVELOPE_PATTERN.matches(envelope)) {
+                    "malformed envelope for $user"
+                }
+            }
+        }
     }
 
     private fun fromRow(rs: java.sql.ResultSet): MessageRecord = MessageRecord(
@@ -69,28 +96,56 @@ class Messages(
         rs.getString("waveform"),
         rs.getLong("edited_at").let { if (rs.wasNull()) null else it },
         rs.getString("group_id"),
+        rs.getBoolean("encrypted"),
     )
 
-    // A single INSERT ... ON CONFLICT DO NOTHING is atomic by itself; the
-    // read-your-writes lookup below runs after it commits, exactly as before.
-    // Values are bound with params(), never concatenated into the SQL text.
+    /**
+     * Stores a pairwise TEXT message. When [envelopes] is given the message
+     * is end-to-end encrypted (ADR-0015, Phase 22): the server stores an
+     * empty `content`, sets `encrypted`, and keeps one ciphertext per
+     * envelope recipient (peer + author self-copy) in `message_envelopes` —
+     * the message row and its envelopes commit in one transaction. Without
+     * envelopes the legacy plaintext path is kept for pre-E2EE rows only;
+     * the API rejects plaintext TEXT sends, so this branch is unreachable
+     * from current clients.
+     */
     fun insert(
         sender: String,
         recipient: String,
         content: String,
         clientKey: String,
         replyTo: String? = null,
+        envelopes: Map<String, String>? = null,
     ): MessageRecord {
-        val bytes = content.toByteArray(Charsets.UTF_8)
-        require(content.isNotEmpty()) { "content must not be empty" }
-        require(bytes.size <= MAX_CONTENT_BYTES) { "content too large" }
+        val encrypted = envelopes != null
+        if (encrypted) {
+            requireValidEnvelopes(envelopes)
+        } else {
+            val bytes = content.toByteArray(Charsets.UTF_8)
+            require(content.isNotEmpty()) { "content must not be empty" }
+            require(bytes.size <= MAX_CONTENT_BYTES) { "content too large" }
+        }
         val id = newId()
         val now = System.currentTimeMillis()
-        val inserted = db.sql(
-            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, reply_to) VALUES(:id, :sender, :recipient, :content, :createdAt, :clientKey, :type, :replyTo) ON CONFLICT DO NOTHING",
-        ).param("id", id).param("sender", sender).param("recipient", recipient).param("content", content)
-            .param("createdAt", now).param("clientKey", clientKey).param("type", "TEXT").param("replyTo", replyTo)
-            .update()
+        val inserted = tx.execute {
+            val rows = db.sql(
+                "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, reply_to, encrypted) " +
+                    "VALUES(:id, :sender, :recipient, :content, :createdAt, :clientKey, :type, :replyTo, :encrypted) ON CONFLICT DO NOTHING",
+            ).param("id", id).param("sender", sender).param("recipient", recipient)
+                .param("content", if (encrypted) "" else content)
+                .param("createdAt", now).param("clientKey", clientKey).param("type", "TEXT").param("replyTo", replyTo)
+                .param("encrypted", encrypted)
+                .update()
+            if (rows > 0 && encrypted) {
+                for ((user, envelope) in envelopes) {
+                    db.sql(
+                        "INSERT INTO message_envelopes(message_id, recipient, envelope) VALUES(:messageId, :recipient, :envelope)",
+                    ).param("messageId", id).param("recipient", user).param("envelope", envelope).update()
+                }
+            }
+            rows
+        }
+        // Read-your-writes lookup runs after the transaction commits.
         val stored = find(sender, recipient, clientKey)
             ?: error("stored message disappeared after insert")
         if (inserted > 0) onNewMessage(stored)
@@ -185,20 +240,46 @@ class Messages(
     /**
      * Stores a group text message (Phase 19): one row visible to all
      * members, `recipient` stays '' and `group_id` carries the conversation.
-     * The caller must already be validated as a member.
+     * The caller must already be validated as a member. With [envelopes]
+     * (mandatory from Phase 22, ADR-0015) the row is stored encrypted with
+     * one ciphertext per member, committed in the same transaction.
      */
-    fun insertGroupText(sender: String, groupId: String, content: String, clientKey: String, replyTo: String? = null): MessageRecord {
-        val bytes = content.toByteArray(Charsets.UTF_8)
-        require(content.isNotEmpty()) { "content must not be empty" }
-        require(bytes.size <= MAX_CONTENT_BYTES) { "content too large" }
+    fun insertGroupText(
+        sender: String,
+        groupId: String,
+        content: String,
+        clientKey: String,
+        replyTo: String? = null,
+        envelopes: Map<String, String>? = null,
+    ): MessageRecord {
+        val encrypted = envelopes != null
+        if (encrypted) {
+            requireValidEnvelopes(envelopes)
+        } else {
+            val bytes = content.toByteArray(Charsets.UTF_8)
+            require(content.isNotEmpty()) { "content must not be empty" }
+            require(bytes.size <= MAX_CONTENT_BYTES) { "content too large" }
+        }
         val id = newId()
         val now = System.currentTimeMillis()
-        val inserted = db.sql(
-            "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, reply_to, group_id) " +
-                "VALUES(:id, :sender, '', :content, :createdAt, :clientKey, 'TEXT', :replyTo, :groupId) ON CONFLICT DO NOTHING",
-        ).param("id", id).param("sender", sender).param("content", content)
-            .param("createdAt", now).param("clientKey", clientKey).param("replyTo", replyTo)
-            .param("groupId", groupId).update()
+        val inserted = tx.execute {
+            val rows = db.sql(
+                "INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, reply_to, group_id, encrypted) " +
+                    "VALUES(:id, :sender, '', :content, :createdAt, :clientKey, 'TEXT', :replyTo, :groupId, :encrypted) ON CONFLICT DO NOTHING",
+            ).param("id", id).param("sender", sender)
+                .param("content", if (encrypted) "" else content)
+                .param("createdAt", now).param("clientKey", clientKey).param("replyTo", replyTo)
+                .param("groupId", groupId).param("encrypted", encrypted)
+                .update()
+            if (rows > 0 && encrypted) {
+                for ((user, envelope) in envelopes) {
+                    db.sql(
+                        "INSERT INTO message_envelopes(message_id, recipient, envelope) VALUES(:messageId, :recipient, :envelope)",
+                    ).param("messageId", id).param("recipient", user).param("envelope", envelope).update()
+                }
+            }
+            rows
+        }
         val stored = findInGroup(sender, groupId, clientKey)
             ?: error("stored group message disappeared after insert")
         if (inserted > 0) onNewMessage(stored)
@@ -271,6 +352,30 @@ class Messages(
         db.sql(
             "SELECT $SELECT_COLUMNS FROM messages WHERE id = ?",
         ).param(id).query { rs, _ -> fromRow(rs) }.optional().orElse(null)
+
+    /**
+     * The ciphertext envelope stored for [user] on message [messageId]
+     * (ADR-0015): each participant only ever fetches their own copy. Null
+     * for plaintext/media messages or when the user has no envelope.
+     */
+    fun envelopeFor(messageId: String, user: String): String? =
+        db.sql(
+            "SELECT envelope FROM message_envelopes WHERE message_id = ? AND recipient = ?",
+        ).params(messageId, user).query(String::class.java).optional().orElse(null)
+
+    /**
+     * Envelope lookup for a history page: one query for all [messageIds],
+     * keyed by message id. Used to personalize DTOs per requesting user.
+     */
+    fun envelopesFor(messageIds: List<String>, user: String): Map<String, String> {
+        if (messageIds.isEmpty()) return emptyMap()
+        val values = messageIds.joinToString(",") { "?" }
+        return db.sql(
+            "SELECT message_id, envelope FROM message_envelopes WHERE recipient = ? AND message_id IN ($values)",
+        ).param(user).params(messageIds).query { rs, _ ->
+            rs.getString("message_id") to rs.getString("envelope")
+        }.list().toMap()
+    }
 
     /**
      * Marks the peer's messages as read by [reader] (ADR-0010). Only the
@@ -347,49 +452,16 @@ class Messages(
      */
     fun delete(messageId: String, deletedBy: String): MessageRecord? {
         val now = System.currentTimeMillis()
-        db.sql(
-            "UPDATE messages SET content = '', deleted_at = ?, deleted_by = ? " +
-                "WHERE id = ? AND deleted_at IS NULL",
-        ).params(now, deletedBy, messageId).update()
-        return findById(messageId)
-    }
-
-    /**
-     * Full-text search over one conversation (Phase 16). Both directions of
-     * the pair's messages are searched, matching [page]'s scoping; a caller
-     * who is not part of the pair can never see results. Uses the generated
-     * `search_text` tsvector (V11, `simple` config: case-folded, diacritics
-     * kept). Tombstones have no content and never match. Pagination follows
-     * the history cursor exactly (created_at, id descending).
-     */
-    fun search(
-        user: String,
-        peer: String,
-        query: String,
-        before: Pair<Long, String>?,
-        limit: Int,
-    ): List<MessageRecord> {
-        require(query.isNotBlank()) { "query must not be blank" }
-        val effectiveLimit = limit.coerceIn(1, MAX_PAGE)
-        // websearch_to_tsquery parses the user's words the way a search box
-        // behaves elsewhere: quoted phrases, OR, minus-exclusions, no syntax
-        // errors possible (a malformed query yields no matches, not an error).
-        val columns = SELECT_COLUMNS
-        val sql = if (before == null) {
-            "SELECT $columns FROM messages " +
-                "WHERE group_id IS NULL AND ((sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?)) " +
-                "AND search_text @@ websearch_to_tsquery('simple', ?) " +
-                "ORDER BY created_at DESC, id DESC LIMIT ?"
-        } else {
-            "SELECT $columns FROM messages " +
-                "WHERE group_id IS NULL AND ((sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?)) " +
-                "AND search_text @@ websearch_to_tsquery('simple', ?) " +
-                "AND (created_at < ? OR (created_at = ? AND id < ?)) " +
-                "ORDER BY created_at DESC, id DESC LIMIT ?"
+        // The tombstone and the envelope cleanup commit together: a deleted
+        // message must not leave ciphertext behind on the relay (ADR-0015).
+        tx.execute {
+            db.sql(
+                "UPDATE messages SET content = '', deleted_at = ?, deleted_by = ? " +
+                    "WHERE id = ? AND deleted_at IS NULL",
+            ).params(now, deletedBy, messageId).update()
+            db.sql("DELETE FROM message_envelopes WHERE message_id = ?").param(messageId).update()
         }
-        var statement = db.sql(sql).params(peer, user, user, peer, query)
-        if (before != null) statement = statement.param(before.first).param(before.first).param(before.second)
-        return statement.param(effectiveLimit).query { rs, _ -> fromRow(rs) }.list()
+        return findById(messageId)
     }
 
     /**
@@ -399,16 +471,38 @@ class Messages(
      * rejected by the `deleted_at IS NULL` guard, so deletes take
      * precedence. The read receipt is deliberately preserved (ADR-0010: a
      * receipt means a human looked; an edit never un-reads a message).
+     *
+     * When [encrypted] is true (ADR-0015, Phase 22) the new ciphertext must
+     * arrive in [envelopes] — keyed like on send — and the stored content
+     * stays empty; the update and the envelope upserts commit together.
+     * Legacy plaintext rows take the plaintext path.
      */
-    fun edit(messageId: String, author: String, content: String): MessageRecord? {
-        val bytes = content.toByteArray(Charsets.UTF_8)
-        require(content.isNotEmpty()) { "content must not be empty" }
-        require(bytes.size <= MAX_CONTENT_BYTES) { "content too large" }
+    fun edit(messageId: String, author: String, content: String, encrypted: Boolean, envelopes: Map<String, String>? = null): MessageRecord? {
         val now = System.currentTimeMillis()
-        db.sql(
-            "UPDATE messages SET content = ?, edited_at = ? " +
-                "WHERE id = ? AND sender = ? AND deleted_at IS NULL",
-        ).params(content, now, messageId, author).update()
+        if (encrypted) {
+            val env = envelopes ?: emptyMap()
+            requireValidEnvelopes(env)
+            tx.execute {
+                db.sql(
+                    "UPDATE messages SET content = '', edited_at = ? " +
+                        "WHERE id = ? AND sender = ? AND deleted_at IS NULL",
+                ).params(now, messageId, author).update()
+                for ((user, envelope) in env) {
+                    db.sql(
+                        "INSERT INTO message_envelopes(message_id, recipient, envelope) VALUES(?, ?, ?) " +
+                            "ON CONFLICT (message_id, recipient) DO UPDATE SET envelope = EXCLUDED.envelope",
+                    ).params(messageId, user, envelope).update()
+                }
+            }
+        } else {
+            val bytes = content.toByteArray(Charsets.UTF_8)
+            require(content.isNotEmpty()) { "content must not be empty" }
+            require(bytes.size <= MAX_CONTENT_BYTES) { "content too large" }
+            db.sql(
+                "UPDATE messages SET content = ?, edited_at = ? " +
+                    "WHERE id = ? AND sender = ? AND deleted_at IS NULL",
+            ).params(content, now, messageId, author).update()
+        }
         return findById(messageId)
     }
 }

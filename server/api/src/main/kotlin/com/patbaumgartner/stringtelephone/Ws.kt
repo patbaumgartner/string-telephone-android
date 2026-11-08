@@ -117,16 +117,39 @@ class WsHub(
     /** Drops every session of a user; used when an account is disabled or reset. */
     fun disconnect(username: String) = sessions.disconnect(username)
 
-    fun broadcastNewMessage(message: MessageRecord) =
-        sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.newMessage(message))
+    /**
+     * The ciphertext envelope stored for [user] on [messageId] (ADR-0015).
+     * The hub reads the envelope table directly so the fan-out can stay
+     * self-contained (Messages already calls back into the hub — a direct
+     * Messages dependency would be a cycle).
+     */
+    private fun envelopeFor(messageId: String, user: String): String? =
+        jdbcClient.sql(
+            "SELECT envelope FROM message_envelopes WHERE message_id = ? AND recipient = ?",
+        ).params(messageId, user).query(String::class.java).optional().orElse(null)
+
+    /**
+     * Pairwise new-message fan-out. Encrypted messages (ADR-0015) are
+     * personalized: each participant's devices receive the frame with their
+     * own envelope, never the peer's copy.
+     */
+    fun broadcastNewMessage(message: MessageRecord) {
+        for (user in setOf(message.sender, message.recipient)) {
+            sessions.send(user, WsFrames.newMessage(message, envelopeFor(message.id, user)))
+        }
+    }
 
     /**
      * Group message fan-out (Phase 19): every *current* member receives the
      * frame. Membership is read live, so members who joined a heartbeat ago
-     * get the frame and removed members stop receiving immediately.
+     * get the frame and removed members stop receiving immediately. Encrypted
+     * messages (ADR-0015) carry each member's own envelope.
      */
-    fun broadcastGroupMessage(message: MessageRecord, members: List<String>) =
-        sessions.sendTo(members.toSet(), WsFrames.groupNewMessage(message))
+    fun broadcastGroupMessage(message: MessageRecord, members: List<String>) {
+        for (member in members.toSet()) {
+            sessions.send(member, WsFrames.groupNewMessage(message, envelopeFor(message.id, member)))
+        }
+    }
 
     /**
      * Per-member group read fan-out (Phase 19): every member's devices
@@ -183,10 +206,14 @@ class WsHub(
     /**
      * Fan-out for an edited message (Phase 17): both participants receive
      * the frame, so every device re-renders the bubble with the new content
-     * and the "edited" hint immediately, without a history refresh.
+     * and the "edited" hint immediately, without a history refresh. For an
+     * encrypted message (ADR-0015) each user gets their own new envelope.
      */
-    fun broadcastMessageEdited(message: MessageRecord) =
-        sessions.sendTo(setOf(message.sender, message.recipient), WsFrames.messageEdited(message))
+    fun broadcastMessageEdited(message: MessageRecord) {
+        for (user in setOf(message.sender, message.recipient)) {
+            sessions.send(user, WsFrames.messageEdited(message, envelopeFor(message.id, user)))
+        }
+    }
 
     /**
      * Tells every device of both participants which messages the reader has

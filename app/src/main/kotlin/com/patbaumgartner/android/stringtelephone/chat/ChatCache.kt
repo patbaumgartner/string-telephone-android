@@ -116,6 +116,15 @@ class ChatCache {
     fun history(peer: String): List<ChatMessage> = byPeer[peer].orEmpty().toList()
 
     /**
+     * Finds a cached message by server id across all conversations
+     * (ADR-0015: the personalized edit fan-out derives the author from the
+     * cache, because the wire frame's `peer` is always the recipient).
+     */
+    @Synchronized
+    fun findByServerId(serverId: String): ChatMessage? =
+        byPeer.values.firstNotNullOfOrNull { list -> list.firstOrNull { it.serverId == serverId } }
+
+    /**
      * The conversation preview (Phase 15): the last message regardless of
      * state — "message deleted" for tombstones (ADR-0011), media and replies
      * keep their own text. Null when nothing was exchanged yet. The UI maps

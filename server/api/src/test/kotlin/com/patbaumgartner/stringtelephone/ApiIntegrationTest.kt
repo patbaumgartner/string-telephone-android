@@ -44,17 +44,39 @@ class ApiIntegrationTest {
         assertEquals("alice", Json.parseToJsonElement(server.get("/v1/me", token).body()).jsonObject.getValue("username").jsonPrimitive.content)
         val contacts = server.get("/v1/contacts", token)
         assertTrue(contacts.body().contains("bob"))
-        val body = """{"recipient":"bob","content":"hello bob","clientKey":"k1","sender":"mallory"}"""
+        // TEXT is always end-to-end encrypted (ADR-0015): the body carries
+        // envelopes for the peer and the author; the client-sent "sender" is
+        // still ignored in favour of the authenticated principal.
+        val body = """{"recipient":"bob","content":"hello bob","clientKey":"k1","sender":"mallory","envelopes":${envelopesJson("bob", "alice")}}"""
         val first = server.post("/v1/conversations/bob/messages", body, token)
         assertEquals(201, first.statusCode(), first.body())
         val record = Json.parseToJsonElement(first.body()).jsonObject
         assertEquals("alice", record.getValue("sender").jsonPrimitive.content)
+        assertTrue(record.getValue("encrypted").jsonPrimitive.boolean, "TEXT is stored encrypted (ADR-0015)")
+        assertEquals("", record.getValue("content").jsonPrimitive.content, "the server never stores plaintext text")
+        assertEquals(envelope("alice"), record.getValue("envelope").jsonPrimitive.content, "the author receives their self-copy envelope")
         val duplicate = server.post("/v1/conversations/bob/messages", body, token)
         assertEquals(record.getValue("id"), Json.parseToJsonElement(duplicate.body()).jsonObject.getValue("id"))
-        assertTrue(server.get("/v1/conversations/bob/messages", token).body().contains("hello bob"))
+        val messageId = record.getValue("id").jsonPrimitive.content
+        val historyRow = messageOf(server.get("/v1/conversations/bob/messages", token), messageId)
+        assertTrue(historyRow.getValue("encrypted").jsonPrimitive.boolean)
+        assertEquals(envelope("alice"), historyRow.getValue("envelope").jsonPrimitive.content)
+        // Bob's view of the same message carries bob's envelope, never alice's copy.
+        assertEquals(
+            envelope("bob"),
+            messageOf(server.get("/v1/conversations/alice/messages", bob.getValue("apiToken").jsonPrimitive.content), messageId)
+                .getValue("envelope").jsonPrimitive.content,
+        )
         assertEquals(400, server.get("/v1/conversations/bob/messages?cursor=bad", token).statusCode())
         assertEquals(400, server.post("/v1/conversations/bob/messages", """{"recipient":"alice","content":"hello","clientKey":"k2"}""", token).statusCode())
-        assertEquals(413, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"${"x".repeat(8193)}","clientKey":"k3"}""", token).statusCode())
+        // Plaintext TEXT is rejected: no envelopes, no message (ADR-0015).
+        assertEquals(400, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"plaintext","clientKey":"k2b"}""", token).statusCode())
+        // A missing self-copy is rejected as well.
+        assertEquals(400, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"x","clientKey":"k2e","envelopes":{"bob":"${envelope("bob")}"}}""", token).statusCode())
+        // A malformed envelope shape is rejected.
+        assertEquals(400, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"x","clientKey":"k2c","envelopes":{"bob":"not-base64!","alice":"${envelope("alice")}"}}""", token).statusCode())
+        // An oversized envelope is rejected (the ciphertext size cap moved from content to envelope).
+        assertEquals(400, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"x","clientKey":"k2d","envelopes":{"bob":"3:${"A".repeat(20000)}","alice":"${envelope("alice")}"}}""", token).statusCode())
         assertEquals(404, server.post("/v1/conversations/nobody/messages", """{"recipient":"nobody","content":"x","clientKey":"k4"}""", token).statusCode())
         assertEquals(200, server.get("/v1/me", bob.getValue("apiToken").jsonPrimitive.content).statusCode())
     }
@@ -66,11 +88,7 @@ class ApiIntegrationTest {
         server.create("bob", "Bob")
 
         listOf("first", "second", "third").forEachIndexed { index, content ->
-            val response = server.post(
-                "/v1/conversations/bob/messages",
-                """{"recipient":"bob","content":"$content","clientKey":"page-$index"}""",
-                alice,
-            )
+            val response = sendText(alice, "alice", "bob", content, "page-$index")
             assertEquals(201, response.statusCode())
         }
 
@@ -101,11 +119,15 @@ class ApiIntegrationTest {
         val listener = SocketListener()
         val socket = server.http.newWebSocketBuilder().header("Authorization", "Bearer $bob")
             .buildAsync(URI("${server.base.replaceFirst("http", "ws")}/v1/ws"), listener).join()
-        val response = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"live","clientKey":"ws-1"}""", alice)
+        val response = sendText(alice, "alice", "bob", "live", "ws-1")
         assertEquals(201, response.statusCode())
-        val envelope = listener.next("new-message")
-        val payload = Json.parseToJsonElement(envelope.getValue("payload").jsonPrimitive.content).jsonObject
-        assertEquals("live", payload.getValue("content").jsonPrimitive.content)
+        val frame = listener.next("new-message")
+        val payload = Json.parseToJsonElement(frame.getValue("payload").jsonPrimitive.content).jsonObject
+        // Encrypted message (ADR-0015): content is empty server-side and the
+        // frame carries bob's own envelope, personalized on the fan-out.
+        assertEquals("", payload.getValue("content").jsonPrimitive.content)
+        assertTrue(payload.getValue("encrypted").jsonPrimitive.boolean)
+        assertEquals(envelope("bob"), payload.getValue("envelope").jsonPrimitive.content)
         assertEquals(200, server.post("/v1/admin/revoke-user", """{"username":"bob"}""").statusCode())
         assertEquals(401, server.get("/v1/me", bob).statusCode())
         assertEquals(1008, listener.closed.poll(5, TimeUnit.SECONDS))
@@ -201,7 +223,7 @@ class ApiIntegrationTest {
         val bob2Socket = connect(bob, bob2Events)
         val bob1Socket = connect(bob, SocketListener()) // the device that will mark read
 
-        assertEquals(201, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"read me","clientKey":"multi-1"}""", alice).statusCode())
+        assertEquals(201, sendText(alice, "alice", "bob", "read me", "multi-1").statusCode())
         // The marking device must have received the message before marking.
         val envelope = Json.parseToJsonElement(aliceEvents.next("new-message").getValue("payload").jsonPrimitive.content).jsonObject
         val messageId = envelope.getValue("id").jsonPrimitive.content
@@ -300,7 +322,7 @@ class ApiIntegrationTest {
         val aliceEvents = SocketListener()
         val aliceSocket = connect(alice, aliceEvents)
 
-        val sent = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"hello bob","clientKey":"r1"}""", alice)
+        val sent = sendText(alice, "alice", "bob", "hello bob", "r1")
         assertEquals(201, sent.statusCode(), sent.body())
         val id = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
 
@@ -345,77 +367,112 @@ class ApiIntegrationTest {
     }
 
     @Test
-    fun `message search finds matches only inside the authenticated conversation`() {
-        server.login()
-        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
-        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
-        val carol = server.create("carol", "Carol").getValue("apiToken").jsonPrimitive.content
-
-        // Alice ↔ Bob conversation: the only place "pineapple" appears.
-        assertEquals(201, server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"pineapple pizza tonight?","clientKey":"s-1"}""", alice).statusCode())
-        assertEquals(201, server.post("/v1/conversations/alice/messages", """{"recipient":"alice","content":"always, bring pineapple","clientKey":"s-2"}""", bob).statusCode())
-        // Alice ↔ Carol: the same words must NOT leak into carol's search scope.
-        assertEquals(201, server.post("/v1/conversations/carol/messages", """{"recipient":"carol","content":"the weather is nice","clientKey":"s-3"}""", alice).statusCode())
-
-        // Case-insensitive match across both directions of the pair.
-        val found = Json.parseToJsonElement(
-            server.get("/v1/conversations/bob/search?q=PINEAPPLE", alice).body(),
-        ).jsonObject.getValue("messages").jsonArray
-        assertEquals(2, found.size, "both directions of the pair must match, case-insensitively")
-
-        // No match: empty page.
-        val none = Json.parseToJsonElement(
-            server.get("/v1/conversations/bob/search?q=kiwi", alice).body(),
-        ).jsonObject
-        assertEquals(0, none.getValue("messages").jsonArray.size)
-
-        // Carol searching her own conversation with alice finds nothing of Bob's.
-        val carolsView = Json.parseToJsonElement(
-            server.get("/v1/conversations/alice/search?q=pineapple", carol).body(),
-        ).jsonObject
-        assertEquals(0, carolsView.getValue("messages").jsonArray.size, "another pair's conversation must not leak")
-
-        // A word that only exists in alice ↔ carol stays there.
-        val weather = Json.parseToJsonElement(
-            server.get("/v1/conversations/carol/search?q=weather", alice).body(),
-        ).jsonObject.getValue("messages").jsonArray
-        assertEquals(1, weather.size)
-
-        // Blank queries are rejected; unknown peers 404.
-        assertEquals(400, server.get("/v1/conversations/bob/search?q=%20", alice).statusCode())
-        assertEquals(404, server.get("/v1/conversations/stranger/search?q=x", alice).statusCode())
-
-        // Tombstones carry no content and never match.
-        assertEquals(400, server.get("/v1/conversations/bob/search", alice).statusCode(), "missing q must be a bad request")
-    }
-
-    @Test
-    fun `message search pagination walks the whole conversation with cursors`() {
+    fun `the server-side search endpoint is gone because ciphertext cannot be searched`() {
         server.login()
         val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
         server.create("bob", "Bob")
+        assertEquals(201, sendText(alice, "alice", "bob", "pineapple pizza tonight?", "s-1").statusCode())
+        // Phase 16's server-side full-text search is removed in Phase 22 (ADR-0015):
+        // encrypted rows store an empty content, so the relay has nothing to match —
+        // search moves client-side over the decrypted ChatCache.
+        assertEquals(404, server.get("/v1/conversations/bob/search?q=pineapple", alice).statusCode())
+    }
 
-        repeat(3) { index ->
-            assertEquals(201, server.post(
-                "/v1/conversations/bob/messages",
-                """{"recipient":"bob","content":"needle number $index","clientKey":"p-$index"}""",
-                alice,
-            ).statusCode())
-        }
+    @Test
+    fun `key directory publishes fetches and atomically consumes one-time prekeys`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
 
-        val firstPage = Json.parseToJsonElement(
-            server.get("/v1/conversations/bob/search?q=needle&limit=2", alice).body(),
-        ).jsonObject
-        assertEquals(2, firstPage.getValue("messages").jsonArray.size)
-        val cursor = firstPage.getValue("nextCursor").jsonPrimitive.content
+        // Nothing published yet.
+        assertEquals(404, server.get("/v1/keys/me", alice).statusCode())
+        assertEquals(404, server.get("/v1/keys/alice", bob).statusCode())
 
-        val secondPage = Json.parseToJsonElement(
-            server.get("/v1/conversations/bob/search?q=needle&limit=2&cursor=$cursor", alice).body(),
-        ).jsonObject
-        val ids = (firstPage.getValue("messages").jsonArray + secondPage.getValue("messages").jsonArray)
-            .map { it.jsonObject.getValue("id").jsonPrimitive.content }
-        assertEquals(3, ids.size)
-        assertEquals(3, ids.toSet().size, "no message may appear on both pages")
+        val bundle = """{"registrationId":1337,"identityKey":"${b64("id-alice")}",""" +
+            """"signedPreKey":{"id":1,"publicKey":"${b64("sp-alice")}","signature":"${b64("sig-alice")}"},""" +
+            """"kyberPreKey":{"id":7,"publicKey":"${b64("ky-alice")}","signature":"${b64("ksig-alice")}"},""" +
+            """"oneTimePreKeys":[{"id":100,"publicKey":"${b64("opk-alice-100")}"}]}"""
+        assertEquals(200, server.put("/v1/keys", bundle, alice).statusCode())
+        // Re-publish is idempotent: identity/signed/kyber upsert, one-time prekeys
+        // only add on conflict-free ids, so a duplicate top-up changes nothing.
+        assertEquals(200, server.put("/v1/keys", bundle, alice).statusCode())
+
+        val own = Json.parseToJsonElement(server.get("/v1/keys/me", alice).body()).jsonObject
+        assertEquals(1337, own.getValue("registrationId").jsonPrimitive.int)
+        assertEquals(b64("id-alice"), own.getValue("identityKey").jsonPrimitive.content)
+        assertEquals(1, own.getValue("oneTimePrekeyCount").jsonPrimitive.int)
+
+        // A peer fetches exactly what a sender needs for X3DH/PQXDH.
+        val peer = Json.parseToJsonElement(server.get("/v1/keys/alice", bob).body()).jsonObject
+        assertEquals("alice", peer.getValue("username").jsonPrimitive.content)
+        assertEquals(b64("id-alice"), peer.getValue("identityKey").jsonPrimitive.content)
+        assertEquals(b64("sp-alice"), peer.getValue("signedPreKey").jsonObject.getValue("publicKey").jsonPrimitive.content)
+        assertEquals(b64("ky-alice"), peer.getValue("kyberPreKey").jsonObject.getValue("publicKey").jsonPrimitive.content)
+        assertEquals(1, peer.getValue("oneTimePrekeyCount").jsonPrimitive.int)
+
+        // Consumption is atomic (DELETE ... RETURNING): one prekey, one caller.
+        val consumed = server.get("/v1/keys/alice/one-time", bob)
+        assertEquals(200, consumed.statusCode())
+        assertEquals(100, Json.parseToJsonElement(consumed.body()).jsonObject.getValue("id").jsonPrimitive.int)
+        assertEquals(b64("opk-alice-100"), Json.parseToJsonElement(consumed.body()).jsonObject.getValue("publicKey").jsonPrimitive.content)
+        assertEquals(404, server.get("/v1/keys/alice/one-time", bob).statusCode(), "the same prekey may never be handed out twice")
+        assertEquals(
+            0,
+            Json.parseToJsonElement(server.get("/v1/keys/alice", bob).body()).jsonObject.getValue("oneTimePrekeyCount").jsonPrimitive.int,
+        )
+
+        // Unknown peer and missing auth behave like the rest of the API.
+        assertEquals(404, server.get("/v1/keys/stranger", bob).statusCode())
+        assertEquals(401, server.get("/v1/keys/alice").statusCode())
+        assertEquals(401, server.put("/v1/keys", bundle).statusCode())
+    }
+
+    @Test
+    fun `encrypted messages fan out and read back with per-requester envelopes end to end`() {
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        val aliceEvents = SocketListener()
+        val aliceSocket = connect(alice, aliceEvents)
+        val bobEvents = SocketListener()
+        val bobSocket = connect(bob, bobEvents)
+
+        val sent = sendText(alice, "alice", "bob", "secret plans", "e2e-1")
+        assertEquals(201, sent.statusCode(), sent.body())
+        val id = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
+
+        // The WS fan-out personalizes the envelope per recipient.
+        val alicePayload = Json.parseToJsonElement(aliceEvents.next("new-message").getValue("payload").jsonPrimitive.content).jsonObject
+        val bobPayload = Json.parseToJsonElement(bobEvents.next("new-message").getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals(envelope("alice"), alicePayload.getValue("envelope").jsonPrimitive.content)
+        assertEquals(envelope("bob"), bobPayload.getValue("envelope").jsonPrimitive.content)
+        assertTrue(alicePayload.getValue("encrypted").jsonPrimitive.boolean)
+        assertEquals("", alicePayload.getValue("content").jsonPrimitive.content, "no plaintext on the wire")
+
+        // History personalizes the same way: each side reads only its own copy.
+        assertEquals(envelope("alice"), messageOf(server.get("/v1/conversations/bob/messages", alice), id).getValue("envelope").jsonPrimitive.content)
+        assertEquals(envelope("bob"), messageOf(server.get("/v1/conversations/alice/messages", bob), id).getValue("envelope").jsonPrimitive.content)
+
+        // Editing an encrypted message requires fresh envelopes (peer + author);
+        // a plaintext edit is rejected because the server never sees text.
+        assertEquals(400, server.put("/v1/conversations/bob/messages/$id", """{"content":"edited plaintext"}""", alice).statusCode())
+        val edited = server.put("/v1/conversations/bob/messages/$id", editBody("edited secret", "bob", "alice"), alice)
+        assertEquals(200, edited.statusCode(), edited.body())
+        val editedRecord = Json.parseToJsonElement(edited.body()).jsonObject
+        assertEquals("", editedRecord.getValue("content").jsonPrimitive.content)
+        assertEquals(envelope("alice", "edit"), editedRecord.getValue("envelope").jsonPrimitive.content)
+        val editPayload = Json.parseToJsonElement(bobEvents.next("message-edited").getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals(envelope("bob", "edit"), editPayload.getValue("envelope").jsonPrimitive.content, "the edit fan-out is personalized too")
+
+        // Deleting removes the ciphertext from the relay entirely.
+        assertEquals(200, server.delete("/v1/conversations/bob/messages/$id", bob).statusCode())
+        val tombstone = messageOf(server.get("/v1/conversations/bob/messages", alice), id)
+        assertNull(tombstone["envelope"], "a deleted message leaves no ciphertext behind")
+        assertEquals(0, server.db.sql("SELECT COUNT(*) FROM message_envelopes WHERE message_id = ?")
+            .param(id).query(Int::class.java).single())
+
+        aliceSocket.abort()
+        bobSocket.abort()
     }
 
     @Test
@@ -424,46 +481,54 @@ class ApiIntegrationTest {
         val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
         val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
 
-        val sent = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"helo bob","clientKey":"e-1"}""", alice)
+        val sent = sendText(alice, "alice", "bob", "helo bob", "e-1")
         assertEquals(201, sent.statusCode(), sent.body())
         val id = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
 
         // Bob (not the author) may not edit.
         assertEquals(403, server.put("/v1/conversations/alice/messages/$id", """{"content":"hacked"}""", bob).statusCode())
 
-        // The author edits; the response is the updated record.
-        val edited = server.put("/v1/conversations/bob/messages/$id", """{"content":"hello bob"}""", alice)
+        // The author edits; the response is the updated record. The message is
+        // encrypted (ADR-0015), so the edit carries fresh envelopes and the
+        // stored content stays empty.
+        val edited = server.put("/v1/conversations/bob/messages/$id", editBody("hello bob", "bob", "alice"), alice)
         assertEquals(200, edited.statusCode(), edited.body())
         val record = Json.parseToJsonElement(edited.body()).jsonObject
-        assertEquals("hello bob", record.getValue("content").jsonPrimitive.content)
+        assertEquals("", record.getValue("content").jsonPrimitive.content)
+        assertTrue(record.getValue("encrypted").jsonPrimitive.boolean)
+        assertEquals(envelope("alice", "edit"), record.getValue("envelope").jsonPrimitive.content)
         val editedAt = record.getValue("editedAt").jsonPrimitive.long
         assertTrue(editedAt > 0, "editedAt must be stamped")
 
-        // History reflects the edit.
+        // History reflects the edit (with the author's own envelope).
         val history = Json.parseToJsonElement(server.get("/v1/conversations/bob/messages", alice).body()).jsonObject
         val row = history.getValue("messages").jsonArray
             .map { it.jsonObject }
             .single { it.getValue("id").jsonPrimitive.content == id }
-        assertEquals("hello bob", row.getValue("content").jsonPrimitive.content)
+        assertEquals("", row.getValue("content").jsonPrimitive.content)
+        assertEquals(envelope("alice", "edit"), row.getValue("envelope").jsonPrimitive.content)
         assertEquals(editedAt, row.getValue("editedAt").jsonPrimitive.long)
 
-        // Both participants receive the message-edited event with the new content.
+        // Both participants receive the message-edited event, each with their
+        // own new envelope (personalized fan-out, ADR-0015).
         val aliceEvents = SocketListener()
         val aliceSocket = connect(alice, aliceEvents)
         val bobEvents = SocketListener()
         val bobSocket = connect(bob, bobEvents)
-        assertEquals(200, server.put("/v1/conversations/bob/messages/$id", """{"content":"hello bob, again"}""", alice).statusCode())
-        for (listener in listOf(aliceEvents, bobEvents)) {
-            val envelope = listener.next("message-edited")
-            val payload = Json.parseToJsonElement(envelope.getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals(200, server.put("/v1/conversations/bob/messages/$id", editBody("hello bob, again", "bob", "alice", seed = "edit2"), alice).statusCode())
+        val expectedEnvelopes = mapOf(aliceEvents to envelope("alice", "edit2"), bobEvents to envelope("bob", "edit2"))
+        for ((listener, expectedEnvelope) in expectedEnvelopes) {
+            val frame = listener.next("message-edited")
+            val payload = Json.parseToJsonElement(frame.getValue("payload").jsonPrimitive.content).jsonObject
             assertEquals(id, payload.getValue("messageId").jsonPrimitive.content)
-            assertEquals("hello bob, again", payload.getValue("content").jsonPrimitive.content)
+            assertEquals(expectedEnvelope, payload.getValue("envelope").jsonPrimitive.content)
+            assertEquals("", payload.getValue("content").jsonPrimitive.content)
             assertEquals("bob", payload.getValue("peer").jsonPrimitive.content)
         }
         aliceSocket.abort()
         bobSocket.abort()
 
-        // An empty edit is rejected like an empty send.
+        // An edit without envelopes is rejected: the server never sees plaintext (ADR-0015).
         assertEquals(400, server.put("/v1/conversations/bob/messages/$id", """{"content":""}""", alice).statusCode())
     }
 
@@ -473,12 +538,12 @@ class ApiIntegrationTest {
         val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
         server.create("bob", "Bob")
 
-        val sent = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"to be removed","clientKey":"e-2"}""", alice)
+        val sent = sendText(alice, "alice", "bob", "to be removed", "e-2")
         assertEquals(201, sent.statusCode())
         val id = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
 
         // Edit first, then delete: the tombstone wins and carries no content.
-        assertEquals(200, server.put("/v1/conversations/bob/messages/$id", """{"content":"still there?"}""", alice).statusCode())
+        assertEquals(200, server.put("/v1/conversations/bob/messages/$id", editBody("still there?", "bob", "alice"), alice).statusCode())
         assertEquals(200, server.delete("/v1/conversations/bob/messages/$id", alice).statusCode())
 
         // Editing a tombstone is a 409: deletes take precedence.
@@ -498,20 +563,21 @@ class ApiIntegrationTest {
         val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
         val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
 
-        val sent = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"read me then edit me","clientKey":"e-3"}""", alice)
+        val sent = sendText(alice, "alice", "bob", "read me then edit me", "e-3")
         assertEquals(201, sent.statusCode())
         val id = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
 
         // Bob reads the message.
         assertEquals(200, server.post("/v1/conversations/alice/read", """{"upToMessageId":"$id"}""", bob).statusCode())
 
-        // Alice edits: the read receipt must survive the edit (ADR-0010).
-        assertEquals(200, server.put("/v1/conversations/bob/messages/$id", """{"content":"edited after read"}""", alice).statusCode())
+        // Alice edits (with fresh envelopes, ADR-0015): the read receipt must
+        // survive the edit (ADR-0010).
+        assertEquals(200, server.put("/v1/conversations/bob/messages/$id", editBody("edited after read", "bob", "alice"), alice).statusCode())
         val row = Json.parseToJsonElement(server.get("/v1/conversations/bob/messages", alice).body()).jsonObject
             .getValue("messages").jsonArray.map { it.jsonObject }
             .single { it.getValue("id").jsonPrimitive.content == id }
         assertNotNull(row.getValue("readAt").jsonPrimitive.longOrNull, "an edit must not un-read a read message")
-        assertEquals("edited after read", row.getValue("content").jsonPrimitive.content)
+        assertEquals(envelope("alice", "edit"), row.getValue("envelope").jsonPrimitive.content)
     }
 
     @Test
@@ -520,7 +586,7 @@ class ApiIntegrationTest {
         val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
         val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
         val ids = (1..3).map { index ->
-            val response = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"m$index","clientKey":"bulk-$index"}""", alice)
+            val response = sendText(alice, "alice", "bob", "m$index", "bulk-$index")
             assertEquals(201, response.statusCode())
             Json.parseToJsonElement(response.body()).jsonObject.getValue("id").jsonPrimitive.content
         }
@@ -531,7 +597,7 @@ class ApiIntegrationTest {
             assertNotNull(messageOf(server.get("/v1/conversations/bob/messages", alice), id)["readAt"])
         }
         // The recipient's own messages stay unread: the receipt is about what the reader read.
-        val reply = server.post("/v1/conversations/alice/messages", """{"recipient":"alice","content":"hi alice","clientKey":"bulk-reply"}""", bob)
+        val reply = sendText(bob, "bob", "alice", "hi alice", "bulk-reply")
         assertEquals(201, reply.statusCode())
         val replyId = Json.parseToJsonElement(reply.body()).jsonObject.getValue("id").jsonPrimitive.content
         assertNull(messageOf(server.get("/v1/conversations/alice/messages", bob), replyId)["readAt"])
@@ -614,25 +680,33 @@ class ApiIntegrationTest {
         val dave = server.create("dave", "Dave").getValue("apiToken").jsonPrimitive.content
         val groupId = createGroup(alice, "Readers", listOf("bob", "carol")).getValue("id").jsonPrimitive.content
 
-        // Sending derives the author from the principal; an empty content is rejected.
-        assertEquals(413, server.post("/v1/groups/$groupId/messages", """{"content":"","clientKey":"g-e"}""", alice).statusCode())
+        val members = listOf("alice", "bob", "carol")
+        // TEXT requires an envelope for every member (ADR-0015, incl. the author);
+        // a missing or absent envelope map is a 400, not a stored plaintext.
+        assertEquals(400, server.post("/v1/groups/$groupId/messages", """{"content":"","clientKey":"g-e"}""", alice).statusCode())
+        assertEquals(400, server.post("/v1/groups/$groupId/messages", groupTextBody("x", "g-e2", listOf("alice", "bob")), alice).statusCode())
         assertEquals(404, server.post("/v1/groups/$groupId/messages", """{"content":"x","clientKey":"g-n"}""", dave).statusCode())
-        val sent = server.post("/v1/groups/$groupId/messages", """{"content":"hello members","clientKey":"g-1"}""", alice)
+        val body = groupTextBody("hello members", "g-1", members)
+        val sent = server.post("/v1/groups/$groupId/messages", body, alice)
         assertEquals(201, sent.statusCode(), sent.body())
         val record = Json.parseToJsonElement(sent.body()).jsonObject
         val messageId = record.getValue("id").jsonPrimitive.content
         assertEquals(groupId, record.getValue("groupId").jsonPrimitive.content)
         assertEquals("", record.getValue("recipient").jsonPrimitive.content)
+        assertTrue(record.getValue("encrypted").jsonPrimitive.boolean)
+        assertEquals(envelope("alice"), record.getValue("envelope").jsonPrimitive.content)
 
         // Idempotent resend returns the same row.
-        val again = server.post("/v1/groups/$groupId/messages", """{"content":"hello members","clientKey":"g-1"}""", alice)
+        val again = server.post("/v1/groups/$groupId/messages", body, alice)
         assertEquals(messageId, Json.parseToJsonElement(again.body()).jsonObject.getValue("id").jsonPrimitive.content)
 
-        // History is visible to every member and carries the same row.
-        for (member in listOf(bob, carol)) {
-            val page = Json.parseToJsonElement(server.get("/v1/groups/$groupId/messages", member).body()).jsonObject
+        // History is visible to every member and carries that member's own envelope.
+        for ((memberToken, memberName) in listOf(bob to "bob", carol to "carol")) {
+            val page = Json.parseToJsonElement(server.get("/v1/groups/$groupId/messages", memberToken).body()).jsonObject
             assertEquals(1, page.getValue("messages").jsonArray.size)
-            assertEquals(messageId, page.getValue("messages").jsonArray[0].jsonObject.getValue("id").jsonPrimitive.content)
+            val row = page.getValue("messages").jsonArray[0].jsonObject
+            assertEquals(messageId, row.getValue("id").jsonPrimitive.content)
+            assertEquals(envelope(memberName), row.getValue("envelope").jsonPrimitive.content)
         }
         assertEquals(404, server.get("/v1/groups/$groupId/messages", dave).statusCode())
 
@@ -658,7 +732,7 @@ class ApiIntegrationTest {
             .getValue("readCount").jsonPrimitive.int, "the count is the same for every member's view")
 
         // A foreign message id cannot sneak into the group mark.
-        val foreign = server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"pairwise","clientKey":"pw-1"}""", carol).let {
+        val foreign = sendText(carol, "carol", "bob", "pairwise", "pw-1").let {
             // carol→bob is a different conversation; alice cannot mark it here.
             Json.parseToJsonElement(it.body()).jsonObject.getValue("id").jsonPrimitive.content
         }
@@ -678,10 +752,18 @@ class ApiIntegrationTest {
         val carolEvents = SocketListener()
         val carolSocket = connect(carol, carolEvents)
 
-        assertEquals(201, server.post("/v1/groups/$groupId/messages", """{"content":"fan out","clientKey":"ws-1"}""", alice).statusCode())
-        for (listener in listOf(bobEvents, carolEvents)) {
+        assertEquals(201, server.post(
+            "/v1/groups/$groupId/messages",
+            groupTextBody("fan out", "ws-1", listOf("alice", "bob", "carol")),
+            alice,
+        ).statusCode())
+        // Each member's frame carries that member's own envelope (ADR-0015).
+        val fanOutEnvelopes = mapOf(bobEvents to envelope("bob"), carolEvents to envelope("carol"))
+        for ((listener, expectedEnvelope) in fanOutEnvelopes) {
             val payload = Json.parseToJsonElement(listener.next("group-message").getValue("payload").jsonPrimitive.content).jsonObject
-            assertEquals("fan out", payload.getValue("content").jsonPrimitive.content)
+            assertEquals("", payload.getValue("content").jsonPrimitive.content)
+            assertTrue(payload.getValue("encrypted").jsonPrimitive.boolean)
+            assertEquals(expectedEnvelope, payload.getValue("envelope").jsonPrimitive.content)
             assertEquals(groupId, payload.getValue("groupId").jsonPrimitive.content)
         }
 
@@ -709,7 +791,7 @@ class ApiIntegrationTest {
         val carol = server.create("carol", "Carol").getValue("apiToken").jsonPrimitive.content
         val groupId = createGroup(alice, "Reactors", listOf("bob", "carol")).getValue("id").jsonPrimitive.content
 
-        val sent = server.post("/v1/groups/$groupId/messages", """{"content":"react to me","clientKey":"rx-1"}""", alice)
+        val sent = server.post("/v1/groups/$groupId/messages", groupTextBody("react to me", "rx-1", listOf("alice", "bob", "carol")), alice)
         val messageId = Json.parseToJsonElement(sent.body()).jsonObject.getValue("id").jsonPrimitive.content
 
         val bobEvents = SocketListener()
@@ -749,7 +831,7 @@ class ApiIntegrationTest {
         carolSocket.abort()
 
         // A second group message: pairwise endpoints must not see group rows.
-        val second = server.post("/v1/groups/$groupId/messages", """{"content":"pairwise probe","clientKey":"pw-2"}""", bob)
+        val second = server.post("/v1/groups/$groupId/messages", groupTextBody("pairwise probe", "pw-2", listOf("alice", "bob", "carol")), bob)
         val secondId = Json.parseToJsonElement(second.body()).jsonObject.getValue("id").jsonPrimitive.content
         assertEquals(404, server.delete("/v1/conversations/alice/messages/$secondId", bob).statusCode())
         assertEquals(404, server.put("/v1/conversations/bob/messages/$secondId", """{"content":"hijack"}""", bob).statusCode())
@@ -759,6 +841,36 @@ class ApiIntegrationTest {
     private fun messageOf(response: java.net.http.HttpResponse<String>, id: String): JsonObject =
         Json.parseToJsonElement(response.body()).jsonObject.getValue("messages").jsonArray
             .map { it.jsonObject }.single { it.getValue("id").jsonPrimitive.content == id }
+
+    // ── Phase 22: E2EE envelopes (ADR-0015) ─────────────────────────────────
+    // The server treats envelope blobs as opaque, so tests use synthetic
+    // base64 ciphertext; the real Signal-protocol crypto is proven by the
+    // libsignal round-trip test in the core module.
+
+    private fun b64(text: String) = java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))
+
+    /** Synthetic ciphertext envelope `"3:<base64>"` for [user] (the ADR-0015 wire shape). */
+    private fun envelope(user: String, seed: String = "ct") = "3:${b64("$seed:$user")}"
+
+    /** JSON map of synthetic envelopes, one per [users] entry. */
+    private fun envelopesJson(vararg users: String, seed: String = "ct"): String =
+        users.joinToString(",", "{", "}") { "\"$it\":\"${envelope(it, seed)}\"" }
+
+    /** Pairwise TEXT body: envelopes for the peer and the author (self-copy). */
+    private fun textBody(recipient: String, content: String, clientKey: String, sender: String, seed: String = "ct") =
+        """{"recipient":"$recipient","content":"$content","clientKey":"$clientKey","envelopes":${envelopesJson(recipient, sender, seed = seed)}}"""
+
+    /** Group TEXT body: one envelope per member, including the author. */
+    private fun groupTextBody(content: String, clientKey: String, members: List<String>, seed: String = "ct") =
+        """{"content":"$content","clientKey":"$clientKey","envelopes":${envelopesJson(*members.toTypedArray(), seed = seed)}}"""
+
+    /** Edit body carrying fresh envelopes for the peer and the author. */
+    private fun editBody(content: String, peer: String, author: String, seed: String = "edit") =
+        """{"content":"$content","envelopes":${envelopesJson(peer, author, seed = seed)}}"""
+
+    /** Sends an encrypted pairwise TEXT message; returns the raw response. */
+    private fun sendText(senderToken: String, sender: String, peer: String, content: String, clientKey: String, seed: String = "ct") =
+        server.post("/v1/conversations/$peer/messages", textBody(peer, content, clientKey, sender, seed), senderToken)
 
     @Test
     fun `group calls bridge one active call per group with invite fan out and end on last leave`() {
@@ -891,13 +1003,13 @@ class ApiIntegrationTest {
             .jsonObject.getValue("archived").jsonPrimitive.boolean)
 
         // Bob sends: alice's archived flag clears (WhatsApp behaviour).
-        assertEquals(201, server.post("/v1/conversations/alice/messages", """{"recipient":"alice","content":"wake up","clientKey":"ua-1"}""", bob).statusCode())
+        assertEquals(201, sendText(bob, "bob", "alice", "wake up", "ua-1").statusCode())
         assertFalse(Json.parseToJsonElement(server.get("/v1/conversations/bob/state", alice).body())
             .jsonObject.getValue("archived").jsonPrimitive.boolean)
 
         // Muting survives the un-archive: only the archived flag moves.
         assertEquals(200, server.put("/v1/conversations/bob/state", """{"muted":true,"archived":true}""", alice).statusCode())
-        assertEquals(201, server.post("/v1/conversations/alice/messages", """{"recipient":"alice","content":"ping","clientKey":"ua-2"}""", bob).statusCode())
+        assertEquals(201, sendText(bob, "bob", "alice", "ping", "ua-2").statusCode())
         val state = Json.parseToJsonElement(server.get("/v1/conversations/bob/state", alice).body()).jsonObject
         assertFalse(state.getValue("archived").jsonPrimitive.boolean)
         assertTrue(state.getValue("muted").jsonPrimitive.boolean)
@@ -954,7 +1066,7 @@ class ApiIntegrationTest {
         val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
         val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
         // A shared conversation so the typing signal has a peer to reach.
-        server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"ping","clientKey":"seed-1"}""", alice)
+        server.post("/v1/conversations/bob/messages", textBody("bob", "ping", "seed-1", "alice"), alice)
 
         val bobEvents = SocketListener()
         val bobSocket = connect(bob, bobEvents)

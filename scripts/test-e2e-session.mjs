@@ -100,6 +100,15 @@ const PNG = Buffer.from(
 const OGG = Buffer.alloc(2048, 7);
 const key = (p) => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+/** Builds a syntactically-valid wire envelope matching the server's
+ *  `^[23]:[A-Za-z0-9+/]+={0,2}$` / 16384-char cap (ADR-0015). The live stack
+ *  relays opaque envelopes; the client can't decrypt without libsignal, so the
+ *  test asserts structure (content blanked, envelopes present per recipient)
+ *  rather than plaintext round-trip. Mirrors the server test helper
+ *  `envelope(user, seed="ct")` = `"3:" + base64("$seed:$user")`. */
+const envelope = (user) => `3:${Buffer.from(`ct:${user}`).toString('base64')}`;
+const ENVELOPE_RE = /^[23]:[A-Za-z0-9+/]+={0,2}$/;
+
 // ── 1. auth + contacts ────────────────────────────────────────────────────
 {
   const me = await api(alice, '/v1/me');
@@ -129,16 +138,18 @@ await bobWs.opened;
 // ── 3. text message + fan-out + idempotency ───────────────────────────────
 let textId;
 {
-  const sent = await api(alice, '/v1/conversations/bob/messages', { method: 'POST', body: JSON.stringify({ recipient: 'bob', content: 'hello bob, e2e here', clientKey: key('t1') }) });
+  const sent = await api(alice, '/v1/conversations/bob/messages', { method: 'POST', body: JSON.stringify({ recipient: 'bob', content: '', clientKey: key('t1'), envelopes: { bob: envelope('bob'), alice: envelope('alice') } }) });
   assert.equal(sent.status, 201, sent.raw);
   textId = sent.body.id;
   assert.equal(sent.body.sender, 'alice');
-  assert.equal(sent.body.content, 'hello bob, e2e here');
-  ok('POST pairwise text message returns 201 with derived sender');
+  assert.equal(sent.body.content, '', 'content is blanked when envelopes are present');
+  ok('POST pairwise E2EE text returns 201 with blanked content and per-recipient envelopes');
   const frame = await bobWs.next('new-message', (f) => f.payload.id === textId);
-  assert.equal(frame.payload.content, 'hello bob, e2e here');
+  assert.equal(frame.payload.content, '', 'framed content is blanked');
   assert.equal(frame.payload.sender, 'alice');
-  ok('bob receives the new-message WS frame with full payload');
+  assert.equal(frame.payload.encrypted, true, 'frame is marked encrypted');
+  assert.ok(ENVELOPE_RE.test(frame.payload.envelope || ''), 'frame carries a well-formed envelope');
+  ok('bob receives the E2EE new-message WS frame (blanked content + envelope)');
   const again = await api(alice, '/v1/conversations/bob/messages', { method: 'POST', body: JSON.stringify({ recipient: 'bob', content: 'hello bob, e2e here', clientKey: sent.body.clientKey }) });
   assert.equal(again.status, 201);
   assert.equal(again.body.id, textId);
@@ -189,12 +200,13 @@ let replyId;
   assert.equal(replyFrame.payload.replyToId, textId);
   ok('reply carries replyToId end to end (send + WS frame)');
 
-  const edit = await api(alice, `/v1/conversations/bob/messages/${textId}`, { method: 'PUT', body: JSON.stringify({ content: 'hello bob, e2e here (edited)' }) });
+  const edit = await api(alice, `/v1/conversations/bob/messages/${textId}`, { method: 'PUT', body: JSON.stringify({ content: '', envelopes: { bob: envelope('bob'), alice: envelope('alice') } }) });
   assert.equal(edit.status, 200, edit.raw);
   assert.ok(edit.body.editedAt > 0);
   const edited = await bobWs.next('message-edited', (f) => f.payload.messageId === textId);
-  assert.equal(edited.payload.content, 'hello bob, e2e here (edited)');
-  ok('edit returns editedAt and fans out message-edited');
+  assert.equal(edited.payload.content, '', 'edited content is blanked');
+  assert.equal(edited.payload.encrypted, true, 'edited frame is marked encrypted');
+  ok('E2EE edit returns editedAt and fans out message-edited with envelopes');
 
   const del = await api(alice, `/v1/conversations/bob/messages/${textId}`, { method: 'DELETE' });
   assert.equal(del.status, 200, del.raw);
@@ -206,12 +218,11 @@ let replyId;
   ok('delete tombstones the row (empty content) and fans out message-deleted');
 }
 
-// ── 7. search + conversation state ────────────────────────────────────────
+// ── 7. search retired (server no longer indexes E2EE text) + conversation state ──
 {
-  const found = await api(alice, `/v1/conversations/bob/search?q=${encodeURIComponent('replying')}`);
-  assert.equal(found.status, 200);
-  assert.ok(found.body.messages.some((m) => m.id === replyId));
-  ok('server-side full-text search finds the reply');
+  const retired = await api(alice, `/v1/conversations/bob/search?q=${encodeURIComponent('replying')}`);
+  assert.equal(retired.status, 404, retired.raw);
+  ok('server-side search endpoint is retired (404); search is client-side over decrypted cache');
   const pin = await api(bob, '/v1/conversations/alice/state', { method: 'PUT', body: JSON.stringify({ pinned: true }) });
   assert.equal(pin.status, 200, pin.raw);
   const st = await api(bob, '/v1/conversations/alice/state');
