@@ -318,5 +318,20 @@ passphrases, completes calls, rejects bad credentials, checks SIP/TLS and
 HTTPS, disconnects an established call through revocation, and tests reset
 credentials. It does not verify Android microphone audio.
 
-Messages are not end-to-end encrypted. Android incoming calls still require
-a live app process; see [ADR-0006](adr/0006-background-call-policy.md).
+One-to-one `TEXT` messages are end-to-end encrypted (ADR-0015, Phase 22): the
+client encrypts per recipient with Signal's PQXDH + Double Ratchet
+(`libsignal-android`) and the server relays opaque ciphertext envelopes,
+storing `content` empty. The server never sees plaintext. Each device publishes
+its key bundle (`PUT /v1/keys`) at sign-in and tops up one-time prekeys when the
+server count drops below the floor; a failed publish retries on the next
+sign-in. Identity changes surface a safety-number warning in the chat until the
+user compares safety numbers and acknowledges. Edits on encrypted rows require
+fresh envelopes; a missing or unreachable session fails the send honestly
+instead of leaking plaintext. The server-side search endpoint is retired
+(`404`); search runs client-side over each device's cached, decrypted history.
+
+Calls stay PBX-relayed (liblinphone); reactions, replies and deletion remain
+plaintext metadata; media encryption is deferred to Phase 23.
+
+Android incoming calls still require a live app process; see
+[ADR-0006](adr/0006-background-call-policy.md).

@@ -36,6 +36,15 @@ The vector drawables named `ic_*.xml` in `app/src/main/res/drawable/` are
 derived from the Material Design icons, copyright Google LLC, distributed
 under the Apache License 2.0.
 
+### libsignal-android (E2EE, Phase 22)
+
+`org.signal:libsignal-android` (0.86.5) provides the Signal Protocol PQXDH
++ Double Ratchet implementation used for one-to-one text message encryption.
+It is copyright Signal Messenger, LLC and distributed under the GNU Affero
+General Public License, version 3. Because the app links it and the root
+`LICENSE` is AGPL-3.0-or-later, the app remains GPL-compatible (ADR-0002,
+ADR-0004). Full text: https://www.gnu.org/licenses/agpl-3.0.en.html
+
 ## Companion API (AGPL-3.0-or-later)
 
 - Spring Boot, Spring Framework, Spring Security, Thymeleaf, Kotlin,
