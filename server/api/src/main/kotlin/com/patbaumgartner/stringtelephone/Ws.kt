@@ -67,11 +67,16 @@ class WsHub(
      * group variant (Phase 19) to every member except the composer.
      */
     internal fun handleClientFrame(sender: String, frame: String) {
-        val envelope = runCatching { Json.decodeFromString<WsMessageDto>(frame) }.getOrNull() ?: return
+        val envelope = runCatching { Json.decodeFromString<WsClientEnvelopeDto>(frame) }.getOrNull() ?: return
         if (envelope.type != "typing") return
+        // Clients send the payload either as a JSON string (older pairwise
+        // form) or as an embedded object (what the app sends today); accept
+        // both and normalize to text for the inner decodes.
+        val payload = envelope.payload
+        val payloadText = if (payload is kotlinx.serialization.json.JsonPrimitive && payload.isString) payload.content else payload.toString()
         // Group variant first: its payload carries a groupId.
         val groupPayload = runCatching {
-            Json.decodeFromString<WsClientGroupTypingPayload>(envelope.payload)
+            Json.decodeFromString<WsClientGroupTypingPayload>(payloadText)
         }.getOrNull()
         if (groupPayload != null) {
             val members = groups.memberNames(groupPayload.groupId)
@@ -80,7 +85,7 @@ class WsHub(
             return
         }
         val typing = runCatching {
-            Json.decodeFromString<WsClientTypingPayload>(envelope.payload).typing
+            Json.decodeFromString<WsClientTypingPayload>(payloadText).typing
         }.getOrNull() ?: return
         val peers = recentPeers(sender)
         if (peers.isEmpty()) return
@@ -90,15 +95,19 @@ class WsHub(
     /**
      * Distinct conversation partners of [user] in both directions, most
      * recently active first. Used by the typing fan-out to reach everyone
-     * who shares a conversation with the sender.
+     * who shares a (pairwise) conversation with the sender. Group messages
+     * have no peer, so they are excluded; this is the only implementation —
+     * an earlier duplicate without the `AS latest` alias threw a bad-grammar
+     * error on every typing frame and killed the sender's socket (E2E
+     * 2026-11-08), so do not copy it around.
      */
     private fun recentPeers(user: String, limit: Int = 50): List<String> =
         jdbcClient.sql(
             "SELECT peer FROM (" +
-                "SELECT recipient AS peer, MAX(created_at) FROM messages WHERE sender = ? GROUP BY recipient " +
+                "SELECT recipient AS peer, MAX(created_at) AS latest FROM messages WHERE sender = ? AND group_id IS NULL GROUP BY recipient " +
                 "UNION ALL " +
-                "SELECT sender AS peer, MAX(created_at) FROM messages WHERE recipient = ? GROUP BY sender" +
-                ") recent WHERE peer <> ? GROUP BY peer ORDER BY MAX(recent.latest) DESC LIMIT ?",
+                "SELECT sender AS peer, MAX(created_at) AS latest FROM messages WHERE recipient = ? AND group_id IS NULL GROUP BY sender" +
+                ") recent WHERE peer <> ? AND peer <> '' GROUP BY peer ORDER BY MAX(latest) DESC LIMIT ?",
         ).params(user, user, user, limit).query(String::class.java).list().filterNotNull()
 
     fun isConnected(username: String): Boolean = sessions.isConnected(username)
