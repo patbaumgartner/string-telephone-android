@@ -150,16 +150,19 @@ let textId;
   assert.equal(frame.payload.encrypted, true, 'frame is marked encrypted');
   assert.ok(ENVELOPE_RE.test(frame.payload.envelope || ''), 'frame carries a well-formed envelope');
   ok('bob receives the E2EE new-message WS frame (blanked content + envelope)');
-  const again = await api(alice, '/v1/conversations/bob/messages', { method: 'POST', body: JSON.stringify({ recipient: 'bob', content: 'hello bob, e2e here', clientKey: sent.body.clientKey }) });
+  const again = await api(alice, '/v1/conversations/bob/messages', { method: 'POST', body: JSON.stringify({ recipient: 'bob', content: '', clientKey: sent.body.clientKey, envelopes: { bob: envelope('bob'), alice: envelope('alice') } }) });
   assert.equal(again.status, 201);
   assert.equal(again.body.id, textId);
-  ok('resend with the same clientKey is idempotent (same id)');
+  ok('resend with the same clientKey and envelopes is idempotent (same id)');
   const unknown = await api(alice, '/v1/conversations/nobody/messages', { method: 'POST', body: JSON.stringify({ recipient: 'nobody', content: 'x', clientKey: key('t2') }) });
   assert.equal(unknown.status, 404);
-  ok('unknown peer is 404');
+  ok('unknown peer is 404 (peer check precedes envelope validation)');
   const big = await api(alice, '/v1/conversations/bob/messages', { method: 'POST', body: JSON.stringify({ recipient: 'bob', content: 'x'.repeat(9000), clientKey: key('t3') }) });
-  assert.equal(big.status, 413);
-  ok('oversize content is 413');
+  assert.equal(big.status, 400, big.raw);
+  ok('plaintext TEXT without envelopes is rejected (400 envelopes required) — E2EE mandatory');
+  const malformed = await api(alice, '/v1/conversations/bob/messages', { method: 'POST', body: JSON.stringify({ recipient: 'bob', content: '', clientKey: key('t4'), envelopes: { bob: 'not-an-envelope', alice: envelope('alice') } }) });
+  assert.equal(malformed.status, 400, malformed.raw);
+  ok('malformed envelope is rejected (400)');
 }
 
 // ── 4. typing ─────────────────────────────────────────────────────────────
@@ -192,20 +195,22 @@ let replyId;
   assert.equal(frame.payload.authorUsername, 'bob');
   ok('reaction is stored and fanned out with the author');
 
-  const reply = await api(bob, '/v1/conversations/alice/messages', { method: 'POST', body: JSON.stringify({ recipient: 'alice', content: 'replying to you', clientKey: key('r1'), replyToId: textId }) });
-  assert.equal(reply.status, 201);
+  const reply = await api(bob, '/v1/conversations/alice/messages', { method: 'POST', body: JSON.stringify({ recipient: 'alice', content: '', clientKey: key('r1'), replyToId: textId, envelopes: { alice: envelope('alice'), bob: envelope('bob') } }) });
+  assert.equal(reply.status, 201, reply.raw);
   replyId = reply.body.id;
   assert.equal(reply.body.replyToId, textId);
   const replyFrame = await aliceWs.next('new-message', (f) => f.payload.id === replyId);
   assert.equal(replyFrame.payload.replyToId, textId);
-  ok('reply carries replyToId end to end (send + WS frame)');
+  assert.equal(replyFrame.payload.content, '', 'reply content is blanked');
+  assert.equal(replyFrame.payload.encrypted, true, 'reply frame is marked encrypted');
+  ok('E2EE reply carries replyToId end to end (send + WS frame)');
 
   const edit = await api(alice, `/v1/conversations/bob/messages/${textId}`, { method: 'PUT', body: JSON.stringify({ content: '', envelopes: { bob: envelope('bob'), alice: envelope('alice') } }) });
   assert.equal(edit.status, 200, edit.raw);
   assert.ok(edit.body.editedAt > 0);
   const edited = await bobWs.next('message-edited', (f) => f.payload.messageId === textId);
   assert.equal(edited.payload.content, '', 'edited content is blanked');
-  assert.equal(edited.payload.encrypted, true, 'edited frame is marked encrypted');
+  assert.ok(ENVELOPE_RE.test(edited.payload.envelope || ''), 'edited frame carries a well-formed envelope');
   ok('E2EE edit returns editedAt and fans out message-edited with envelopes');
 
   const del = await api(alice, `/v1/conversations/bob/messages/${textId}`, { method: 'DELETE' });
@@ -265,12 +270,13 @@ let replyId;
   const groupId = created.body.id;
   ok('group created with bob as member');
 
-  const gText = await api(alice, `/v1/groups/${groupId}/messages`, { method: 'POST', body: JSON.stringify({ content: 'hi group', clientKey: key('g1') }) });
+  const gText = await api(alice, `/v1/groups/${groupId}/messages`, { method: 'POST', body: JSON.stringify({ content: '', clientKey: key('g1'), envelopes: { alice: envelope('alice'), bob: envelope('bob') } }) });
   assert.equal(gText.status, 201, gText.raw);
   assert.equal(gText.body.groupId, groupId);
   const gFrame = await bobWs.next('group-message', (f) => f.payload.id === gText.body.id);
-  assert.equal(gFrame.payload.content, 'hi group');
-  ok('group text message fans out as group-message to members');
+  assert.equal(gFrame.payload.content, '', 'group text content is blanked');
+  assert.equal(gFrame.payload.encrypted, true, 'group text frame is marked encrypted');
+  ok('E2EE group text fans out as group-message to members');
 
   const gImg = await upload(alice, { groupId }, 'g.png', 'image/png', PNG);
   assert.equal(gImg.status, 201);
