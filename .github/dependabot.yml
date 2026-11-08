@@ -35,6 +35,10 @@ updates:
     github-actions:
       patterns:
       - '*'
+    multi-step-actions:
+      patterns:
+      - github/codeql-action/*
+      - gradle/actions/*
 - package-ecosystem: docker
   directories:
   - /server/api
@@ -45,8 +49,3 @@ updates:
     time: 06:30
     timezone: Europe/Zurich
   open-pull-requests-limit: 5
-groups:
-  multi-step-actions:
-    patterns:
-    - github/codeql-action/*
-    - gradle/actions/*
