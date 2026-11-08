@@ -219,6 +219,18 @@ No public release has been published yet.
 
 ### Fixed
 
+- Typing indicators never reached the peer: the app sends the WebSocket
+  typing frame with the payload as an embedded JSON object, but the server
+  only decoded a JSON string and silently dropped the frame — and the
+  peer-lookup query behind the fan-out was invalid SQL (`MAX(created_at)`
+  without an alias), so every typing frame actually threw and closed the
+  sender's socket. The server now accepts both payload forms, the query is
+  fixed, an in-process regression test covers both forms, and a new live
+  two-client end-to-end script (`scripts/test-e2e-session.mjs`, 29 checks
+  over real HTTP + WebSocket against the Docker stack) proves the whole app
+  protocol: auth, contacts, presence, messaging, typing, read receipts,
+  reactions, replies, edits, deletions, search, pin state, image and voice
+  media, groups, group calls and offline presence (E2E 2026-11-08).
 - A deployed API never received its media-store settings: the Compose `api`
   service passed no `ST_MEDIA_*` variables, so despite `server/.env.example`
   enabling Garage the running API silently used the in-memory store and lost

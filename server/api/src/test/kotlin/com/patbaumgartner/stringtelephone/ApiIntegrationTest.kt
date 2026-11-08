@@ -943,6 +943,38 @@ class ApiIntegrationTest {
         assertTrue(html.body().contains(TEST_PASSPHRASE))
         assertFalse(server.get("/admin/").body().contains(TEST_PASSPHRASE))
     }
+
+    @Test
+    fun `typing client frames fan out whether payload is an object or a JSON string`() {
+        // Regression (E2E 2026-11-08): the app sends the payload as an embedded
+        // object (`{"type":"typing","payload":{"typing":true}}`); the server
+        // once required a string and silently dropped the frame. Both forms
+        // must work.
+        server.login()
+        val alice = server.create("alice", "Alice").getValue("apiToken").jsonPrimitive.content
+        val bob = server.create("bob", "Bob").getValue("apiToken").jsonPrimitive.content
+        // A shared conversation so the typing signal has a peer to reach.
+        server.post("/v1/conversations/bob/messages", """{"recipient":"bob","content":"ping","clientKey":"seed-1"}""", alice)
+
+        val bobEvents = SocketListener()
+        val bobSocket = connect(bob, bobEvents)
+        val aliceSocket = connect(alice, SocketListener())
+
+        // Object form — exactly what RealtimeClient.sendTyping emits.
+        aliceSocket.sendText("""{"type":"typing","payload":{"typing":true}}""", true).join()
+        val objectForm = Json.parseToJsonElement(bobEvents.next("typing").getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals("alice", objectForm.getValue("peer").jsonPrimitive.content)
+        assertEquals(true, objectForm.getValue("typing").jsonPrimitive.boolean)
+
+        // String form — the documented pairwise variant.
+        aliceSocket.sendText("""{"type":"typing","payload":"{\"typing\":false}"}""", true).join()
+        val stringForm = Json.parseToJsonElement(bobEvents.next("typing").getValue("payload").jsonPrimitive.content).jsonObject
+        assertEquals("alice", stringForm.getValue("peer").jsonPrimitive.content)
+        assertEquals(false, stringForm.getValue("typing").jsonPrimitive.boolean)
+
+        bobSocket.abort()
+        aliceSocket.abort()
+    }
 }
 
 class SocketListener : WebSocket.Listener {

@@ -664,11 +664,14 @@ Invalid credentials close with `1008` immediately after upgrade.
   a reader device that did not perform the mark applies it idempotently —
   clearing its unread badge and cancelling that conversation's notification.
   Applying a receipt twice is harmless.
-- `{"type":"typing","payload":"<JSON string>"}` is an ephemeral fan-out
+- `{"type":"typing","payload":...}` is an ephemeral fan-out
   (Phase 7): the client sends `{"typing":true}` or `{"typing":false}` over
   the socket; the server relays it to the sender's conversation partners as
   `{"peer":"bob","typing":true}`. Nothing is persisted. A peer with no
   recent message in either direction is not reachable via this signal.
+  The `payload` may be an embedded JSON **object** (what the app sends) or a
+  JSON **string** — the server accepts both and normalizes (E2E 2026-11-08;
+  earlier builds silently dropped the object form).
   The same client frame may carry a group variant
   (Phase 19): `{"type":"typing","payload":{"groupId":"grp-uuid",
   "typing":true}}` relays as `{"peer":"","typing":true,"groupId":"grp-uuid"}`

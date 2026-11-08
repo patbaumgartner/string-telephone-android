@@ -133,6 +133,15 @@ data class ErrorDto(val error: String)
 @kotlinx.serialization.Serializable
 data class WsMessageDto(val type: String, val payload: String)
 
+/**
+ * Inbound client frame on `/v1/ws`. Unlike the outbound [WsMessageDto], the
+ * payload is a raw [kotlinx.serialization.json.JsonElement] because clients
+ * send it either as an embedded object (what the app emits) or as a JSON
+ * string; [WsHub.handleClientFrame] normalizes both forms (E2E 2026-11-08).
+ */
+@kotlinx.serialization.Serializable
+data class WsClientEnvelopeDto(val type: String, val payload: kotlinx.serialization.json.JsonElement)
+
 /** Presence change pushed on /v1/ws as `{"type":"presence"}`. */
 @kotlinx.serialization.Serializable
 data class WsPresenceEvent(

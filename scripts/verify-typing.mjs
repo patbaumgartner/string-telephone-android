@@ -95,6 +95,9 @@ check('Ws.kt — handleClientFrame internal method',ws.includes('internal fun ha
 check('Ws.kt — typing branch in when',           ws.includes('"typing"'));
 check('Ws.kt — typing signal sent to peers',     ws.includes('WsFrames.typing(sender'));
 check('Ws.kt — recentPeers query',               ws.includes('recentPeers'));
+check('Ws.kt — recentPeers aliases the MAX column (AS latest); without it the SQL throws bad-grammar and kills the socket (E2E 2026-11-08)',
+      /MAX\(created_at\) AS latest/.test(ws));
+check('Ws.kt — recentPeers excludes group messages', ws.includes('group_id IS NULL'));
 check('Ws.kt — JdbcClient injected into WsHub',  ws.includes('private val jdbcClient: JdbcClient'));
 check('WsFrames — typing factory',               wsFrames.includes('fun typing(peer: String'));
 check('WsFrames — WsTypingEvent in typing',      wsFrames.includes('WsTypingEvent(peer'));
