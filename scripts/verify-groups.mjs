@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Group-chat verification (Phase 19, ADR-0012): membership in its own
- * tables, group messages addressed by group id, per-member read receipts,
- * and the group surfaces on REST, websocket and app. Exits nonzero with a
- * reason per failure; prints "groups verification passed" only after every
- * assertion passes.
+ * Group-chat verification (Phase 19, ADR-0012; updated for Phase 22 /
+ * ADR-0015): membership in its own tables, group messages addressed by
+ * group id, per-member read receipts, per-member ciphertext envelopes on
+ * send/fan-out/receive, and the group surfaces on REST, websocket and app.
+ * Exits nonzero with a reason per failure; prints "groups verification
+ * passed" only after every assertion passes.
  *
  * Checks:
  *  - Server: V14 tables + partial idempotency indexes, Groups store
@@ -111,7 +112,8 @@ check('Api — rename ADMIN only', api.includes('if (!group.isAdmin(me.username)
 check('Api — add member ADMIN only, unknown user 404', api.includes('if (!group.isAdmin(me.username)) throw ApiFailure(HttpStatus.FORBIDDEN, "only the admin may add members")') && api.includes('if (users.find(body.username)?.active != true) throw ApiFailure(HttpStatus.NOT_FOUND, "no such user")'));
 check('Api — remove member: admin removes others / member leaves', api.includes('groups.removeMember(groupId, me.username, username)') && api.includes('"not allowed to remove this member"'));
 check('Api — disband ADMIN only', api.includes('if (!group.isAdmin(me.username)) throw ApiFailure(HttpStatus.FORBIDDEN, "only the admin may disband")') && api.includes('groups.disband(groupId)'));
-check('Api — group send derives authorship, 413 on empty/oversize', api.includes('fun sendGroupMessage') && api.includes('HttpStatus.CONTENT_TOO_LARGE') && api.includes('messages.insertGroupText(me.username, groupId, body.content, body.clientKey, replyToId)'));
+check('Api — group TEXT send (Phase 22) requires an envelope for every member, malformed 400', api.includes('fun sendGroupMessage') && api.includes('"envelopes required for every group member"') && api.includes('envelopes.keys != group.memberNames().toSet()') && api.includes('messages.insertGroupText(me.username, groupId, body.content, body.clientKey, replyToId, envelopes)') && api.includes('"malformed envelope"'));
+check('Api — group send fans out and returns the record with the author own envelope', api.includes('hub.broadcastGroupMessage(stored, group.memberNames())') && api.includes('messageDto(stored, envelope = messages.envelopeFor(stored.id, me.username))'));
 check('Api — group send validates the reply target belongs to the group', api.includes('if (replyMsg.groupId != groupId) throw ApiFailure(HttpStatus.BAD_REQUEST, "reply target not in this group")'));
 check('Api — group history paginates with read counts', api.includes('fun groupMessages') && api.includes('messages.groupReadCounts(messageIds)') && api.includes('GroupMessagesPageDto('));
 check('Api — group read marks and fans out', api.includes('fun markGroupRead') && api.includes('messages.markGroupRead(groupId, me.username, upTo)') && api.includes('hub.broadcastGroupRead(groupId, me.username, group.memberNames(), mark)'));
@@ -124,16 +126,17 @@ check('Api — security matcher covers /v1/groups/**', security.includes('"/v1/g
 
 // ── Server: store + fan-out ──────────────────────────────────────────────────
 
-check('Messages — group insert keeps recipient empty, binds group id', messages.includes("INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, reply_to, group_id)") && messages.includes("VALUES(:id, :sender, '', :content, :createdAt, :clientKey, 'TEXT', :replyTo, :groupId)"));
+check('Messages — group insert keeps recipient empty, binds group id + encrypted flag', messages.includes('INSERT INTO messages(id, sender, recipient, content, created_at, client_key, type, reply_to, group_id, encrypted)') && messages.includes("VALUES(:id, :sender, '', :content, :createdAt, :clientKey, 'TEXT', :replyTo, :groupId, :encrypted) ON CONFLICT DO NOTHING"));
+check('Messages — encrypted group row blanks content and stores one envelope per member in the same tx', messages.includes('.param("content", if (encrypted) "" else content)') && messages.includes('INSERT INTO message_envelopes(message_id, recipient, envelope) VALUES(:messageId, :recipient, :envelope)'));
 check('Messages — group idempotency scope (sender, group, clientKey)', messages.includes('WHERE sender = ? AND group_id = ? AND client_key = ?'));
 check('Messages — markGroupRead never marks own messages', messages.includes('WHERE group_id = ? AND sender <> ? AND deleted_at IS NULL'));
 check('Messages — groupReadCounts per message', messages.includes('SELECT message_id, COUNT(*) AS readers FROM group_message_reads'));
 check('Reactions — group membership enforced, 404 via exception', reactions.includes('class GroupMessageAccessException') && reactions.includes('if (!groups.isMember(groupId, author)) throw GroupMessageAccessException()'));
-check('WsHub — group message fan-out to members', ws.includes('fun broadcastGroupMessage') && ws.includes('sessions.sendTo(members.toSet(), WsFrames.groupNewMessage(message))'));
+check('WsHub — group message fan-out to members, each with their own envelope (Phase 22)', ws.includes('fun broadcastGroupMessage(message: MessageRecord, members: List<String>)') && ws.includes('for (member in members.toSet())') && ws.includes('WsFrames.groupNewMessage(message, envelopeFor(message.id, member))'));
 check('WsHub — group read fan-out carries the reader', ws.includes('fun broadcastGroupRead(groupId: String, reader: String, members: List<String>, mark: ReadMark)'));
 check('WsHub — group reaction/deletion fan-outs', ws.includes('WsFrames.groupReaction(message, author, emoji, added)') && ws.includes('WsFrames.groupMessageDeleted(message)'));
 check('WsHub — group typing excludes the composer', ws.includes('sessions.sendTo((members.toSet() - from), WsFrames.groupTyping(groupId, from, typing))'));
-check('WsFrames — group frames and reader field', wsFrames.includes('"group-message"') && wsFrames.includes('"group-message-read"') && wsFrames.includes('WsGroupMessageReadEvent(groupId, reader, mark.messageIds, mark.readAt)') && wsFrames.includes('"group-reaction"') && wsFrames.includes('"group-deleted"') && wsFrames.includes('WsTypingEvent(from, typing, groupId)'));
+check('WsFrames — group frames and reader field', wsFrames.includes('"group-message"') && wsFrames.includes('fun groupNewMessage(message: MessageRecord, envelope: String? = null)') && wsFrames.includes('"group-message-read"') && wsFrames.includes('WsGroupMessageReadEvent(groupId, reader, mark.messageIds, mark.readAt)') && wsFrames.includes('"group-reaction"') && wsFrames.includes('"group-deleted"') && wsFrames.includes('WsTypingEvent(from, typing, groupId)'));
 check('Main — send-path fan-out routes group rows by membership', main.includes('if (stored.groupId == null)') && main.includes('hub.broadcastGroupMessage(stored, groups.memberNames(stored.groupId))'));
 check('Main — incoming group message un-archives for every member but the author', main.includes('for (member in groups.memberNames(stored.groupId))') && main.includes('if (member != stored.sender) conversationStates.unarchive(member, stored.sender)'));
 check('Main — groups bean wired', main.includes('fun groups(jdbcClient: JdbcClient) = Groups(jdbcClient)'));
@@ -156,7 +159,7 @@ check('ApiClient — non-member 404 maps to Protocol error', apiClient.includes(
 check('Repository — group state flows', repository.includes('private val _groups = MutableStateFlow<List<GroupDto>>(emptyList())') && repository.includes('val groups: StateFlow<List<GroupDto>> = _groups.asStateFlow()') && repository.includes('val groupTyping: StateFlow<Map<String, Set<String>>> = _groupTyping.asStateFlow()'));
 check('Repository — realtime group events dispatched', repository.includes('is RealtimeEvent.GroupMessage -> onGroupMessage(event)') && repository.includes('is RealtimeEvent.GroupMessageRead -> onGroupMessageRead(event)') && repository.includes('is RealtimeEvent.GroupMessageReaction -> onGroupMessageReaction(event)') && repository.includes('is RealtimeEvent.GroupMessageDeleted -> onGroupMessageDeleted(event)') && repository.includes('is RealtimeEvent.GroupTyping -> onGroupTyping(event)'));
 check('Repository — group events ignore non-member groups', repository.includes('if (!groups.value.any { it.id == event.groupId }) return'));
-check('Repository — incoming group message emits with sender + groupId', repository.includes('_incoming.tryEmit(IncomingMessage(key, event.content, event.createdAtEpochMs, sender = event.sender, groupId = event.groupId))'));
+check('Repository — incoming group message decrypts the own envelope, then emits with sender + groupId', repository.includes('decryptContent(event.sender, event.content, event.encrypted, event.envelope)') && repository.includes('_incoming.tryEmit(IncomingMessage(key, content, event.createdAtEpochMs, sender = event.sender, groupId = event.groupId))'));
 check('Repository — group read converges via applyGroupRead', repository.includes('chatCache.applyGroupRead(event.groupId, event.reader, event.messageIds.toSet(), event.readAtEpochMs)'));
 check('Repository — refreshGroups reloads from the server', repository.includes('fun refreshGroups()') && repository.includes('val list = withContext(Dispatchers.IO) { client.groups() }'));
 check('Repository — createGroup prepends and opens', repository.includes('fun createGroup(name: String, members: List<String>, onResult: (GroupDto?) -> Unit)') && repository.includes('_groups.value = listOf(created) + _groups.value'));

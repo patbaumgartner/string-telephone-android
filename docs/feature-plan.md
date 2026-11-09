@@ -729,6 +729,14 @@ protocol.md. Tests: server 43 (+2 integration: scope/no-match/blank/404 and
 cursor pagination), app 190 (+3 `ChatTimelineIndexTest`). Docs: protocol
 search section, feature-plan status, CHANGELOG.
 
+**Retired by Phase 22 (ADR-0015):** the server cannot full-text search
+ciphertext, so `Messages.search`, the `GET /v1/conversations/{peer}/search`
+endpoint (now `404`, covered by an integration test) and `ApiClient.search`
+were removed. The V11 `search_text` column stays per the forward-only
+migration rule but is no longer queried. In-chat search is client-side over
+the decrypted local cache (`StringTelephoneRepository.search`); the chat
+header search UI, results list and scroll-to-result are unchanged.
+
 ---
 
 ### Phase 17 — Message editing
@@ -1020,7 +1028,10 @@ Groups fan out to every member including the author. Edits on encrypted rows
 require fresh envelopes; a missing or failed session fails the send honestly
 (markFailed / edit rollback) instead of leaking plaintext. Identity changes
 surface a safety-number warning banner until the user compares safety numbers
-and acknowledges. The server-side search endpoint is retired (404); search is
+and acknowledges ("I verified it"), which accepts the peer's currently
+published identity key — until then libsignal refuses new handshakes for that
+peer, so sends fail honestly and incoming messages render the placeholder. The
+server-side search endpoint is retired (404); search is
 client-side over each device's cached, decrypted history. Calls stay PBX-relayed
 (liblinphone), reactions/replies/deletion stay plaintext metadata, and media
 encryption is deferred to Phase 23.
@@ -1028,7 +1039,7 @@ encryption is deferred to Phase 23.
 - **Keys**: `Keys` directory (`publish`/`peerBundle`/`ownBundle`/`consumeOneTimePreKey`) exposed through `Api.kt` `/v1/keys*` endpoints; `V17` migration creates `message_envelopes`, `identity_keys`, `signed_prekeys`, `one_time_prekeys`, `kyber_prekeys` plus `messages.encrypted`.
 - **Repository**: `encryptEnvelopes`/`decryptContent`/`decryptResult`/`ensureSession`/`publishE2eeKeys`/`e2eeSafetyNumber`/`acknowledgeIdentityChange`; `identityWarnings: StateFlow<Set<String>>`; honest failure on unreachable sessions; client-side `search` over decrypted cache; `UNDECRYPTABLE_CONTENT` placeholder.
 - **App**: `LibsignalEngine` over `SecureKeyValueStore` (EncryptedSharedPreferences), wired via `AppContainer`; `SessionController` publishes/tops up keys on sign-in; `AppViewModel` exposes `e2eeActive()`/`identityWarnings()`/`e2eeSafetyNumber()`/`acknowledgeIdentityChange()`; `ChatScreen` shows a lock icon, an identity-warning banner, and a safety-number dialog.
-- **Tests**: `:core:test` `LibsignalE2eeTest` PQXDH/Double-Ratchet round trips (58 total), new `StringTelephoneRepositoryE2eeTest` (7 checks), `scripts/verify-e2ee.mjs` oracle appended to `run-session-verify.sh`, `scripts/test-e2e-session.mjs` drives envelopes and the retired search endpoint.
+- **Tests**: `:core:test` `LibsignalE2eeTest` PQXDH/Double-Ratchet round trips incl. the replaced-identity handshake refusal (59 total), new `StringTelephoneRepositoryE2eeTest` (8 checks incl. changed-identity-on-send fails honestly and still warns), `scripts/verify-e2ee.mjs` oracle appended to `run-session-verify.sh`, `scripts/test-e2e-session.mjs` drives envelopes and the retired search endpoint.
 
 ---
 

@@ -400,26 +400,16 @@ Pagination uses both timestamp and message ID so records sharing a timestamp
 are not skipped. `nextCursor` is null for an empty page; otherwise it identifies
 the last record. Clients deduplicate by message ID.
 
-### `GET /v1/conversations/{peer}/search?q=`
+### `GET /v1/conversations/{peer}/search?q=` — retired (Phase 22, ADR-0015)
 
-Full-text search within the authenticated pair's conversation (Phase 16),
-newest first. The response shape is identical to the history endpoint
-(`MessagesPageDto` with `nextCursor`), so clients reuse the same cursor
-codec. `limit` behaves the same (default 50, clamped to 1-200); a blank `q`
-is a `400`; an unknown peer is `404`; a caller outside the pair finds
-nothing (the scoping predicate is the same as history's).
+The Phase 16 server-side full-text search endpoint is retired: with E2EE the
+server stores only ciphertext (`content = ''` on encrypted rows), so this
+route no longer exists and answers `404` (proven by `ApiIntegrationTest`).
+The V11 `search_text` column stays per the forward-only migration rule but is
+no longer queried. In-chat search is client-side over each device's cached,
+decrypted history (see the E2EE section below).
 
-Matching is case-insensitive full-text over the message content via a
-generated `search_text` tsvector (V11, PostgreSQL `simple` configuration:
-case-folded, whitespace-normalised, diacritics kept as typed). The query is
-parsed with `websearch_to_tsquery`, so quoted phrases, `OR` and
-minus-exclusions work and a malformed query yields no matches rather than an
-error. Tombstoned messages have no content and never match. A missing `q`
-returns `400`.
-
-```
-GET /v1/conversations/bob/search?q=pineapple
-```
+### `GET /v1/conversations/{peer}/messages`
 
 Returns conversation history in both directions, newest first.
 `limit` defaults to 50 and is clamped to 1-200. Optional `cursor` is the
@@ -785,7 +775,7 @@ Double Ratchet. The server is a ciphertext relay and never sees plaintext:
 - `PUT /v1/keys` publishes the caller's key bundle (identity, signed prekey,
   Kyber last-resort prekey, one-time prekeys); `GET /v1/keys/me` returns the
   caller's own bundle; `GET /v1/keys/{peer}` returns a peer's bundle (null if
-  never published); `DELETE /v1/keys/{peer}/one-time` atomically consumes one
+  never published); `GET /v1/keys/{peer}/one-time` atomically consumes one
   one-time prekey (404 when none remain). The `V17` migration creates the key
   directory tables and `message_envelopes`.
 - An encrypted TEXT is stored with `content = ''` and one envelope per
@@ -799,9 +789,13 @@ Double Ratchet. The server is a ciphertext relay and never sees plaintext:
   cached message because the wire `peer` is always the recipient).
 - A missing or failed session fails the send honestly instead of leaking
   plaintext; undecryptable envelopes render a placeholder. Identity changes
-  surface a safety-number warning until acknowledged. The server-side search
-  endpoint is retired (`404`); search is client-side over each device's cached,
-  decrypted history.
+  surface a safety-number warning until acknowledged: until the user verifies
+  the new key out of band, libsignal refuses new handshakes and decrypts for
+  that peer, so sends fail honestly and incoming messages render the
+  placeholder. Acknowledging the banner ("I verified it") accepts the peer's
+  currently published identity key, so new sessions process again. The
+  server-side search endpoint is retired (`404`); search is client-side over
+  each device's cached, decrypted history.
 - Calls stay PBX-relayed (liblinphone); reactions/replies/deletion stay
   plaintext metadata; media encryption is deferred to Phase 23.
 

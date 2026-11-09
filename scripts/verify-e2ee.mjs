@@ -49,6 +49,7 @@ const keyValueStore= read(app + 'security/KeyValueStore.kt');
 const libsignalEngine = read(app + 'e2ee/LibsignalEngine.kt');
 const strings      = read('app/src/main/res/values/strings.xml');
 const e2eeTest     = read(appTest + 'data/StringTelephoneRepositoryE2eeTest.kt');
+const coreE2eeTest = read('core/src/test/kotlin/com/patbaumgartner/android/stringtelephone/core/e2ee/LibsignalE2eeTest.kt');
 const protocol     = read('docs/protocol.md');
 const adr          = read('docs/adr/0015-e2ee-signal-protocol.md');
 const plan         = read('docs/feature-plan.md');
@@ -87,6 +88,8 @@ check('Repository — ensureSession establishes PQXDH session on first use', rep
 check('Repository — decryptContent/decryptResult with UNDECRYPTABLE_CONTENT fallback', repository.includes('decryptContent') && repository.includes('decryptResult') && repository.includes('UNDECRYPTABLE_CONTENT'));
 check('Repository — honest failure: encryptEnvelopes null -> markFailed / rollback', repository.includes('markFailed') && repository.includes('applyEdited'));
 check('Repository — identityWarnings StateFlow + acknowledgeIdentityChange', repository.includes('_identityWarnings') && repository.includes('identityWarnings: StateFlow') && repository.includes('acknowledgeIdentityChange'));
+check('Repository — identity change warns even when libsignal refuses the handshake', repository.includes('if (changed) _identityWarnings.update'));
+check('Repository — "I verified it" accepts the currently published identity key', repository.includes('engine.trustIdentity(peer, bundle.identityKey)'));
 check('Repository — e2eeSafetyNumber + publishE2eeKeys top-up (batch 50 / floor 10)', repository.includes('e2eeSafetyNumber') && repository.includes('publishE2eeKeys') && repository.includes('ONE_TIME_PREKEY_BATCH') && repository.includes('ONE_TIME_PREKEY_FLOOR'));
 check('Repository — client-side search over decrypted cache, tombstones excluded', repository.includes('chatCache.history(peer)') && repository.includes('!it.deleted') && repository.includes('contains(query, ignoreCase = true)'));
 check('ChatCache — findByServerId for edit author derivation', chatCache.includes('findByServerId'));
@@ -111,6 +114,8 @@ check('strings.xml — E2EE strings (lock, safety number, identity changed)', st
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 check('App test — encrypts (envelopes peer+me, content blanked), fail-honest, decrypt, undecryptable, identity warn/ack, client-side search', e2eeTest.includes('sending encrypts') && e2eeTest.includes('fails honestly') && e2eeTest.includes('decrypts into cache') && e2eeTest.includes('placeholder, never garbage') && e2eeTest.includes('warning and acknowledge clears it') && e2eeTest.includes('client-side over decrypted cache'));
+check('App test — changed identity on send fails honestly and still warns', e2eeTest.includes('identity changed fails honestly and still raises the warning'));
+check('Core test — replaced identity blocks the handshake until the new key is accepted', coreE2eeTest.includes('a replaced identity key blocks a new handshake') && coreE2eeTest.includes('UntrustedIdentityException') && coreE2eeTest.includes('saveIdentity'));
 
 // ── Docs ───────────────────────────────────────────────────────────────────────
 

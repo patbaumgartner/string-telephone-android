@@ -6,16 +6,20 @@
  * failure; prints "edit verification passed" only after every assertion
  * passes.
  *
- * Checks:
+ * Checks (Phase 17, updated for Phase 22 / ADR-0015):
  *  - Server: V12 column, Messages.edit (author-only, receipt-preserving,
- *    tombstone-refusing), PUT endpoint (403/404/409/400), message-edited
- *    fan-out frame.
- *  - Core: MessageDto/WsMessageEditedDto/RealtimeEvent.MessageEdited and
- *    the parse branch.
+ *    tombstone-refusing; encrypted rows blank the content and upsert the new
+ *    envelopes in one transaction), PUT endpoint (403/404/409/400 plus a
+ *    400 when an encrypted row lacks envelopes), personalized
+ *    message-edited fan-out frame.
+ *  - Core: MessageDto/WsMessageEditedDto/RealtimeEvent.MessageEdited carry an
+ *    optional envelope, EditMessageRequest carries content + envelopes, the
+ *    parse branch.
  *  - App: ChatMessage editedAtEpochMs/canEdit, ChatCache.applyEdited,
- *    ApiClient.editMessage, repository edit + realtime handler, ViewModel
- *    edit mode (start/cancel/send-applies), EditMessageBanner, Edit sheet
- *    action, "edited" hint in the bubble.
+ *    ApiClient.editMessage (blanks content when envelopes are given),
+ *    repository edit (encrypts fresh envelopes, rolls back on failure) +
+ *    realtime handler (decrypts this device's envelope first), ViewModel
+ *    edit mode, EditMessageBanner, Edit sheet action, "edited" hint.
  *  - Tests: integration (author-only/sync, tombstone 409, read-preserved),
  *    cache applyEdited, realtime edit frame, parser branch.
  *  - Docs: protocol.md contract, feature-plan status, changelog entry,
@@ -84,37 +88,40 @@ function check(name, condition, hint) {
 check('V12 — edited_at BIGINT column', migration.includes('ALTER TABLE messages ADD COLUMN edited_at BIGINT'));
 check('V12 — documents the tombstone precedence', migration.includes('deletes take precedence'));
 check('MessageRecord — editedAt field and SELECT column', messages.includes('val editedAt: Long? = null') && messages.includes('waveform, edited_at'));
-check('Messages.edit — author-guarded, tombstone-refusing update', messages.includes('WHERE id = ? AND sender = ? AND deleted_at IS NULL') && messages.includes('fun edit(messageId: String, author: String, content: String)'));
+check('Messages.edit — signature takes encrypted flag + envelopes (Phase 22)', messages.includes('fun edit(messageId: String, author: String, content: String, encrypted: Boolean, envelopes: Map<String, String>? = null)'));
+check('Messages.edit — author-guarded, tombstone-refusing in both branches', (messages.match(/WHERE id = \? AND sender = \? AND deleted_at IS NULL/g) ?? []).length === 2);
+check('Messages.edit — encrypted branch blanks content and upserts envelopes in one tx', messages.includes("UPDATE messages SET content = '', edited_at = ? ") && messages.includes('INSERT INTO message_envelopes(message_id, recipient, envelope) VALUES(?, ?, ?)') && messages.includes('ON CONFLICT (message_id, recipient) DO UPDATE SET envelope = EXCLUDED.envelope'));
 check('Messages.edit — stamps edited_at', messages.includes('SET content = ?, edited_at = ?'));
 check('Messages.edit — preserves the read receipt', !messages.includes('read_at = NULL'));
 check('Messages.edit — same content caps as sends', /require\(bytes\.size <= MAX_CONTENT_BYTES\)/.test(messages.split('fun edit')[1] ?? ''));
 check('Api — PUT endpoint with author-only 403', api.includes('@PutMapping("/v1/conversations/{peer}/messages/{messageId}")') && api.includes('"only the author may edit"'));
 check('Api — tombstone and non-text edits are 409', api.includes('"message is deleted"') && api.includes('"only text messages can be edited"'));
 check('Api — unknown message 404, wrong peer 400', api.includes('"no such message"') && api.includes('"message not in this conversation"'));
-check('Api — edit fans out and returns the record', api.includes('hub.broadcastMessageEdited(edited)') && api.includes('return messageDto(edited)'));
-check('WsFrames — message-edited frame', wsFrames.includes('WsMessageDto("message-edited"') && wsFrames.includes('WsMessageEditedEvent'));
-check('WsHub — broadcastMessageEdited reaches both participants', wsHub.includes('fun broadcastMessageEdited(message: MessageRecord)') && wsHub.includes('setOf(message.sender, message.recipient), WsFrames.messageEdited(message)'));
+check('Api — encrypted edit without envelopes for peer+author is 400', api.includes('"envelopes required to edit an encrypted message"') && api.includes('body.envelopes[peer].isNullOrBlank()') && api.includes('body.envelopes[me.username].isNullOrBlank()'));
+check('Api — edit fans out and returns the record with the caller envelope', api.includes('hub.broadcastMessageEdited(edited)') && api.includes('return messageDto(edited, envelope = if (edited.encrypted) messages.envelopeFor(edited.id, me.username) else null)'));
+check('WsFrames — message-edited frame with optional own envelope', wsFrames.includes('WsMessageDto("message-edited"') && wsFrames.includes('fun messageEdited(message: MessageRecord, envelope: String? = null)') && wsFrames.includes('WsMessageEditedEvent') && wsFrames.includes('envelope = envelope'));
+check('WsHub — broadcastMessageEdited reaches both participants with personalized envelopes', wsHub.includes('fun broadcastMessageEdited(message: MessageRecord)') && wsHub.includes('for (user in setOf(message.sender, message.recipient))') && wsHub.includes('WsFrames.messageEdited(message, envelopeFor(message.id, user))'));
 check('Dto — MessageDto and WsNewMessageEvent carry editedAt', dto.includes('val editedAt: Long? = null,'));
-check('Dto — WsMessageEditedEvent shape', dto.includes('data class WsMessageEditedEvent(') && dto.includes('val editedAt: Long,'));
-check('Dto — EditMessageRequest with a NotBlank body', dto.includes('data class EditMessageRequest(') && dto.includes('NotBlank'));
+check('Dto — WsMessageEditedEvent shape with optional envelope', dto.includes('data class WsMessageEditedEvent(') && dto.includes('val editedAt: Long,') && dto.includes('val envelope: String? = null,'));
+check('Dto — EditMessageRequest carries blankable content + envelopes (Phase 22)', dto.includes('data class EditMessageRequest(') && dto.includes('val content: String = "",') && dto.includes('val envelopes: Map<String, String>? = null,'));
 
 // ── Core ─────────────────────────────────────────────────────────────────────
 
 check('core MessageDto — editedAt', coreDtos.includes('val editedAt: Long? = null'));
-check('core WsMessageEditedDto — payload shape', coreDtos.includes('data class WsMessageEditedDto(') && coreDtos.includes('val editedAt: Long,'));
-check('core EditMessageRequest — PUT body', coreDtos.includes('data class EditMessageRequest(val content: String)'));
+check('core WsMessageEditedDto — payload shape with optional envelope', coreDtos.includes('data class WsMessageEditedDto(') && coreDtos.includes('val editedAt: Long,') && coreDtos.includes('val envelope: String? = null,'));
+check('core EditMessageRequest — PUT body with envelopes (Phase 22)', coreDtos.includes('data class EditMessageRequest(') && coreDtos.includes('val content: String = "",') && coreDtos.includes('val envelopes: Map<String, String>? = null,'));
 check('core RealtimeEvent.MessageEdited — event type', coreDtos.includes('data class MessageEdited(') && coreDtos.includes('val editedAtEpochMs: Long,'));
 check('core parser — message-edited branch', coreDtos.includes('"message-edited" -> runCatching'));
 
 // ── App wire + state ─────────────────────────────────────────────────────────
 
-check('ApiClient — editMessage PUT with 409 mapping', apiClient.includes('fun editMessage(peer: String, messageId: String, content: String): MessageResult') && apiClient.includes('.url("$baseUrl/v1/conversations/$peer/messages/$messageId")') && apiClient.includes('r.code == 409 -> throw ApiException.Protocol("message cannot be edited")') && /EditMessageRequest\.serializer\(\)/.test(apiClient));
+check('ApiClient — editMessage PUT with 409 mapping, blanks content when envelopes given', apiClient.includes('fun editMessage(peer: String, messageId: String, content: String, envelopes: Map<String, String>? = null): MessageResult') && apiClient.includes('.url("$baseUrl/v1/conversations/$peer/messages/$messageId")') && apiClient.includes('r.code == 409 -> throw ApiException.Protocol("message cannot be edited")') && apiClient.includes('EditMessageRequest(if (envelopes != null) "" else content, envelopes)') && /EditMessageRequest\.serializer\(\)/.test(apiClient));
 check('ApiClient — toMessageResult forwards editedAt', apiClient.includes('m.waveform, m.editedAt,'));
 check('ChatMessage — editedAtEpochMs and canEdit gate', chatCache.includes('val editedAtEpochMs: Long? = null,') && chatCache.includes('val canEdit: Boolean') && chatCache.includes('fromMe && type == "TEXT" && !deleted'));
 check('ChatMessage.fromServer — maps editedAt', chatCache.includes('editedAtEpochMs = m.editedAt,'));
 check('ChatCache.applyEdited — content swap, receipt kept, tombstone safe', chatCache.includes('fun applyEdited(serverId: String, content: String, editedAtEpochMs: Long): String?') && chatCache.includes('current.copy(content = content, editedAtEpochMs = editedAtEpochMs)') && chatCache.includes('if (current.deleted) return entry.key'));
-check('Repository — editMessage with optimistic apply + rollback', repository.includes('fun editMessage(peer: String, message: ChatMessage, newContent: String)') && repository.includes('client.editMessage(peer, serverId, newContent)') && repository.includes('chatCache.applyEdited(serverId, message.content, 0L)'));
-check('Repository — realtime edit handler', repository.includes('is RealtimeEvent.MessageEdited -> onMessageEdited(event)') && repository.includes('chatCache.applyEdited(event.messageId, event.content, event.editedAtEpochMs)'));
+check('Repository — editMessage optimistic apply, encrypts fresh envelopes, rolls back', repository.includes('fun editMessage(peer: String, message: ChatMessage, newContent: String)') && repository.includes('encryptEnvelopes(client, listOf(peer, me), newContent)') && repository.includes('client.editMessage(peer, serverId, newContent, envelopes)') && repository.includes('chatCache.applyEdited(serverId, message.content, 0L)'));
+check('Repository — realtime edit handler decrypts this device envelope before applying', repository.includes('is RealtimeEvent.MessageEdited -> onMessageEdited(event)') && repository.includes('decryptContent(cryptoPeer, event.content, event.envelope != null, event.envelope)') && repository.includes('chatCache.applyEdited(event.messageId, content, event.editedAtEpochMs)'));
 check('ViewModel — edit mode state', viewModel.includes('val editingMessage: StateFlow<ChatMessage?>') && viewModel.includes('fun startEditing(peer: String, message: ChatMessage)') && viewModel.includes('fun cancelEditing()'));
 check('ViewModel — send applies the edit instead of a new message', viewModel.includes('if (content != editing.content)') && viewModel.includes('repository.editMessage(peer, editing, content)'));
 check('ViewModel — edit preserves the draft and stays silent on typing', viewModel.includes('if (_editingMessage.value != null) return') && viewModel.includes('peerOfEditingDraft?.let { peer -> chatInput = repository.chatDraftFlow(peer).value }'));
@@ -146,6 +153,7 @@ check('Screenshot — route + fixture exist', screenshotActivity.includes('CHAT_
 
 check('protocol.md — edit endpoint documented', protocol.includes('#### Edit a message') && protocol.includes('PUT /v1/conversations/{peer}/messages/{messageId}') && protocol.includes('deletes take precedence'));
 check('protocol.md — message-edited frame documented', protocol.includes('"message-edited","payload"'));
+check('protocol.md — E2EE section documents that edits carry each own envelope', protocol.includes('for edits, the author is derived from the'));
 check('feature-plan — Phase 17 done with shipped paragraph', plan.includes('**Status:** Done (2026-10-30)') && plan.includes('V12__message_editing.sql') && plan.includes('Shipped: V12 migration'));
 check('CHANGELOG — Phase 17 entry', changelog.includes('edited (Phase 17)') && changelog.includes('deleting still wins'));
 check('run-session-verify.sh — oracle appended', sessionVerify.includes('verify-edit.mjs'));

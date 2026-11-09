@@ -49,6 +49,9 @@ class StringTelephoneRepositoryE2eeTest {
         override fun buildKeyBundle(oneTimePreKeyCount: Int): KeyBundleDto =
             KeyBundleDto(registrationId, identityKeyPublicBase64, dummySigned, dummyKyber, emptyList())
         override fun processPeerBundle(peer: String, bundle: PeerKeyBundleDto, oneTimePreKey: OneTimePreKeyDto?): kotlin.Result<Unit> {
+            // Mirrors libsignal: a replaced identity key makes SessionBuilder
+            // throw UntrustedIdentityException until the new key is accepted.
+            if (peer in changed) return kotlin.Result.failure(IllegalStateException("untrusted identity for $peer"))
             sessions += peer
             return kotlin.Result.success(Unit)
         }
@@ -57,7 +60,7 @@ class StringTelephoneRepositoryE2eeTest {
         override fun decrypt(peer: String, envelope: String): String? =
             if (envelope.startsWith("2:ok:")) envelope.substringAfter("2:ok:") else null
         override fun isIdentityTrusted(peer: String, identityKeyBase64: String) = !changed.contains(peer)
-        override fun trustIdentity(peer: String, identityKeyBase64: String) {}
+        override fun trustIdentity(peer: String, identityKeyBase64: String) { changed.remove(peer) }
         override fun safetyNumber(peer: String): String? =
             "12345 67890 12345 67890 12345 67890 12345 67890 12345 67890"
         override fun identityChanged(peer: String): Boolean = changed.contains(peer)
@@ -223,11 +226,17 @@ class StringTelephoneRepositoryE2eeTest {
     }
 
     @Test
-    fun `identity change surfaces a warning and acknowledge clears it`() = runBlocking {
+    fun `identity change surfaces a warning and acknowledge clears it and accepts the new key`() = runBlocking {
         val cache = ChatCache()
         val engine = FakeE2eeEngine()
         val stream = FakeRealtimeStream()
-        val repo = repository(cache, engine, stream) { _ -> null }
+        val repo = repository(cache, engine, stream) { request ->
+            when {
+                request.url.toString() == "https://phone.example.com/v1/keys/bob" -> ok(
+                    """{"username":"bob","registrationId":7,"identityKey":"identity-bob-rotated","signedPreKey":{"id":1,"publicKey":"signed-pub","signature":"signed-sig"},"kyberPreKey":{"id":2,"publicKey":"kyber-pub","signature":"kyber-sig"},"oneTimePrekeyCount":3}""")
+                else -> fail("unrouted: ${request.method} ${request.url}")
+            }
+        }
         repo.seedForPreviews(me, emptyList())
         repo.startRealtime()
 
@@ -236,9 +245,51 @@ class StringTelephoneRepositoryE2eeTest {
 
         withTimeout(5_000) { while (repo.identityWarnings.value.isEmpty()) delay(10) }
         assertTrue(repo.identityWarnings.value.contains("bob"))
+        assertFalse(engine.isIdentityTrusted("bob", "identity-bob-rotated"))
 
         repo.acknowledgeIdentityChange("bob")
         assertTrue(repo.identityWarnings.value.isEmpty())
+        // "I verified it" must accept the currently published identity key so
+        // libsignal lets new handshakes process again (ADR-0015 §3).
+        withTimeout(5_000) { while (!engine.isIdentityTrusted("bob", "identity-bob-rotated")) delay(10) }
+        // ...and a fresh handshake now processes instead of being refused.
+        val retried = engine.processPeerBundle("bob", PeerKeyBundleDto("bob", 7, "identity-bob-rotated", dummySigned, dummyKyber, 3), null)
+        assertTrue(retried.isSuccess)
+        assertTrue(engine.hasSession("bob"))
+        repo.stopRealtime()
+    }
+
+    @Test
+    fun `send to a peer whose identity changed fails honestly and still raises the warning`() = runBlocking {
+        val cache = ChatCache()
+        val engine = FakeE2eeEngine()
+        val stream = FakeRealtimeStream()
+        var posted = false
+        val repo = repository(cache, engine, stream) { request ->
+            when {
+                request.url.toString() == "https://phone.example.com/v1/keys/bob" -> ok(
+                    """{"username":"bob","registrationId":7,"identityKey":"identity-bob-rotated","signedPreKey":{"id":1,"publicKey":"signed-pub","signature":"signed-sig"},"kyberPreKey":{"id":2,"publicKey":"kyber-pub","signature":"kyber-sig"},"oneTimePrekeyCount":3}""")
+                request.url.toString() == "https://phone.example.com/v1/keys/bob/one-time" -> ok(
+                    """{"id":4,"publicKey":"otk-4"}""")
+                request.url.toString().contains("/v1/conversations/bob/messages") -> {
+                    posted = true
+                    fail("must not POST when the changed identity makes the handshake fail")
+                }
+                else -> fail("unrouted: ${request.method} ${request.url}")
+            }
+        }
+        repo.seedForPreviews(me, emptyList())
+        repo.startRealtime()
+        // The stored identity differs from the freshly published one.
+        engine.setChanged("bob", true)
+
+        repo.send("bob", "hello") {}
+        awaitState(cache, "bob", SendState.FAILED)
+        assertFalse(posted, "no plaintext may leave the device")
+        assertEquals(SendState.FAILED, cache.history("bob").single().state)
+        // ADR-0015 §3: the banner surfaces even though the send failed —
+        // libsignal refuses the handshake for the untrusted identity.
+        assertTrue(repo.identityWarnings.value.contains("bob"))
         repo.stopRealtime()
     }
 
