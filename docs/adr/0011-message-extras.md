@@ -3,7 +3,10 @@
 ## Status
 
 Accepted (planned; phases follow the media and receipts phases in
-`docs/feature-plan.md`).
+`docs/feature-plan.md`). The "no end-to-end encryption" constraint quoted
+below was the state at decision time and is superseded for one-to-one TEXT
+messages by [ADR-0015](0015-e2ee-signal-protocol.md) (Phase 22); reactions,
+replies and deletion remain plaintext metadata on the encrypted rows.
 
 ## Context
 

@@ -60,6 +60,7 @@ class CameraPermissionTest {
     fun `already granted camera permission starts video immediately`() {
         shadowOf(ApplicationProvider.getApplicationContext<Application>()).grantPermissions(Manifest.permission.CAMERA)
         showVideoButton()
+        compose.waitForIdle()
         compose.onNodeWithText("Video call").performClick()
         compose.runOnIdle { assertEquals(1, granted) }
         assertEquals(0, denied)
@@ -68,6 +69,7 @@ class CameraPermissionTest {
     @Test
     fun `first video call waits for the camera permission and continues once on grant`() {
         showVideoButton()
+        compose.waitForIdle()
         compose.onNodeWithText("Video call").performClick()
         val request = assertNotNull(shadowOf(controller.get()).lastRequestedPermission)
         assertContentEquals(arrayOf(Manifest.permission.CAMERA), request.requestedPermissions)
@@ -84,6 +86,7 @@ class CameraPermissionTest {
     @Test
     fun `denied camera permission falls back to audio exactly once`() {
         showVideoButton()
+        compose.waitForIdle()
         compose.onNodeWithText("Video call").performClick()
         val request = assertNotNull(shadowOf(controller.get()).lastRequestedPermission)
         compose.runOnIdle {

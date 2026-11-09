@@ -129,7 +129,10 @@ together; pairwise flows are untouched.
 
 The API derives authorship from the authenticated principal, not a sender field
 provided by the client. WebSocket events accelerate updates; persisted messages
-and cursor sync provide catch-up. Messages are not end-to-end encrypted.
+and cursor sync provide catch-up. One-to-one TEXT messages are end-to-end
+encrypted with the Signal Protocol (Phase 22, [ADR-0015](adr/0015-e2ee-signal-protocol.md)):
+the server stores only ciphertext and relays per-recipient envelopes; reactions,
+replies and deletion stay plaintext metadata, and media encryption is deferred.
 
 A message becomes read only while the conversation is on screen: the chat
 screen asks the repository to mark the rendered messages read, and the
