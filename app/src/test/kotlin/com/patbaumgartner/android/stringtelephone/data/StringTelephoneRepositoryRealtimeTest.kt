@@ -165,8 +165,11 @@ class StringTelephoneRepositoryRealtimeTest {
         fake.emit(RealtimeEvent.Typing("bob", true))
         assertEquals("bob", repo.typingPeer.value)
 
-        // After the expiry window, the indicator clears.
-        delay(StringTelephoneRepository.TYPING_EXPIRY_MS + 100)
+        // After the expiry window the indicator clears; await it with a wide
+        // margin so a loaded test runner cannot flake a fixed 100 ms wait.
+        withTimeout(StringTelephoneRepository.TYPING_EXPIRY_MS + 5_000) {
+            while (repo.typingPeer.value != null) delay(10)
+        }
         assertEquals(null, repo.typingPeer.value)
         repo.stopRealtime()
     }

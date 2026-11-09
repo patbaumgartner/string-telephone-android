@@ -46,7 +46,9 @@ are included there too.
 - One-to-one calls between explicitly provisioned accounts (SIP/UDP, Opus).
 - One-to-one text messages through a companion API with server persistence,
   idempotent sends, cursor catch-up sync, and a live WebSocket stream
-  ([API reference](docs/protocol.md)).
+  ([API reference](docs/protocol.md)). Text is end-to-end encrypted with the
+  Signal Protocol — the server relays ciphertext only
+  ([ADR-0015](docs/adr/0015-e2ee-signal-protocol.md)).
 - Image messages: an attachment button opens the Photo Picker, the image is
   downscaled client-side before upload, and the bubble shows the server
   thumbnail inline — tap it for the fullscreen picture.
@@ -102,7 +104,8 @@ are included there too.
 - [docs/adr/](docs/adr/) — architecture decision records (PBX choice, SIP
   engine, messaging, licensing, SDK levels, background call policy;
   PostgreSQL 18 storage, Garage media storage, read receipts, message
-  reactions/replies/deletion, group-chat scope constraints).
+  reactions/replies/deletion, group-chat scope constraints, end-to-end
+  encryption).
 - [SECURITY.md](SECURITY.md) — how to report vulnerabilities privately.
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — third-party components
   and licences.

@@ -58,6 +58,7 @@ class MicrophonePermissionTest {
     fun `already granted microphone permission starts the call immediately`() {
         shadowOf(ApplicationProvider.getApplicationContext<Application>()).grantPermissions(Manifest.permission.RECORD_AUDIO)
         showCallButton()
+        compose.waitForIdle()
         compose.onNodeWithText("Call").performClick()
         compose.runOnIdle { assertEquals(1, calls) }
         assertFalse(denied)
@@ -66,6 +67,7 @@ class MicrophonePermissionTest {
     @Test
     fun `first call waits for microphone permission and continues exactly once on grant`() {
         showCallButton()
+        compose.waitForIdle()
         compose.onNodeWithText("Call").performClick()
         val request = assertNotNull(shadowOf(controller.get()).lastRequestedPermission)
         assertContentEquals(arrayOf(Manifest.permission.RECORD_AUDIO), request.requestedPermissions)
@@ -82,6 +84,7 @@ class MicrophonePermissionTest {
     @Test
     fun `denied permission does not start a call and asks the UI to explain recovery`() {
         showCallButton()
+        compose.waitForIdle()
         compose.onNodeWithText("Call").performClick()
         val request = assertNotNull(shadowOf(controller.get()).lastRequestedPermission)
         compose.runOnIdle {
