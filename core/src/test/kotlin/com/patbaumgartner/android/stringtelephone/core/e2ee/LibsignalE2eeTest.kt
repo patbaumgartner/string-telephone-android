@@ -308,4 +308,28 @@ class LibsignalE2eeTest {
         assertTrue(envelope.startsWith("3:"))
         assertEquals("kyber only", alice.decrypt("bob", envelope))
     }
+
+    @Test
+    fun `a replaced identity key blocks a new handshake until the new key is accepted`() {
+        val alice = LibsignalJvmEngine()
+        val bob = LibsignalJvmEngine()
+        val b1 = alice.buildKeyBundle(1)
+        bob.processPeerBundle("alice", alice.peerViewOf(b1, "alice", 0), b1.oneTimePreKeys.first()).getOrThrow()
+
+        // alice "reinstalls": brand-new identity key, new published bundle.
+        val alice2 = LibsignalJvmEngine()
+        val b2 = alice2.buildKeyBundle(1)
+        val refused = bob.processPeerBundle("alice", alice2.peerViewOf(b2, "alice", 0), b2.oneTimePreKeys.first())
+        assertTrue(refused.isFailure, "libsignal must refuse the handshake for a changed identity")
+        assertFailsWith<UntrustedIdentityException> { refused.getOrThrow() }
+
+        // Once the new identity is accepted (the app engine's trustIdentity
+        // writes the same store entry), the handshake processes and traffic
+        // flows to the new device.
+        val newKey = IdentityKey(Base64.getDecoder().decode(alice2.identityKeyPublicBase64))
+        bob.store.saveIdentity(SignalProtocolAddress("alice", 1), newKey)
+        bob.processPeerBundle("alice", alice2.peerViewOf(b2, "alice", 0), null).getOrThrow()
+        val envelope = bob.encrypt("alice", "after reinstall").getOrThrow()
+        assertEquals("after reinstall", alice2.decrypt("bob", envelope))
+    }
 }

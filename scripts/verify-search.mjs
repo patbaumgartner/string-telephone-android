@@ -1,22 +1,24 @@
 #!/usr/bin/env node
 /**
- * Message search verification (Phase 16): PostgreSQL full-text search inside
- * one conversation, a chat-header search bar, and scroll-to-result.
+ * Message search verification (Phase 16, reworked by Phase 22 / ADR-0015):
+ * the chat-header search bar, results list and scroll-to-result are
+ * unchanged, but the server-side full-text search is RETIRED — with E2EE the
+ * server stores only ciphertext, so the endpoint 404s and the query runs
+ * client-side over each device's decrypted local cache.
  * Exits nonzero with a reason per failure; prints "search verification
  * passed" only after every assertion passes.
  *
  * Checks:
- *  - Server: V11 migration (generated tsvector + GIN), Messages.search
- *    (pair scoping, websearch_to_tsquery, cursor pagination, blank guard),
- *    /v1/conversations/{peer}/search endpoint, param-to-400 handler.
- *  - App: ApiClient.search, repository one-shot search, ViewModel search
- *    state (cancel-previous, close resets), ChatSearchBar + results,
- *    timelineIndexOf scroll mapping.
- *  - Tests: the two integration tests and ChatTimelineIndexTest.
- *  - Docs: protocol search section, feature-plan status, changelog, hook.
- *
- * The live query path is proved by :server:api:test (Testcontainers);
- * this script verifies the contract is wired correctly in the source.
+ *  - Server: V11 migration kept (forward-only rule) but no longer queried;
+ *    Messages.search and the /v1/conversations/{peer}/search endpoint are
+ *    gone (404, proven by ApiIntegrationTest).
+ *  - App: ApiClient.search removed; repository search is client-side over
+ *    ChatCache (decrypted, tombstones excluded); ViewModel search state
+ *    (cancel-previous, close resets, blank clears).
+ *  - UI: ChatSearchBar + results, timelineIndexOf scroll mapping.
+ *  - Tests: integration 404 test, app client-side search test, ChatTimelineIndexTest.
+ *  - Docs: protocol E2EE section (retired endpoint, client-side search),
+ *    feature-plan Phase 16/22 notes, changelog, hook.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -45,6 +47,7 @@ const chatTimeline = read(app + 'ui/ChatTimeline.kt');
 const strings    = read('app/src/main/res/values/strings.xml');
 
 const integration = read('server/api/src/test/kotlin/com/patbaumgartner/stringtelephone/ApiIntegrationTest.kt');
+const e2eeTest     = read('app/src/test/kotlin/com/patbaumgartner/android/stringtelephone/data/StringTelephoneRepositoryE2eeTest.kt');
 const indexTest   = read('app/src/test/kotlin/com/patbaumgartner/android/stringtelephone/ui/ChatTimelineIndexTest.kt');
 
 const protocol  = read('docs/protocol.md');
@@ -58,24 +61,23 @@ function check(name, condition, hint) {
     if (!condition) fails.push(`${name}${hint ? ' — ' + hint : ''}`);
 }
 
-// ── Server: migration, query, endpoint, error mapping ────────────────────────
+// ── Server: V11 kept forward-only, search retired ─────────────────────────────
 
-check('V11 — generated tsvector with the simple config', migration.includes("GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED"));
+check('V11 — generated tsvector with the simple config (column stays, forward-only)', migration.includes("GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED"));
 check('V11 — GIN index on the tsvector', migration.includes('CREATE INDEX idx_messages_search ON messages USING GIN (search_text)'));
 check('V11 — normalisation decision documented', migration.includes('unaccent') && migration.includes('Revisit'));
-check('Messages.search — scoped to the authenticated pair', /sender = \? AND recipient = \?\) OR \(sender = \? AND recipient = \?\)/.test(messages) && messages.includes('user: String,\n        peer: String,'));
-check('Messages.search — websearch_to_tsquery on the simple config', messages.includes("search_text @@ websearch_to_tsquery('simple', ?)"));
-check('Messages.search — blank queries rejected', messages.includes('require(query.isNotBlank())'));
-check('Messages.search — cursor pagination like history', messages.includes('created_at < ? OR (created_at = ? AND id < ?)') && messages.includes('ORDER BY created_at DESC, id DESC LIMIT ?'));
-check('Messages.search — limit clamped to MAX_PAGE', messages.includes('val effectiveLimit = limit.coerceIn(1, MAX_PAGE)'));
-check('Api — search endpoint guards blank q and bad cursors', api.includes('@GetMapping("/v1/conversations/{peer}/search")') && api.includes('if (q.isBlank()) throw ApiFailure(HttpStatus.BAD_REQUEST, "empty query")') && api.includes('decodeMessageCursor(it) ?: throw ApiFailure(HttpStatus.BAD_REQUEST, "invalid cursor")'));
-check('Api — search reuses the history cursor codec and DTO', api.includes('encodeMessageCursor(it.createdAt, it.id)'));
+check('Messages — server-side search removed (ciphertext cannot be searched)', !messages.includes('fun search(') && !messages.includes('websearch_to_tsquery'));
+check('Api — search endpoint removed (404)', !api.includes('/v1/conversations/{peer}/search'));
 check('ExceptionHandler — missing/malformed params map to 400', handler.includes('MissingServletRequestParameterException') && handler.includes('MethodArgumentTypeMismatchException') && handler.includes('invalid or missing parameter'));
 
-// ── Core/app: wire contract ──────────────────────────────────────────────────
+// ── App: client-side search over the decrypted cache ─────────────────────────
 
-check('ApiClient — search hits the search path with encoded q', apiClient.includes('fun search(peer: String, query: String, cursor: String?, limit: Int = 50): MessagesPage') && apiClient.includes('/v1/conversations/$peer/search?limit=$limit&q=') && apiClient.includes('URLEncoder.encode(query, "UTF-8")'));
-check('Repository — one-shot paginated search via ChatMessage.fromServer', repository.includes('suspend fun search(peer: String, query: String): List<ChatMessage>') && repository.includes('client.search(peer, query, cursor)') && repository.includes('ChatMessage.fromServer(m,'));
+check('ApiClient — server search call removed', !apiClient.includes('fun search(') && !apiClient.includes('/search?'));
+check('Repository — client-side search over decrypted cache, tombstones excluded',
+    repository.includes('fun search(peer: String, query: String): List<ChatMessage>') &&
+    repository.includes('chatCache.history(peer)') &&
+    repository.includes('!it.deleted') &&
+    repository.includes('contains(query, ignoreCase = true)'));
 check('ViewModel — search state with cancel-previous and close reset', viewModel.includes('searchJob?.cancel()') && viewModel.includes('fun searchInChat(peer: String, query: String)') && viewModel.includes('fun closeSearch()'));
 check('ViewModel — blank query clears results synchronously', viewModel.includes('if (query.isBlank()) {\n            _searchResults.value = emptyList()'));
 
@@ -95,15 +97,18 @@ check('strings.xml — open/close search descriptions', strings.includes('name="
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-check('Integration — scope, no-match, blank, unknown peer', integration.includes('`message search finds matches only inside the authenticated conversation`') && integration.includes("another pair's conversation must not leak") && integration.includes('missing q must be a bad request'));
-check('Integration — cursor pagination over search', integration.includes('`message search pagination walks the whole conversation with cursors`') && integration.includes('no message may appear on both pages'));
+check('Integration — retired search endpoint answers 404', integration.includes('`the server-side search endpoint is gone because ciphertext cannot be searched`') && integration.includes('assertEquals(404, server.get("/v1/conversations/bob/search?q=pineapple", alice).statusCode())'));
+check('App E2EE test — search runs client-side over decrypted cache', e2eeTest.includes('search runs client-side over decrypted cache'));
 check('IndexTest — finder locates bubbles and counts chips', indexTest.includes('`the finder locates a bubble row by client key`') && indexTest.includes('`day chips count as rows so the index is the LazyColumn index`'));
 
 // ── Docs ─────────────────────────────────────────────────────────────────────
 
-check('protocol.md — search section documents scoping + config', protocol.includes('GET /v1/conversations/{peer}/search?q=') && protocol.includes('websearch_to_tsquery') && protocol.includes('`simple` configuration'));
-check('feature-plan — Phase 16 done', plan.includes('### Phase 16 — Message search') && plan.includes('**Status:** Done (2026-10-28)'));
-check('CHANGELOG — Phase 16 entry', changelog.includes('full-text search (Phase 16)') && changelog.includes('diacritics kept as typed'));
+check('protocol.md — search endpoint documented as retired, client-side search documented',
+    protocol.includes('retired (Phase 22, ADR-0015)') && protocol.includes('client-side') && protocol.includes('`404`'));
+check('feature-plan — Phase 16 done, Phase 22 retires the server-side search',
+    plan.includes('### Phase 16 — Message search') && plan.includes('**Status:** Done (2026-10-28)') && plan.includes('retired (404)'));
+check('CHANGELOG — Phase 16 entry + Phase 22 retirement entry',
+    changelog.includes('full-text search (Phase 16)') && changelog.includes('server-side search endpoint (404)'));
 check('run-session-verify.sh — oracle appended', sessionVerify.includes('verify-search.mjs'));
 
 // ── Result ───────────────────────────────────────────────────────────────────

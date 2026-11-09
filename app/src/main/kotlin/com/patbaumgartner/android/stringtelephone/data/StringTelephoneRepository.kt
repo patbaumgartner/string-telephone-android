@@ -332,11 +332,14 @@ class StringTelephoneRepository(
             return false
         }
         // A stored identity that differs from the freshly published one is a
-        // safety-number change: warn even though the new session processes.
+        // safety-number change (ADR-0015 §3). libsignal refuses the handshake
+        // for an untrusted identity (UntrustedIdentityException), so the send
+        // fails honestly below — but the warning banner must surface either
+        // way, not only when the new session happens to process.
         val changed = !engine.isIdentityTrusted(peer, bundle.identityKey)
         val oneTime = if (peer == me) null else runCatching { client.consumeOneTimePreKey(peer) }.getOrNull()
         val ok = engine.processPeerBundle(peer, bundle, oneTime).isSuccess
-        if (ok && changed) _identityWarnings.update { it + peer }
+        if (changed) _identityWarnings.update { it + peer }
         return ok
     }
 
@@ -395,10 +398,27 @@ class StringTelephoneRepository(
     /** The 60-digit safety number for [peer], or null while no session exists yet (ADR-0015 §3). */
     fun e2eeSafetyNumber(peer: String): String? = e2ee?.safetyNumber(peer)
 
-    /** Acknowledges the identity-change warning for [peer] after comparing safety numbers. */
+    /**
+     * Acknowledges the identity-change warning for [peer] after the user
+     * compared safety numbers out of band ("I verified it", ADR-0015 §3):
+     * clears the banner and accepts the peer's currently published identity
+     * key. Without accepting it, libsignal keeps refusing handshakes and
+     * decrypts for that peer — the conversation would stay locked out even
+     * though the user verified the new key.
+     */
     fun acknowledgeIdentityChange(peer: String) {
         e2ee?.clearIdentityChange(peer)
         _identityWarnings.update { it - peer }
+        val engine = e2ee ?: return
+        scope.launch(sessionJob) {
+            val client = apiProvider() ?: return@launch
+            val bundle = try {
+                withContext(Dispatchers.IO) { client.peerKeys(peer) }
+            } catch (_: ApiException) {
+                return@launch
+            }
+            if (bundle != null) engine.trustIdentity(peer, bundle.identityKey)
+        }
     }
 
     private fun onRealtimeEvent(event: RealtimeEvent) {

@@ -60,7 +60,11 @@ AGPL-3.0 (ADR-0004) and still never links Android or libsignal code.
 - Trust on first use: contact profiles expose a **safety number** (the
   fingerprint hash of both identity keys, 60 digits like Signal). Users
   compare it out of band; a changed safety number after re-install shows a
-  prominent warning banner in the chat.
+  prominent warning banner in the chat. Until the user acknowledges it,
+  libsignal refuses new handshakes and decrypts for that peer (sends fail
+  honestly, incoming messages render a placeholder); acknowledging the banner
+  ("I verified it") accepts the peer's currently published identity key so new
+  sessions process again.
 
 ### 4. Sessions: X3DH + Double Ratchet per (user, device) pair
 
