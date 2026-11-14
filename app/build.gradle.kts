@@ -14,6 +14,24 @@ val devPrefill = Properties().apply {
 
 fun prefill(key: String): String = devPrefill.getProperty(key) ?: ""
 
+// Release signing. The release workflow decodes the keystore from the
+// ANDROID_KEYSTORE_BASE64 repository secret and passes ST_KEYSTORE_* environment
+// variables; local release builds can use an ignored keystore.properties with the
+// same ST_KEYSTORE_* keys. Without either, the release APK is built unsigned —
+// fine for local verification, never for distribution (the release workflow
+// refuses to publish an unsigned APK).
+val keystoreProps = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+fun signingValue(name: String): String? =
+    providers.environmentVariable(name).orNull?.ifBlank { null }
+        ?: keystoreProps.getProperty(name)?.ifBlank { null }
+
+val releaseStoreFile = signingValue("ST_KEYSTORE_FILE") ?: ""
+val releaseSigningConfigured = releaseStoreFile.isNotEmpty()
+
 // Shown in Settings. CI can set GIT_COMMIT; local builds ask git, and builds without git omit it.
 val gitCommit: String = providers.environmentVariable("GIT_COMMIT").orNull?.take(10)
     ?: runCatching {
@@ -62,6 +80,19 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile)
+                storePassword = signingValue("ST_KEYSTORE_PASSWORD") ?: ""
+                keyAlias = signingValue("ST_KEY_ALIAS") ?: ""
+                // PKCS12 keys usually share the store password; fall back to it.
+                keyPassword = signingValue("ST_KEY_PASSWORD")
+                    ?: signingValue("ST_KEYSTORE_PASSWORD") ?: ""
+            }
+        }
+    }
+
     buildTypes {
         debug {
             buildConfigField("String", "DEV_SERVER_URL", prefill("stringtelephone.serverUrl").asBuildConfigLiteral())
@@ -73,6 +104,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
             buildConfigField("String", "DEV_SERVER_URL", "\"\"")
             buildConfigField("String", "DEV_USERNAME", "\"\"")
             buildConfigField("String", "DEV_PASSWORD", "\"\"")
@@ -93,6 +125,27 @@ android {
 
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
+        // libsignal-android ships a second, testing-only native lib per ABI, and
+        // its POM pulls in libsignal-client, whose JAR carries desktop natives
+        // (.so/.dylib/.dll at the JAR root, packaged at the APK root). None of
+        // those belong in an Android APK: together they are ~400 MB of the
+        // ~900 MB APK, which matters for GitHub Releases downloads.
+        jniLibs.excludes += setOf("**/libsignal_jni_testing.so")
+        resources.excludes += setOf("libsignal_jni_*", "signal_jni_*.dll")
+    }
+
+    // Ship per-ABI APKs: the Signal and linphone native libs are tens of MB per
+    // ABI and .so files cannot be compressed inside an APK, so a universal APK
+    // is ~420 MB while a split APK is ~120 MB. The universal APK is still built
+    // as app-universal-{debug,release}.apk (scripts/deploy-android.sh and its
+    // tests install it), but only the split APKs are published to Releases.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            isUniversalApk = true
+        }
     }
 }
 

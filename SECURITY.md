@@ -30,8 +30,14 @@ users have a reasonable opportunity to update.
   the same encryption and present a publicly trusted certificate for its
   hostname. Plaintext transport is development-only; the prototype Compose
   stack must never be published as-is.
-- Messages are not end-to-end encrypted; the UI and docs must never claim E2EE
-  (ADR-0003). Reports demonstrating otherwise are in scope.
+- One-to-one text messages are end-to-end encrypted with the Signal Protocol
+  ([ADR-0015](docs/adr/0015-e2ee-signal-protocol.md), Phase 22): the companion
+  API stores and relays ciphertext only. Reports showing the server — or anyone
+  with server or database access — reading one-to-one TEXT content are in
+  scope, as is any UI or doc claim of E2EE beyond text. Not encrypted by design
+  (and never claimed as encrypted): media attachments (images/voice, Phase 23
+  pending), call media (PBX-relayed, ADR-0001/0013), and reaction, reply and
+  deletion metadata.
 - The companion API admin surface uses Spring Security session authentication
   with environment-configured `ADMIN_USERNAME` and `ADMIN_PASSWORD` (at least
   24 characters), PBKDF2 hashing and CSRF-protected mutations. No default admin

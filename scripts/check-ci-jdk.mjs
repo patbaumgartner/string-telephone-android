@@ -5,7 +5,7 @@
  */
 import { readFileSync } from 'node:fs';
 
-const workflows = ['.github/workflows/ci.yml', '.github/workflows/security.yml'];
+const workflows = ['.github/workflows/ci.yml', '.github/workflows/security.yml', '.github/workflows/release.yml'];
 
 for (const file of workflows) {
   const text = readFileSync(file, 'utf8');

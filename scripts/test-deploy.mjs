@@ -68,7 +68,7 @@ test('device helper installs and launches only the physical target, even with an
   const result = deploy(t, { devices: 'emulator-5554 device\nphone-1 device' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.calls, /gradle --no-daemon :app:assembleDebug/);
-  assert.ok(result.calls.includes(`adb -s phone-1 install -r ${result.root}/app/build/outputs/apk/debug/app-debug.apk`));
+  assert.ok(result.calls.includes(`adb -s phone-1 install -r ${result.root}/app/build/outputs/apk/debug/app-universal-debug.apk`));
   assert.ok(result.calls.includes(`adb -s phone-1 shell am start -W -n ${packageName}/.ui.MainActivity`));
   assert.doesNotMatch(result.calls, /adb -s emulator-/);
 });

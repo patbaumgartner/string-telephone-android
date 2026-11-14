@@ -7,6 +7,20 @@ All notable changes are documented here. The project follows
 
 No public release has been published yet.
 
+### Added
+
+- Release pipeline (`.github/workflows/release.yml`): every push to `main`
+  updates the **Snapshot** prerelease with per-ABI debug APKs and
+  `SHA256SUMS.txt`; pushing a `v*` tag publishes a release with the signed
+  per-ABI release APKs, checksums and the signing-certificate fingerprint in
+  the release notes. Release builds are signed from repository secrets
+  (`ANDROID_KEYSTORE_*` → `ST_KEYSTORE_*` environment variables; local builds
+  can use an ignored `keystore.properties`), and the release job verifies
+  every published APK with `apksigner` and refuses to publish an unsigned APK.
+  APKs are split per ABI and the testing-only/desktop native libraries of the
+  Signal dependencies are excluded from packaging, shrinking a downloadable
+  APK from ~900 MB (universal, with bloat) to ~109–123 MB per ABI.
+
 ### Changed
 
 - End-to-end encryption (Phase 22, ADR-0015). One-to-one TEXT messages are

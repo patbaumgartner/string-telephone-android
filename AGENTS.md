@@ -170,6 +170,18 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    does not verify Android audio/video or the media store.
 4. CI runs 1 + assemble + lint + API installDist on main pushes and pull requests.
    Security CI builds app and API for CodeQL and reviews PR dependency changes.
+   `.github/workflows/release.yml` additionally publishes APKs to GitHub
+   Releases: a `snapshot` prerelease (per-ABI debug APKs + `SHA256SUMS.txt`) on
+   every main push, and a signed release on `v*` tags. APKs are ABI-split
+   (`app-<abi>-{debug,release}.apk`; the `app-universal-*.apk` build stays
+   local for the deploy scripts) because the Signal/linphone native libs make a
+   universal APK ~420 MB while a split is ~110-125 MB. Tagged releases sign
+   `assembleRelease` from repository secrets — `ANDROID_KEYSTORE_BASE64` is
+   decoded to `ST_KEYSTORE_FILE` with `ST_KEYSTORE_PASSWORD` / `ST_KEY_ALIAS` /
+   `ST_KEY_PASSWORD` passed through; `app/build.gradle.kts` reads those env vars
+   (or an ignored `keystore.properties` locally) and signs only when
+   `ST_KEYSTORE_FILE` is set. The release job verifies every published split
+   with `apksigner` and fails on an unsigned APK. Never commit keystores or APKs.
    Dependabot patch/minor auto-merge requires repository auto-merge and branch
    protection settings; see CONTRIBUTING.md. Never check out PR code in its
    write-token `pull_request_target` workflow.
