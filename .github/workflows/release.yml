@@ -1,0 +1,207 @@
+---
+name: Release
+
+# Publishes per-ABI APKs to GitHub Releases:
+#   - every push to main (or a manual run) updates the "snapshot" prerelease
+#     with freshly built debug APKs plus SHA256SUMS.txt;
+#   - pushing a v* tag publishes a release with the signed release APKs,
+#     SHA256SUMS.txt and the signing certificate fingerprint.
+# APKs are split per ABI (the Signal/linphone native libs make a universal APK
+# ~420 MB; a split APK is ~120 MB) — pick the APK matching your device ABI.
+# Tagged releases need the repository secrets ANDROID_KEYSTORE_BASE64,
+# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD
+# (see CONTRIBUTING.md, "Publish a release"). Snapshots never need secrets.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    name: Snapshot (debug APKs)
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 27
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78  # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '27'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c  # v6.4.1
+
+      - name: Build debug APKs
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Stage snapshot assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Publish the four ABI splits only; the universal APK (~420 MB) is not uploaded.
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            cp "app/build/outputs/apk/debug/app-${abi}-debug.apk" \
+              "dist/string-telephone-snapshot-${abi}-debug.apk"
+          done
+          (cd dist && sha256sum ./*.apk > SHA256SUMS.txt)
+          cat > dist/NOTES.md <<'NOTES'
+          Automated snapshot of `main` at commit __SHA__ — not a versioned release.
+
+          Download the APK for your device ABI (virtually all modern phones are
+          `arm64-v8a`; check with `adb shell getprop ro.product.cpu.abi`):
+
+          - `string-telephone-snapshot-arm64-v8a-debug.apk` — 64-bit ARM phones/tablets
+          - `string-telephone-snapshot-armeabi-v7a-debug.apk` — 32-bit ARM devices
+          - `string-telephone-snapshot-x86_64-debug.apk` — 64-bit emulators
+          - `string-telephone-snapshot-x86-debug.apk` — 32-bit emulators
+          - `SHA256SUMS.txt` — verify a download with `sha256sum -c SHA256SUMS.txt`
+
+          These are debug-signed builds for testing against a development server.
+          CI builds contain no prefilled credentials, but treat the debug key as
+          public: do not use snapshots for production data, and a snapshot cannot
+          update over a signed release build (different signature).
+
+          Signed release APKs are published on `v*` tags — see the other releases
+          on this page. Source: commit __SHA__.
+          NOTES
+          sed -i "s/__SHA__/$GITHUB_SHA/g" dist/NOTES.md
+
+      - name: Publish snapshot prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag=snapshot
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --title 'Snapshot' --prerelease \
+              --target "$GITHUB_SHA" --notes-file dist/NOTES.md
+          else
+            gh release create "$tag" --title 'Snapshot' --prerelease \
+              --target "$GITHUB_SHA" --notes-file dist/NOTES.md
+          fi
+          gh release upload "$tag" ./dist/*.apk ./dist/SHA256SUMS.txt --clobber
+
+  release:
+    name: Tagged release (signed APKs)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 27
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78  # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '27'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c  # v6.4.1
+
+      - name: Decode release signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::error::Missing repository secret ANDROID_KEYSTORE_BASE64 (see CONTRIBUTING.md, Publish a release)."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "ST_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+
+      - name: Build signed release APKs
+        env:
+          ST_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ST_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ST_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Verify release signatures
+        run: |
+          set -euo pipefail
+          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          : > release-certs.txt
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            apk="app/build/outputs/apk/release/app-${abi}-release.apk"
+            if [ ! -f "$apk" ]; then
+              echo "::error::expected signed $apk; release signing is not configured (ST_KEYSTORE_FILE unset)."
+              exit 1
+            fi
+            echo "== $apk" >> release-certs.txt
+            "$build_tools/apksigner" verify --print-certs "$apk" >> release-certs.txt
+          done
+          grep -q 'SHA-256 digest' release-certs.txt
+
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+          tag=$GITHUB_REF_NAME
+          version=${tag#v}
+          mkdir -p dist
+          # Publish the four ABI splits only; the universal APK (~420 MB) is not uploaded.
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            cp "app/build/outputs/apk/release/app-${abi}-release.apk" \
+              "dist/string-telephone-${version}-${abi}.apk"
+          done
+          (cd dist && sha256sum ./*.apk > SHA256SUMS.txt)
+          cat > dist/NOTES.md <<'NOTES'
+          ## String Telephone __VERSION__
+
+          Signed release build, split per device ABI. Download the APK matching
+          your device (virtually all modern phones are `arm64-v8a`; check with
+          `adb shell getprop ro.product.cpu.abi`):
+
+          - `string-telephone-__VERSION__-arm64-v8a.apk` — 64-bit ARM phones/tablets
+          - `string-telephone-__VERSION__-armeabi-v7a.apk` — 32-bit ARM devices
+          - `string-telephone-__VERSION__-x86_64.apk` — 64-bit emulators
+          - `string-telephone-__VERSION__-x86.apk` — 32-bit emulators
+          - `SHA256SUMS.txt` — checksums for all APKs
+
+          Verify a download before installing:
+
+              sha256sum -c SHA256SUMS.txt
+              apksigner verify --print-certs string-telephone-__VERSION__-arm64-v8a.apk
+
+          Signing certificate (compare the SHA-256 digest printed by `apksigner`;
+          all APKs in this release share it):
+
+              __CERTS__
+
+          Updating from an older version? The signing key is the same across
+          releases, so updates install in place; a debug-signed snapshot never
+          updates over this release (different signature) — uninstall the
+          snapshot first. Debug-signed testing builds are published as the
+          `snapshot` prerelease.
+
+          Built from commit `__SHA__`. See CHANGELOG.md in the tag for changes.
+          NOTES
+          certs=$(cat release-certs.txt)
+          sed -i -e "s/__VERSION__/$version/g" -e "s/__SHA__/$GITHUB_SHA/g" \
+            -e "s|__CERTS__|$certs|" dist/NOTES.md
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" ./dist/*.apk ./dist/SHA256SUMS.txt \
+            --verify-tag --title "$GITHUB_REF_NAME" --generate-notes \
+            --notes "$(cat dist/NOTES.md)"

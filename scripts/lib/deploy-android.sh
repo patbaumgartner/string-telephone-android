@@ -73,7 +73,8 @@ echo "Building String Telephone for $serial..."
 ./gradlew --no-daemon :app:assembleDebug
 
 # Gradle installDebug can target multiple devices; install with an explicit adb serial instead.
-"$adb" -s "$serial" install -r "$ROOT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+# ABI splits are enabled, so the universal debug APK is named app-universal-debug.apk.
+"$adb" -s "$serial" install -r "$ROOT_DIR/app/build/outputs/apk/debug/app-universal-debug.apk"
 launch_output="$("$adb" -s "$serial" shell am start -W -n "$PACKAGE_NAME/$ACTIVITY_NAME")"
 printf '%s\n' "$launch_output"
 if ! grep -q '^Status: ok' <<< "${launch_output//$'\r'/}"; then

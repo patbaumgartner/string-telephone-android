@@ -19,6 +19,26 @@ are green; the Android app is a functional prototype, not a release.
 **New here? [Start with the setup guide](docs/setup.md)** for a two-account
 demo, correct sign-in credentials, and the extra network setup needed for audio.
 
+## Download
+
+Prebuilt APKs are published in
+[GitHub Releases](https://github.com/patbaumgartner/string-telephone-android/releases):
+
+- Every `v*` tag publishes **signed release APKs split per device ABI**
+  (`string-telephone-<version>-<abi>.apk`, about 110–125 MB each — pick yours
+  with `adb shell getprop ro.product.cpu.abi`; virtually all modern phones are
+  `arm64-v8a`) plus `SHA256SUMS.txt`. Verify a download with
+  `sha256sum -c SHA256SUMS.txt` and `apksigner verify --print-certs`; the
+  signing certificate's SHA-256 fingerprint is printed in the release notes.
+- Every push to `main` rebuilds the **Snapshot** prerelease with per-ABI debug
+  APKs for testing. Snapshot builds are debug-signed, so they cannot update
+  over a signed release build.
+
+Release APKs require an HTTPS companion API with a trusted certificate and
+SIP/TLS on port 5061 with SRTP — the app refuses plain-HTTP servers
+([docs/setup.md](docs/setup.md) explains the development-only exception).
+Building from source below remains the fully reproducible path.
+
 ## Screens
 
 | Onboarding | Contacts | Chat |
@@ -48,7 +68,9 @@ are included there too.
   idempotent sends, cursor catch-up sync, and a live WebSocket stream
   ([API reference](docs/protocol.md)). Text is end-to-end encrypted with the
   Signal Protocol — the server relays ciphertext only
-  ([ADR-0015](docs/adr/0015-e2ee-signal-protocol.md)).
+  ([ADR-0015](docs/adr/0015-e2ee-signal-protocol.md)). Not end-to-end
+  encrypted (documented limitation): calls (PBX-relayed, TLS + SRTP) and media
+  attachments such as images and voice messages.
 - Image messages: an attachment button opens the Photo Picker, the image is
   downscaled client-side before upload, and the bubble shows the server
   thumbnail inline — tap it for the fullscreen picture.
@@ -146,8 +168,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 
 ### Install on a device or emulator
 
-Connect a physical device with USB debugging enabled, or start an AVD in Android
-Studio and wait for its home screen, then run:
+Prefer a signed APK from [GitHub Releases](#download) (enable "install from
+unknown sources" for your browser/file manager on Android 8+). To build and
+install the debug APK from source instead, connect a physical device with USB
+debugging enabled, or start an AVD in Android Studio and wait for its home
+screen, then run:
 
 ```bash
 scripts/deploy-device.sh

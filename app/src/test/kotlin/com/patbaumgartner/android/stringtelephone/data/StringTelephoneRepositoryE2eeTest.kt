@@ -201,7 +201,13 @@ class StringTelephoneRepositoryE2eeTest {
         }
         assertEquals(1, history.size)
         assertEquals("secret from bob", history.single().content)
-        assertEquals("secret from bob", incoming.single().content)
+        // The cache write and the flow emission are separate steps; await the
+        // emission instead of racing it.
+        val emitted = withTimeout(5_000) {
+            while (incoming.isEmpty()) delay(10)
+            incoming.single()
+        }
+        assertEquals("secret from bob", emitted.content)
         collector.cancel()
         repo.stopRealtime()
     }
