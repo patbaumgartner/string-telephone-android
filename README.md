@@ -13,8 +13,9 @@ Self-hosted one-to-one phone calls and messages for people who share a server,
 not their contacts. An Android app plus a small companion API and an Asterisk
 PBX you run yourself. No cloud, no vendor, no analytics.
 
-**Status: prototype.** The build, unit tests, and the Asterisk SIP prototype
-are green; the Android app is a functional prototype, not a release.
+**Status: v0.1.0 released.** The build, unit tests, and the Asterisk SIP
+prototype are green, and signed APKs ship in GitHub Releases (below); the app
+is still a self-hosted prototype, not a store product.
 
 **New here? [Start with the setup guide](docs/setup.md)** for a two-account
 demo, correct sign-in credentials, and the extra network setup needed for audio.

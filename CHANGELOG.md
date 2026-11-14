@@ -3,9 +3,12 @@
 All notable changes are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.1.0] - 2026-11-14
 
-No public release has been published yet.
+First public release. Signed per-ABI APKs are published in
+[GitHub Releases](https://github.com/patbaumgartner/string-telephone-android/releases)
+(verify with `SHA256SUMS.txt` and `apksigner verify --print-certs`); debug
+snapshots of `main` land in the `snapshot` prerelease.
 
 ### Added
 
