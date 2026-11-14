@@ -3,7 +3,8 @@
  * Live read-receipt check (ADR-0010). Runs against a running companion API
  * and proves the whole path against real HTTP:
  *
- *   - the author sends a message and the server stores it;
+ *   - the author sends a message as E2EE envelopes (ADR-0015) and the
+ *     server stores only envelopes, never plaintext;
  *   - the author may not mark it read (404 — the reader is the peer);
  *   - the recipient marks it read and the server names the message;
  *   - the author sees the receipt in the conversation history;
@@ -39,16 +40,26 @@ async function api(token, path, options = {}) {
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
 
-const content = `read receipt probe ${Date.now()}`;
+const plaintext = `read receipt probe ${Date.now()}`;
+// ADR-0015 Phase 22: TEXT is always end-to-end encrypted — the wire carries
+// envelopes (`<type>:<base64>`, type 3 = prekey message) for the peer plus a
+// self-copy for the author, never plaintext. The probe seals a self-describing
+// payload that matches the server's ENVELOPE_PATTERN.
+const envelope = (user) => `3:${Buffer.from(`ct:${plaintext}:${user}`).toString('base64')}`;
+const envelopes = { bob: envelope('bob'), alice: envelope('alice') };
 
 // The author sends the message.
 const sent = await api(state.alice.apiToken, '/v1/conversations/bob/messages', {
   method: 'POST',
-  body: JSON.stringify({ recipient: 'bob', content, clientKey: `probe-${Date.now()}` }),
+  body: JSON.stringify({ recipient: 'bob', content: '', clientKey: `probe-${Date.now()}`, envelopes }),
 });
 assert.equal(sent.status, 201, `send failed with ${sent.status}: ${JSON.stringify(sent.body)}`);
 const id = sent.body.id;
 assert.ok(id, 'the send must return a message id');
+assert.equal(sent.body.encrypted, true, 'the stored message must be marked encrypted');
+assert.equal(sent.body.content, '', 'the server must not persist plaintext');
+assert.equal(sent.body.envelope, envelopes.alice, 'the author must get her own envelope back');
+assert.ok(!JSON.stringify(sent.body).includes(plaintext), 'no plaintext may appear in the response');
 assert.equal(sent.body.readAt, undefined, 'a fresh message is unread');
 
 // The author may not mark her own message read.
@@ -72,6 +83,10 @@ const history = await api(state.alice.apiToken, '/v1/conversations/bob/messages'
 assert.equal(history.status, 200);
 const message = history.body.messages.find((candidate) => candidate.id === id);
 assert.ok(message, 'the message must be in the conversation history');
+assert.equal(message.encrypted, true, 'history must keep the encrypted flag');
+assert.equal(message.content, '', 'history must not carry plaintext');
+assert.equal(message.envelope, envelopes.alice, 'history must carry the author envelope');
+assert.ok(!JSON.stringify(history.body).includes(plaintext), 'no plaintext may appear in history');
 assert.equal(message.readAt, mark.body.readAt, 'the history must carry the read timestamp');
 
 // A second mark changes nothing and never moves the receipt.
