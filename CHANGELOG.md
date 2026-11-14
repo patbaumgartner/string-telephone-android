@@ -3,6 +3,29 @@
 All notable changes are documented here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Release pipeline aligned with the other Android apps (ADR-0016): every push
+  to `main` publishes a **signed** Snapshot prerelease (per-ABI APKs +
+  `SHA256SUMS`), and every `vX.Y.Z` tag publishes a signed release with
+  per-ABI APKs, an AAB, and `SHA256SUMS`, install notes, and the signer
+  certificate fingerprint (`.github/workflows/release.yml`)
+- `versionName`/`versionCode` can be set with `-PversionName` / `-PversionCode`
+  (the release workflow derives both from the tag)
+
+### Changed
+
+- Snapshots are now signed release builds (not debug APKs) and share the
+  release key with tagged releases, so they install over each other as updates
+- Release signing secrets renamed `ANDROID_KEYSTORE_*` → `SR_KEYSTORE_*`
+  (`ST_KEYSTORE_*` → `SR_KEYSTORE_*` environment variables; local
+  `keystore.properties` now uses `storeFile`/`storePassword`/`keyAlias`/
+  `keyPassword`). The keystore is dedicated to this app instead of shared
+  with another app — v0.1.0 was signed with the old key, so updating from
+  v0.1.0 to a later release requires a one-time uninstall
+
 ## [0.1.0] - 2026-11-14
 
 First public release. Signed per-ABI APKs are published in

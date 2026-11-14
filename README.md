@@ -22,18 +22,23 @@ demo, correct sign-in credentials, and the extra network setup needed for audio.
 
 ## Download
 
-Prebuilt APKs are published in
-[GitHub Releases](https://github.com/patbaumgartner/string-telephone-android/releases):
+Signed builds are published on the
+[Releases](https://github.com/patbaumgartner/string-telephone-android/releases)
+page:
 
-- Every `v*` tag publishes **signed release APKs split per device ABI**
+- **Releases** (`vX.Y.Z` tags): signed APKs split per device ABI
   (`string-telephone-<version>-<abi>.apk`, about 110–125 MB each — pick yours
   with `adb shell getprop ro.product.cpu.abi`; virtually all modern phones are
-  `arm64-v8a`) plus `SHA256SUMS.txt`. Verify a download with
-  `sha256sum -c SHA256SUMS.txt` and `apksigner verify --print-certs`; the
-  signing certificate's SHA-256 fingerprint is printed in the release notes.
-- Every push to `main` rebuilds the **Snapshot** prerelease with per-ABI debug
-  APKs for testing. Snapshot builds are debug-signed, so they cannot update
-  over a signed release build.
+  `arm64-v8a`), an `.aab` for Play-style distribution, plus `SHA256SUMS` and
+  the signer certificate fingerprint in the release notes. Verify a download
+  with `sha256sum -c SHA256SUMS` and `apksigner verify --print-certs`.
+- **Snapshot** (prerelease, rebuilt on every push to `main`): the latest
+  signed per-ABI APKs for testing.
+
+Both use the same release key, so they install over each other as updates.
+Sideloading on Android 8+ requires allowing "Install unknown apps" for the
+app you open the APK with. Note: v0.1.0 was signed with an earlier key, so
+installing a later release over v0.1.0 requires a one-time uninstall.
 
 Release APKs require an HTTPS companion API with a trusted certificate and
 SIP/TLS on port 5061 with SRTP — the app refuses plain-HTTP servers

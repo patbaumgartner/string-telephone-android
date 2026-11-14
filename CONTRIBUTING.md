@@ -159,46 +159,43 @@ It queues merges rather than bypassing protection. No repository settings are
 changed by adding these files; check the workflow result if auto-merge is
 disabled or restricted.
 
-## Publish a release
+## Releases
 
-`.github/workflows/release.yml` publishes APKs to
-[GitHub Releases](https://github.com/patbaumgartner/string-telephone-android/releases):
+Downloadable builds are published from `.github/workflows/release.yml` (see
+[ADR-0016](docs/adr/0016-release-signing-and-distribution.md)):
 
-- Every push to `main` (or a manual workflow run) updates the **Snapshot**
-  prerelease with freshly built per-ABI debug APKs and `SHA256SUMS.txt`.
-- Pushing a `vX.Y.Z` tag builds the release APKs, signs them, verifies every
-  published APK with `apksigner`, and publishes the release with the four
-  per-ABI APKs (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` — users pick the one
-  matching their device), `SHA256SUMS.txt` and the signing certificate
-  fingerprint in the notes. APKs are ABI-split because the Signal/linphone
-  native libraries make a universal APK ~420 MB; a split is ~110–125 MB. The
-  universal build (`app-universal-*.apk`) is still produced locally for
-  `scripts/deploy-*.sh` but is not uploaded.
+- Every push to `main` rebuilds the **Snapshot** prerelease with signed
+  per-ABI APKs (`string-telephone-snapshot-<abi>.apk`) and `SHA256SUMS`.
+- Pushing a signed tag `vX.Y.Z` publishes a **release**: signed per-ABI APKs
+  (`string-telephone-<version>-<abi>.apk` for `arm64-v8a`, `armeabi-v7a`,
+  `x86`, `x86_64` — users pick the one matching their device), an AAB, and
+  `SHA256SUMS`, with the signer certificate fingerprint in the notes. The tag
+  sets the version (`v0.2.0` → versionName `0.2.0`, versionCode `200`):
 
-One-time repository setup (admin):
+  ```bash
+  git tag -s v0.2.0 -m "v0.2.0"
+  git push origin main v0.2.0
+  ```
 
-1. Generate the release key once and keep it offline afterwards:
+  APKs are ABI-split because the Signal/linphone native libraries make a
+  universal APK ~420 MB while a split is ~110–125 MB. The universal build
+  (`app-universal-*.apk`) is still produced for `scripts/deploy-*.sh` but is
+  not uploaded. The release job verifies every published APK with `apksigner`
+  before uploading.
 
-   ```bash
-   keytool -genkeypair -keystore release.keystore -alias stringtelephone \
-     -keyalg RSA -keysize 4096 -validity 10000 -storetype PKCS12
-   ```
+Both jobs sign with the release key held in the repository secrets
+`SR_KEYSTORE_BASE64`, `SR_KEYSTORE_PASSWORD`, `SR_KEY_ALIAS`, and
+`SR_KEY_PASSWORD`; the workflow fails if they are missing. To set or rotate
+the key, generate a PKCS12 keystore with `keytool` and upload it with
+`gh secret set` — never commit keystore material (`*.keystore`, `*.p12` and
+`keystore.properties` are git-ignored and `scripts/check-secrets.mjs` fails
+on committed key material). Keep one backup of the keystore outside the
+repository (password manager / HSM); losing it means updates can no longer be
+signed with the same key. Note: v0.1.0 was signed with an earlier key, so the
+first release signed with the current key requires a one-time uninstall of
+v0.1.0.
 
-   Never commit it: `*.keystore`, `*.p12` and `keystore.properties` are
-   git-ignored and `scripts/check-secrets.mjs` fails on committed key material.
-2. Add the repository secrets `ANDROID_KEYSTORE_BASE64`
-   (`base64 -w 0 release.keystore`), `ANDROID_KEYSTORE_PASSWORD`,
-   `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
-3. Bump `versionCode`/`versionName` in `app/build.gradle.kts`, move the
-   `## Unreleased` section of `CHANGELOG.md` to `## [X.Y.Z] - <date>`, and
-   merge to `main` with green CI.
-4. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-
-The workflow decodes the keystore and passes `ST_KEYSTORE_FILE` plus
-`ST_KEYSTORE_PASSWORD` / `ST_KEY_ALIAS` / `ST_KEY_PASSWORD` to
-`:app:assembleRelease`; `app/build.gradle.kts` signs only when
-`ST_KEYSTORE_FILE` is set, and the workflow refuses to publish an unsigned
-APK. For a local signed build, put the same four `ST_KEYSTORE_*` values in an
-ignored `keystore.properties` instead. Snapshots never need the secrets: they
-ship only the debug APK, which is debug-signed and contains no prefilled
-credentials (CI has no `local.properties`).
+For local signed builds, either export the four `SR_*` environment variables
+or create a git-ignored `keystore.properties` with `storeFile`,
+`storePassword`, `keyAlias`, `keyPassword`, then run
+`./gradlew :app:assembleRelease`.
