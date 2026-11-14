@@ -193,15 +193,17 @@ jobs:
 
           Built from commit `__SHA__`. See CHANGELOG.md in the tag for changes.
           NOTES
-          certs=$(cat release-certs.txt)
-          sed -i -e "s/__VERSION__/$version/g" -e "s/__SHA__/$GITHUB_SHA/g" \
-            -e "s|__CERTS__|$certs|" dist/NOTES.md
+          sed -i -e "s/__VERSION__/$version/g" -e "s/__SHA__/$GITHUB_SHA/g" dist/NOTES.md
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # The certificate block is multi-line, so substitute it with bash
+          # parameter expansion — sed would choke on the embedded newlines.
+          notes=$(cat dist/NOTES.md)
+          notes=${notes//__CERTS__/$(cat release-certs.txt)}
           gh release create "$GITHUB_REF_NAME" ./dist/*.apk ./dist/SHA256SUMS.txt \
             --verify-tag --title "$GITHUB_REF_NAME" --generate-notes \
-            --notes "$(cat dist/NOTES.md)"
+            --notes "$notes"
