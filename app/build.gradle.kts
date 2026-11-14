@@ -14,23 +14,20 @@ val devPrefill = Properties().apply {
 
 fun prefill(key: String): String = devPrefill.getProperty(key) ?: ""
 
-// Release signing. The release workflow decodes the keystore from the
-// ANDROID_KEYSTORE_BASE64 repository secret and passes ST_KEYSTORE_* environment
-// variables; local release builds can use an ignored keystore.properties with the
-// same ST_KEYSTORE_* keys. Without either, the release APK is built unsigned —
-// fine for local verification, never for distribution (the release workflow
-// refuses to publish an unsigned APK).
+// Release signing credentials come from the environment (CI) or from a local,
+// git-ignored keystore.properties file (see CONTRIBUTING.md, "Releases").
+// Without either, the release build stays unsigned, which is fine for local
+// development. Never commit the keystore or the passwords.
 val keystoreProps = Properties().apply {
     val file = rootProject.file("keystore.properties")
-    if (file.exists()) file.inputStream().use { load(it) }
+    if (file.isFile) file.inputStream().use(::load)
 }
 
-fun signingValue(name: String): String? =
-    providers.environmentVariable(name).orNull?.ifBlank { null }
-        ?: keystoreProps.getProperty(name)?.ifBlank { null }
+fun signingSecret(envName: String, propertyName: String): String? =
+    System.getenv(envName)?.takeIf { it.isNotBlank() }
+        ?: keystoreProps.getProperty(propertyName)?.takeIf { it.isNotBlank() }
 
-val releaseStoreFile = signingValue("ST_KEYSTORE_FILE") ?: ""
-val releaseSigningConfigured = releaseStoreFile.isNotEmpty()
+val releaseKeystoreFile: String? = signingSecret("SR_KEYSTORE_FILE", "storeFile")
 
 // Shown in Settings. CI can set GIT_COMMIT; local builds ask git, and builds without git omit it.
 val gitCommit: String = providers.environmentVariable("GIT_COMMIT").orNull?.take(10)
@@ -68,8 +65,10 @@ android {
         applicationId = "com.patbaumgartner.android.stringtelephone"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        // Overridable from the command line (-PversionCode=… -PversionName=…),
+        // which the release workflow uses to stamp tag-based versions.
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("versionName") as String?) ?: "0.1.0"
         buildConfigField("String", "GIT_COMMIT", gitCommit.asBuildConfigLiteral())
     }
 
@@ -81,14 +80,12 @@ android {
     }
 
     signingConfigs {
-        if (releaseSigningConfigured) {
+        if (releaseKeystoreFile != null) {
             create("release") {
-                storeFile = rootProject.file(releaseStoreFile)
-                storePassword = signingValue("ST_KEYSTORE_PASSWORD") ?: ""
-                keyAlias = signingValue("ST_KEY_ALIAS") ?: ""
-                // PKCS12 keys usually share the store password; fall back to it.
-                keyPassword = signingValue("ST_KEY_PASSWORD")
-                    ?: signingValue("ST_KEYSTORE_PASSWORD") ?: ""
+                storeFile = file(releaseKeystoreFile)
+                storePassword = signingSecret("SR_KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingSecret("SR_KEY_ALIAS", "keyAlias")
+                keyPassword = signingSecret("SR_KEY_PASSWORD", "keyPassword")
             }
         }
     }
@@ -104,7 +101,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
+            // Null (unsigned) when no signing credentials are configured.
+            signingConfig = signingConfigs.findByName("release")
             buildConfigField("String", "DEV_SERVER_URL", "\"\"")
             buildConfigField("String", "DEV_USERNAME", "\"\"")
             buildConfigField("String", "DEV_PASSWORD", "\"\"")
