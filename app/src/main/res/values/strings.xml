@@ -257,7 +257,8 @@
     <string name="e2ee_acknowledge">I verified it</string>
     <string name="about_heading">About</string>
     <string name="about_version">Version %1$s</string>
-    <string name="about_author">© 2026 Patrick Baumgartner - Crafted with ❤️</string>
+    <string name="about_author">© 2026 Patrick Baumgartner</string>
+    <string name="about_crafted">Crafted with ❤️</string>
     <string name="about_author_name" translatable="false">Patrick Baumgartner</string>
     <string name="about_author_url" translatable="false">https://patbaumgartner.com/</string>
     <string name="about_app_license">AGPL-3.0-or-later</string>
