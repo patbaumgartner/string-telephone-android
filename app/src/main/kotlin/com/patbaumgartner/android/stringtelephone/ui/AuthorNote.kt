@@ -43,14 +43,14 @@ internal fun AuthorNote() {
         }
     }
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+        TextButton(onClick = { licensesShown = true }, contentPadding = PaddingValues(0.dp)) {
+            Text(stringResource(R.string.about_open_source_licenses), color = StringTelephoneTheme.accents.brand)
+        }
         Text(
             text = stringResource(R.string.about_app_license),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        TextButton(onClick = { licensesShown = true }) {
-            Text(stringResource(R.string.about_open_source_licenses), color = StringTelephoneTheme.accents.brand)
-        }
         TextButton(
             onClick = { uriHandler.openUri(authorUrl) },
             contentPadding = PaddingValues(0.dp),
