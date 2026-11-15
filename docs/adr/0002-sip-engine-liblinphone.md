@@ -1,7 +1,7 @@
 # ADR-0002: SIP/media engine — Liblinphone (linphone-sdk-android)
 
 Date: 2026-10-11
-Status: Accepted
+Status: Accepted; app licensing updated by [ADR-0015](0015-e2ee-signal-protocol.md).
 
 ## Context
 

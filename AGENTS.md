@@ -1,6 +1,6 @@
 # String Telephone — Agent Guide
 
-Self-hosted one-to-one calls and messages: Android app (GPL-3.0), Kotlin/Spring Boot
+Self-hosted one-to-one calls and messages: Android app (AGPL-3.0-or-later), Kotlin/Spring Boot
 companion API (AGPL-3.0), Asterisk 22 PBX. Start with [README.md](README.md)
 and [docs/adr/](docs/adr/) for design decisions; this file covers what is easy
 to get wrong. If a convention changes, correct this file in the same commit.
