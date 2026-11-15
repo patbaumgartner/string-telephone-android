@@ -1,6 +1,6 @@
 # String Telephone
 
-![Licence: GPL-3.0](https://img.shields.io/badge/licence-GPL--3.0--or--later%20%2F%20AGPL--3.0--or--later-blue)
+![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0--or--later-blue)
 ![Status: prototype](https://img.shields.io/badge/status-prototype-orange)
 ![CI: Verify](https://github.com/patbaumgartner/string-telephone-android/actions/workflows/ci.yml/badge.svg)
 ![Security](https://github.com/patbaumgartner/string-telephone-android/actions/workflows/security.yml/badge.svg)
@@ -100,7 +100,7 @@ are included there too.
 
 ## Repository layout
 
-- `app/` — the Android application (GPL-3.0-or-later).
+- `app/` — the Android application (AGPL-3.0-or-later; see ADR-0015).
 - `core/` — pure-Kotlin protocol and domain models shared by app and tests.
 - `server/api/` — Kotlin/Spring Boot API, WebSockets, Thymeleaf administration
   and PostgreSQL 18 storage (AGPL-3.0-or-later), per ADR-0008.
@@ -222,8 +222,16 @@ Operator guidance lives in [docs/operations.md](docs/operations.md);
 provisioning is through `/admin/` or `stringtelephone-provision`, using the
 same authenticated service and automatic PBX reconciliation.
 
+## About
+
+Settings shows the app version, open-source notices, and author information.
+
+© 2026 [Patrick Baumgartner](https://patbaumgartner.com/) - Crafted with ❤️
+
 ## Licence
 
-The Android app: GPL-3.0-or-later ([LICENSE](LICENSE)). The companion API:
+The Android app: AGPL-3.0-or-later ([LICENSE](LICENSE)); see
+[ADR-0015](docs/adr/0015-e2ee-signal-protocol.md) for the licensing decision.
+The companion API:
 AGPL-3.0-or-later ([server/api/LICENSE-AGPL](server/api/LICENSE-AGPL)).
 Third-party components: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

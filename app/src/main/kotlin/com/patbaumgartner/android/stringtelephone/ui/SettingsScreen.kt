@@ -74,6 +74,11 @@ internal fun SettingsScreen(viewModel: AppViewModel) {
                 color = StringTelephoneTheme.accents.textMuted,
             )
             Spacer(Modifier.height(24.dp))
+            Text(
+                text = stringResource(R.string.about_heading),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             val build = viewModel.buildInfo()
             SelectionContainer {
                 Text(
@@ -86,6 +91,7 @@ internal fun SettingsScreen(viewModel: AppViewModel) {
                     color = StringTelephoneTheme.accents.textMuted,
                 )
             }
+            AuthorNote()
             Spacer(Modifier.height(32.dp))
         }
     }
