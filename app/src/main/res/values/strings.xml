@@ -67,9 +67,6 @@
     <string name="settings_credentials_note">Credentials are encrypted on this phone and are never
         included in messages or notifications. Clearing local data also signs you out; messages
         stored on the server are not deleted.</string>
-    <string name="settings_version">Version %1$s</string>
-    <string name="settings_version_commit">Version %1$s (%2$s)</string>
-
     <string name="call_incoming">Incoming call</string>
     <string name="call_outgoing">Calling…</string>
     <string name="call_active">In call</string>
@@ -257,6 +254,7 @@
     <string name="e2ee_acknowledge">I verified it</string>
     <string name="about_heading">About</string>
     <string name="about_version">Version %1$s</string>
+    <string name="about_version_commit">Version %1$s (%2$s)</string>
     <string name="about_author">© 2026 Patrick Baumgartner</string>
     <string name="about_crafted">Crafted with ❤️</string>
     <string name="about_author_name" translatable="false">Patrick Baumgartner</string>
