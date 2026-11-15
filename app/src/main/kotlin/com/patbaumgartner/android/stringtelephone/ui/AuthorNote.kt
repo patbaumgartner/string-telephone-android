@@ -1,6 +1,7 @@
 package com.patbaumgartner.android.stringtelephone.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
@@ -50,9 +51,17 @@ internal fun AuthorNote() {
         TextButton(onClick = { licensesShown = true }) {
             Text(stringResource(R.string.about_open_source_licenses), color = StringTelephoneTheme.accents.brand)
         }
-        TextButton(onClick = { uriHandler.openUri(authorUrl) }) {
+        TextButton(
+            onClick = { uriHandler.openUri(authorUrl) },
+            contentPadding = PaddingValues(0.dp),
+        ) {
             Text(styledAuthorNote, style = MaterialTheme.typography.bodyMedium, color = StringTelephoneTheme.accents.brand)
         }
+        Text(
+            text = stringResource(R.string.about_crafted),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
     if (licensesShown) {
         val licenseText = remember(resources) {
