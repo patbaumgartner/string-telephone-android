@@ -5,6 +5,14 @@ All notable changes are documented here. The project follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Tag-triggered releases failed at `:app:buildReleasePreBundle` with "multiple
+  shrunk-resources files": AGP cannot build an AAB while per-ABI splits are
+  enabled (issuetracker 402800800). The release workflow now builds the signed
+  per-ABI APKs and the AAB in two separate Gradle invocations, with ABI splits
+  disabled for the AAB (`-PnoAbiSplits` in `app/build.gradle.kts`).
+
 ## [0.2.0] - 2026-11-16
 
 ### Added

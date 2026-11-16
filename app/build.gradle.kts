@@ -139,7 +139,11 @@ android {
     // tests install it), but only the split APKs are published to Releases.
     splits {
         abi {
-            isEnable = true
+            // AGP cannot build an AAB while per-ABI splits are enabled
+            // (`:app:buildReleasePreBundle` fails with "multiple shrunk-resources
+            // files", issuetracker 402800800), so the release workflow builds the
+            // AAB in a separate Gradle invocation with -PnoAbiSplits.
+            isEnable = !project.hasProperty("noAbiSplits")
             reset()
             include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
             isUniversalApk = true

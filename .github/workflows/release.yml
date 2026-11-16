@@ -160,13 +160,26 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "Building version $name (versionCode $code) from tag $GITHUB_REF_NAME"
 
-      - name: Build signed APKs and AAB
+      - name: Build signed per-ABI APKs
         env:
           SR_KEYSTORE_PASSWORD: ${{ secrets.SR_KEYSTORE_PASSWORD }}
           SR_KEY_ALIAS: ${{ secrets.SR_KEY_ALIAS }}
           SR_KEY_PASSWORD: ${{ secrets.SR_KEY_PASSWORD }}
         run: |
-          ./gradlew --no-daemon :app:assembleRelease :app:bundleRelease \
+          ./gradlew --no-daemon :app:assembleRelease \
+            -PversionName="${{ steps.version.outputs.name }}" \
+            -PversionCode="${{ steps.version.outputs.code }}"
+
+      - name: Build signed AAB (ABI splits disabled)
+        env:
+          SR_KEYSTORE_PASSWORD: ${{ secrets.SR_KEYSTORE_PASSWORD }}
+          SR_KEY_ALIAS: ${{ secrets.SR_KEY_ALIAS }}
+          SR_KEY_PASSWORD: ${{ secrets.SR_KEY_PASSWORD }}
+        run: |
+          # AGP refuses to bundle while multiple per-ABI shrunk-resources exist
+          # (issuetracker 402800800), so the AAB is built in a separate invocation
+          # with splits off; the APKs built above are left untouched.
+          ./gradlew --no-daemon :app:bundleRelease -PnoAbiSplits \
             -PversionName="${{ steps.version.outputs.name }}" \
             -PversionCode="${{ steps.version.outputs.code }}"
 

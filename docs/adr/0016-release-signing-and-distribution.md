@@ -35,7 +35,11 @@ error-prone.
     `versionCode` (`major*10000 + minor*100 + patch` → `200`) via
     `-PversionName` / `-PversionCode`; snapshot builds use
     `versionCode = 2_000_000_000 + run_number` so they always sort above any
-    tag-derived code and can update over releases.
+    tag-derived code and can update over releases. The release job builds the
+    per-ABI APKs and the AAB in **two separate Gradle invocations**, with ABI
+    splits disabled for the AAB (`-PnoAbiSplits`): AGP cannot bundle while
+    multiple per-ABI shrunk-resources files exist
+    (issuetracker 402800800).
 - **Per-ABI assets:** kept (not a universal APK): the Signal/linphone native
   libs make a universal APK ~420 MB while a split is ~110–125 MB. The
   universal build (`app-universal-*.apk`) is still produced locally for
