@@ -5,6 +5,8 @@ All notable changes are documented here. The project follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-16
+
 ### Added
 
 - Release pipeline aligned with the other Android apps (ADR-0016): every push
@@ -25,6 +27,9 @@ All notable changes are documented here. The project follows
   `keyPassword`). The keystore is dedicated to this app instead of shared
   with another app — v0.1.0 was signed with the old key, so updating from
   v0.1.0 to a later release requires a one-time uninstall
+- The About screen is aligned with the other apps: version and build commit
+  are shown in the shared About note, and the typeface licence moved into
+  About
 
 ## [0.1.0] - 2026-11-14
 
