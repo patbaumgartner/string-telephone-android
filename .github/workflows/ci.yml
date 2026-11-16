@@ -1,5 +1,5 @@
 ---
-name: Verify
+name: CI
 
 on:
   push:
@@ -50,12 +50,16 @@ jobs:
       - name: Validate repository contracts and deployment helpers
         run: |
           node scripts/check-adrs.mjs
+          node scripts/check-ci-jdk.mjs
+          node scripts/check-dockerfile-jdk.mjs
+          node scripts/check-docs-jdk.mjs
+          node scripts/check-protocol-doc.mjs
           node scripts/check-secrets.mjs
           node --test scripts/test-deploy.mjs scripts/test-admin-ui.mjs
 
       - name: Test, lint, and package
         run: >-
-          ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug
+          ./gradlew --no-daemon :core:test :core:pitest :app:testDebugUnitTest :app:lintDebug
           :app:assembleDebug :app:assembleRelease :server:api:test :server:api:installDist
 
       - name: Verify installed provisioning commands
@@ -73,5 +77,6 @@ jobs:
             core/build/test-results/
             server/api/build/reports/
             server/api/build/test-results/
+            core/build/reports/pitest/
           if-no-files-found: ignore
           retention-days: 7

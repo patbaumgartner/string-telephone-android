@@ -1,8 +1,8 @@
 # String Telephone
 
-![Licence: AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0--or--later-blue)
+![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 ![Status: prototype](https://img.shields.io/badge/status-prototype-orange)
-![CI: Verify](https://github.com/patbaumgartner/string-telephone-android/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/patbaumgartner/string-telephone-android/actions/workflows/ci.yml/badge.svg)
 ![Security](https://github.com/patbaumgartner/string-telephone-android/actions/workflows/security.yml/badge.svg)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.4-7F52FF?logo=kotlin&logoColor=white)
 ![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4?logo=android&logoColor=white)
@@ -136,13 +136,13 @@ are included there too.
   encryption).
 - [SECURITY.md](SECURITY.md) — how to report vulnerabilities privately.
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — third-party components
-  and licences.
+  and licenses.
 - [CHANGELOG.md](CHANGELOG.md) — notable changes per release.
 
 ## Design
 
 The UI uses the Manrope typeface (SIL Open Font License, bundled in
-`app/src/main/res/font/` with its licence in `app/src/main/res/raw/`) and a
+`app/src/main/res/font/` with its license in `app/src/main/res/raw/`) and a
 Material 3 theme built from a small semantic palette: cyan brand
 (`0xFF00AFE1`), porcelain/ink neutrals, and coral/amber accents reserved for
 destructive and warning states. Light and dark variants are defined for every
@@ -228,7 +228,7 @@ Settings shows the app version, open-source notices, and author information.
 
 © 2026 [Patrick Baumgartner](https://patbaumgartner.com/) - Crafted with ❤️
 
-## Licence
+## License
 
 The Android app: AGPL-3.0-or-later ([LICENSE](LICENSE)); see
 [ADR-0015](docs/adr/0015-e2ee-signal-protocol.md) for the licensing decision.
