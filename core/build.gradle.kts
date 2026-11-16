@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.pitest)
 }
 
 kotlin {
@@ -12,6 +13,18 @@ kotlin {
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
+}
+
+// Mutation testing runs on this pure-JVM module only; the Android :app module
+// is not pitest-compatible (AGP-produced bytecode/variant complexity).
+pitest {
+    targetClasses = setOf("com.patbaumgartner.android.stringtelephone.core.*")
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    // Regression floor: measured baseline 2026-11-16 is 27% (297/1095 killed,
+    // test strength 92% on covered lines). Fails the build if coverage drops.
+    mutationThreshold = 25
 }
 
 dependencies {

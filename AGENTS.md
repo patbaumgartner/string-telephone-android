@@ -15,11 +15,15 @@ provide Docker already).
 
 ```bash
 export ANDROID_HOME="$HOME/Android/Sdk"
-./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug \
+./gradlew --no-daemon :core:test :core:pitest :app:testDebugUnitTest :app:lintDebug \
   :app:assembleDebug :app:assembleRelease :server:api:test :server:api:installDist
 yamllint .
 find . -name '*.sh' -not -path './*/build/*' -exec shellcheck {} +
 node scripts/check-adrs.mjs
+node scripts/check-ci-jdk.mjs
+node scripts/check-dockerfile-jdk.mjs
+node scripts/check-docs-jdk.mjs
+node scripts/check-protocol-doc.mjs
 node scripts/check-secrets.mjs
 node --test scripts/test-deploy.mjs
 node --test scripts/test-provisioning.mjs
@@ -140,7 +144,9 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
 
 1. Unit tests: `:core:test`, `:app:testDebugUnitTest`, `:server:api:test`
    (Docker required — Testcontainers starts a PostgreSQL 18 container that
-   gives each test its own database). The `ScreenshotTest` suite renders every
+   gives each test its own database), plus mutation tests `:core:pitest` on the
+   pure-JVM `:core` module (the Android `:app` module is not pitest-compatible).
+   The `ScreenshotTest` suite renders every
    screen to
    `app/build/screenshots/` — refresh `docs/screenshots/` in the same commit
    whenever UI output changes.
@@ -168,7 +174,8 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    deletes only its own volumes; stop a demo first to free SIP/RTP ports.
    It starts only the services it exercises (Asterisk, PostgreSQL, API) and
    does not verify Android audio/video or the media store.
-4. CI runs 1 + assemble + lint + API installDist on main pushes and pull requests.
+4. CI runs 1 + assemble + lint + `:core:pitest` + API installDist on main
+   pushes and pull requests.
    Security CI builds app and API for CodeQL and reviews PR dependency changes.
    `.github/workflows/release.yml` additionally publishes APKs to GitHub
    Releases (ADR-0016): a `snapshot` prerelease with signed per-ABI APKs +
