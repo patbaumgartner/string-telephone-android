@@ -57,7 +57,7 @@ fun String.asBuildConfigLiteral(): String = buildString {
 
 android {
     namespace = "com.patbaumgartner.android.stringtelephone"
-    compileSdk = 37
+    compileSdk = 38
 
     sourceSets["test"].manifest.srcFile("src/test/manifest/AndroidManifest.xml")
 
