@@ -57,7 +57,8 @@ fun String.asBuildConfigLiteral(): String = buildString {
 
 android {
     namespace = "com.patbaumgartner.android.stringtelephone"
-    compileSdk = 38
+    compileSdk = 37
+    compileSdkMinor = 1 // Compose BOM 2026.11 requires API 37.1
 
     sourceSets["test"].manifest.srcFile("src/test/manifest/AndroidManifest.xml")
 
