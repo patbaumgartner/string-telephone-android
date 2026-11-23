@@ -47,7 +47,7 @@ testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.
 testcontainers-localstack = { module = "org.testcontainers:localstack", version.ref = "testcontainers" }
 aws-s3 = { module = "software.amazon.awssdk:s3", version.ref = "awsSdk" }
 aws-crt = { module = "software.amazon.awssdk.crt:aws-crt", version.ref = "awsSdk" }
-robolectric = { module = "org.robolectric:robolectric", version = "4.17" }
+robolectric = { module = "org.robolectric:robolectric", version = "4.18.1" }
 androidx-test-core = { module = "androidx.test:core", version = "1.6.1" }
 androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
 androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
