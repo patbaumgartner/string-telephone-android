@@ -8,11 +8,11 @@ tests are easiest to review.
 For a complete app/server demo, start with [the setup guide](docs/setup.md).
 The steps below set up a build environment, not accounts or a running PBX.
 
-Install JDK 27 (17–26 also work; CI builds on 27) and Android SDK 37, then
-clone the repository. Android Studio
-can import the root directory directly; command-line builds use the checked-in
-Gradle wrapper and need `ANDROID_HOME` set, or an `sdk.dir` line in
-`local.properties`.
+Install JDK 27 (17–26 also work; CI builds on 27) and Android SDK Platform 37.1
+(`compileSdk = 37`, `compileSdkMinor = 1`; `targetSdk` stays 37), then clone the
+repository. Android Studio can import the root directory directly; command-line
+builds use the checked-in Gradle wrapper and need `ANDROID_HOME` set, or an
+`sdk.dir` line in `local.properties`.
 
 ```bash
 git clone https://github.com/patbaumgartner/string-telephone-android.git
@@ -23,9 +23,10 @@ export ANDROID_HOME="$HOME/Android/Sdk"
 
 Real devices, an Asterisk server, and credentials are not required for unit
 tests or compilation. For manual device testing, copy `local.properties.example`
-to the ignored `local.properties` and use development credentials only.
-`stringtelephone.password` prefills the **API token**, while
-`stringtelephone.sipSecret` prefills the separate **SIP password**. Prefills
+to the ignored `local.properties`, replace `/path/to/Android/Sdk` with your
+absolute SDK path (or remove `sdk.dir` and use `ANDROID_HOME`), and use
+development credentials only. `stringtelephone.password` prefills the **API
+token**, while `stringtelephone.sipSecret` prefills the separate **SIP password**. Prefills
 exist only in debug builds; do not share debug APKs containing credentials.
 
 Use `scripts/deploy-device.sh` to build, install, and launch on a connected
@@ -59,33 +60,61 @@ Use Conventional Commit subjects, for example
 
 ## Validate
 
+The complete CI-equivalent gate requires Git, JDK 27, Android SDK Platform 37.1
+with build-tools and platform-tools, Node.js 24, Docker Engine/Desktop with a
+running daemon and Compose, yamllint, and ShellCheck. CI installs yamllint with
+`pipx` and provides Docker. OpenSSL and curl are also used by the documented
+server setup and live prototype checks. `actionlint` is optional for additional
+workflow validation.
+
 ```bash
-./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug \
-  :app:assembleDebug :app:assembleRelease :server:api:test :server:api:installDist
+./gradlew --no-daemon :core:test :core:pitest :app:testDebugUnitTest :app:lintDebug \
+  :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease \
+  :server:api:test :server:api:installDist
 yamllint .
 find . -name '*.sh' -not -path './*/build/*' -exec shellcheck {} +
 node scripts/check-adrs.mjs
+node scripts/check-ci-jdk.mjs
+node scripts/check-dockerfile-jdk.mjs
+node scripts/check-docs-jdk.mjs
+node scripts/check-protocol-doc.mjs
+node scripts/check-release-sdk.mjs
 node scripts/check-secrets.mjs
-node --test scripts/test-deploy.mjs
+node --test scripts/test-deploy.mjs scripts/test-admin-ui.mjs scripts/test-auto-merge.mjs
 node --test scripts/test-provisioning.mjs
 node scripts/check-design.mjs
 git diff --check
 ```
 
 `check-design.mjs` compares the bundled Manrope fonts against the design
-reference project and checks adaptive icon layers and cyan brand resources,
-so it only passes on machines where
-that reference is checked out next to this repository (see the `REF` path in
-the script). CI runs the other gates.
+reference project and checks adaptive icon layers and cyan brand resources. It
+is a local-only gate for machines where that reference is checked out next to
+this repository (see the `REF` path in the script). Every other command above is
+the full CI build-job gate; CI's separate emulator job additionally runs
+`connectedDebugAndroidTest`.
 
-Install Node.js 24, yamllint, and ShellCheck for the repository checks. If
-available, `actionlint` also validates the GitHub workflows. Deploy-helper
-tests use Node's built-in runner and mocked SDK/Gradle tools: no device,
+Deploy-helper tests use Node's built-in runner and mocked SDK/Gradle tools: no device,
 emulator, or credentials are needed, and temporary fixtures are removed.
 The provisioning smoke tests run the actual installed CLI against an HTTP
 fixture, verifying session login and CSRF. Backend integration tests exercise
 the real Spring server with an isolated PBX boundary. Run
 `:server:api:installDist` before the CLI tests.
+
+### Instrumented UI smoke test
+
+`app/src/androidTest/.../OnboardingTest.kt` launches the real `MainActivity` and
+checks that separate API-token and SIP-password credentials are required before
+sign-in can make a network request. It needs no server or credentials and grants
+the notification permission so Android 13+ does not cover the UI with a dialog.
+CI runs `connectedDebugAndroidTest` on an API 34 x86_64 emulator. Locally, use a
+ready emulator or device with a fresh, signed-out debug installation:
+
+```bash
+./gradlew --no-daemon :app:connectedDebugAndroidTest
+```
+
+The main validation command's `:app:assembleDebugAndroidTest` task only compiles
+and packages the suite; it does not need or start a device.
 
 ### Screenshots
 
@@ -153,9 +182,26 @@ using it, a repository administrator must:
    auto-merge cannot bypass validation.
 3. Allow GitHub Actions to create/approve pull requests if required by the
    repository or organization policy.
+4. Configure `AUTO_MERGE_TOKEN` as a fine-grained token restricted to this
+   repository with **Contents: Read and write**, **Pull requests: Read and
+   write**, and **Workflows: Read and write**. Contents and Pull requests permit
+   the rebase auto-merge; Workflows is required for updates touching
+   `.github/workflows/**`.
 
 The workflow does not check out PR code or merge major/unknown update types.
-It queues merges rather than bypassing protection. No repository settings are
+Before queueing a patch/minor merge, it makes one paginated, read-only request
+for the active rules applying to `main` and verifies that their
+`required_status_checks` include **Test, lint, and package**. A missing rule or
+unreadable metadata fails closed before `gh pr merge`; fix the active ruleset or
+token read access rather than bypassing this gate. Fetch-metadata and preflight
+keep using `GITHUB_TOKEN`; only the final merge uses `AUTO_MERGE_TOKEN`, and an
+empty value stops before `gh pr merge` with an actionable error.
+
+After a merge, ordinary CI reruns the build/unit and instrumented jobs behind the
+aggregate check on `main`, and the existing Release workflow publishes the
+signed per-ABI Snapshot APKs and `SHA256SUMS`. Thus the dedicated token only
+queues validated dependency updates; post-merge CI and Snapshot publication
+still prove and publish the resulting `main` commit. No repository settings are
 changed by adding these files; check the workflow result if auto-merge is
 disabled or restricted.
 

@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Test, lint, and package
+    name: Build and unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -37,7 +37,9 @@ jobs:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Install Android SDK 37.1
-        run: ${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "platforms;android-37.1"
+        run: >-
+          "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-37.1"
 
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
@@ -57,13 +59,15 @@ jobs:
           node scripts/check-dockerfile-jdk.mjs
           node scripts/check-docs-jdk.mjs
           node scripts/check-protocol-doc.mjs
+          node scripts/check-release-sdk.mjs
           node scripts/check-secrets.mjs
-          node --test scripts/test-deploy.mjs scripts/test-admin-ui.mjs
+          node --test scripts/test-deploy.mjs scripts/test-admin-ui.mjs scripts/test-auto-merge.mjs
 
       - name: Test, lint, and package
         run: >-
           ./gradlew --no-daemon :core:test :core:pitest :app:testDebugUnitTest :app:lintDebug
-          :app:assembleDebug :app:assembleRelease :server:api:test :server:api:installDist
+          :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease
+          :server:api:test :server:api:installDist
 
       - name: Verify installed provisioning commands
         run: node --test scripts/test-provisioning.mjs
@@ -83,3 +87,83 @@ jobs:
             core/build/reports/pitest/
           if-no-files-found: ignore
           retention-days: 7
+
+  instrumented:
+    name: Instrumented tests (emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 27
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880  # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '27'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c  # v6.4.1
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Install Android SDK 37.1
+        run: >-
+          "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          "platforms;android-37.1"
+
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run instrumented tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d  # v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          script: ./gradlew --no-daemon connectedDebugAndroidTest
+
+      - name: Upload failure reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: connected-build-reports-${{ github.run_attempt }}
+          path: |
+            app/build/reports/
+            app/build/outputs/androidTest-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  verify:
+    name: Test, lint, and package
+    if: ${{ always() }}
+    needs: [build, instrumented]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Require build and instrumented success
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          INSTRUMENTED_RESULT: ${{ needs.instrumented.result }}
+        run: |
+          failed=0
+          if [ "$BUILD_RESULT" != "success" ]; then
+            echo "::error::Build and unit tests did not succeed: $BUILD_RESULT"
+            failed=1
+          fi
+          if [ "$INSTRUMENTED_RESULT" != "success" ]; then
+            echo "::error::Instrumented tests did not succeed: $INSTRUMENTED_RESULT"
+            failed=1
+          fi
+          if [ "$failed" -eq 0 ]; then
+            echo "Build, unit tests, and instrumented tests all succeeded."
+          fi
+          exit "$failed"

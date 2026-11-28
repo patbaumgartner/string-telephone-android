@@ -54,7 +54,9 @@ error-prone.
   The legacy `ANDROID_KEYSTORE_*` secrets (which held the shared key) were
   deleted. Signer certificate SHA-256:
   `7F:73:86:D7:FC:E8:03:38:E1:8D:C0:DD:8C:04:9C:77:1A:36:F5:36:62:7D:48:6F:C9:E3:90:A7:DE:A6:DD:6A`.
-  Snapshots and releases share this key, so they update in place.
+  Snapshots and releases share this key, so Stable → Snapshot updates in place.
+  Snapshot → Stable is a versionCode downgrade; myApps makes that switch
+  manual-only with a local-data-loss warning rather than uninstalling automatically.
 - **Build wiring:** `app/build.gradle.kts` reads the credentials from the
   `SR_KEYSTORE_FILE` / `SR_KEYSTORE_PASSWORD` / `SR_KEY_ALIAS` /
   `SR_KEY_PASSWORD` environment variables (CI) or a local, git-ignored
@@ -73,7 +75,9 @@ error-prone.
 ## Consequences
 
 - Users can download and install the per-ABI APKs directly from the Releases
-  page; releases and snapshots share one key and update in place.
+  page. Stable → Snapshot updates in place. Snapshot → Stable is a versionCode
+  downgrade; myApps makes that switch manual-only with a local-data-loss warning,
+  not an automatic uninstall.
 - One-time migration: v0.1.0 (versionCode 1) was signed with the earlier
   shared key, so the first release signed with the new key cannot update over
   v0.1.0 — users uninstall v0.1.0 once. Later releases chain normally.
