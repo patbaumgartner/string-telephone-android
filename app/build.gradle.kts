@@ -71,6 +71,7 @@ android {
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 200
         versionName = (project.findProperty("versionName") as String?) ?: "0.2.0"
         buildConfigField("String", "GIT_COMMIT", gitCommit.asBuildConfigLiteral())
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     testOptions {
@@ -176,6 +177,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.material3)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)
@@ -185,4 +187,10 @@ dependencies {
     testImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.androidx.compose.ui.graphics)
     testImplementation(libs.androidx.compose.material3)
+
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.junit)
 }

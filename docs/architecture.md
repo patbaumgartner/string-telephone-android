@@ -153,6 +153,9 @@ Transport configuration and deployment limitations belong in
 ## Verification and repository tooling
 
 - JVM tests cover `core/`, Android logic and Robolectric screenshots, and the API.
+- An instrumented smoke test launches the real `MainActivity` and checks onboarding validation
+  without credentials or network access. CI runs it with `connectedDebugAndroidTest` on an
+  API 34 x86_64 emulator; `assembleDebugAndroidTest` packages it locally without a device.
 - Android lint and debug/release assembly exercise manifests, resources, and R8.
 - `scripts/test-prototype.sh` checks live SIP behaviour against Docker/Asterisk.
 - ADR and secret checks, YAML lint, ShellCheck, and mocked deployment-helper

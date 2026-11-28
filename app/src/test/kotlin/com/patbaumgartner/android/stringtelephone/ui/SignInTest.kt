@@ -166,6 +166,16 @@ class SignInTest {
     }
 
     @Test
+    fun `missing API token reports validation error before saving credentials`() {
+        val vm = viewModel { error("No request should be made") }
+        vm.onPasswordChanged("")
+        vm.signIn()
+        assertEquals(SignInError.MISSING_CREDENTIALS, repository.signIn.value.error)
+        assertFalse(store.hasCredentials())
+        assertNull(engine.startedConfig)
+    }
+
+    @Test
     fun `missing SIP password reports validation error before saving credentials`() {
         val vm = viewModel { error("No request should be made") }
         vm.onSipSecretChanged("")

@@ -36,10 +36,12 @@ You need:
 
 - Git.
 - JDK 27, matching CI. The build also supports JDK 17–26.
-- Android Studio with Android SDK Platform 37, its build tools and
+- Android Studio with Android SDK Platform 37.1 (`compileSdk = 37`,
+  `compileSdkMinor = 1`; `targetSdk` stays 37), its build tools and
   platform-tools installed. Accept the SDK licences in the SDK Manager.
 - Docker Engine/Desktop with `docker compose` for the servers.
-- Node.js 24 and `openssl` for the live SIP/TLS verification script.
+- Node.js 24 for verification helpers, OpenSSL for generating required server
+  secrets and SIP/TLS verification, and `curl` for readiness checks.
 
 Run all commands below from the repository root unless stated otherwise:
 
@@ -66,6 +68,7 @@ First configure the administrator. There are **no default passwords**:
 cp server/.env.example server/.env
 chmod 600 server/.env
 openssl rand -hex 32
+sed -i "s/^GARAGE_RPC_SECRET=$/GARAGE_RPC_SECRET=$(openssl rand -hex 32)/" server/.env
 ```
 
 Edit `server/.env` in a text editor:
@@ -77,9 +80,12 @@ Edit `server/.env` in a text editor:
   separate private API-to-PBX credential; do not reuse the admin password.
 - Set `DB_PASSWORD` to another fresh `openssl rand -hex 32` value. This is the
   PostgreSQL password; the API refuses to start without it.
+- Leave the generated `GARAGE_RPC_SECRET` in place. The `sed` command above
+  fills only its blank placeholder without printing the secret. Garage requires
+  this independent cluster credential and refuses to start without it.
 
 Do not commit this file or share screenshots of it. Then start the stack
-(API, PostgreSQL and Asterisk):
+(API, PostgreSQL, Asterisk and Garage):
 
 ```bash
 ST_API_HTTP_BIND=0.0.0.0 docker compose -f server/compose.yaml up -d --build --wait
@@ -98,7 +104,7 @@ If startup fails:
 
 ```bash
 docker compose -f server/compose.yaml ps
-docker compose -f server/compose.yaml logs --tail=100 api asterisk db
+docker compose -f server/compose.yaml logs --tail=100 api asterisk db garage
 ```
 
 Ports 8080, 8443, 5060/UDP, 5061/TCP and UDP 10000-10100 must be available. To
@@ -263,7 +269,7 @@ app is open, and the same notice leads to the notification settings.
 | `create-user` says the account exists | Use the existing account or reset its credentials in the dashboard. Do not delete the database just to reset a password. |
 | PBX provisioning pending | Check both containers, matching AMI credentials and the shared config volume. Save one-time credentials, then retry reconciliation. |
 | Admin login rejected | Check `ADMIN_USERNAME` and `ADMIN_PASSWORD` in `server/.env`; restart the API after changing them. These are separate from Android credentials. |
-| SDK not found | Set `ANDROID_HOME` or `sdk.dir`; install SDK 37 and accept its licences. |
+| SDK not found | Set `ANDROID_HOME` or `sdk.dir`; install SDK Platform 37.1 (`compileSdkMinor = 1`) and accept its licences. |
 
 For more detail, see [Operations](operations.md), [Contributing](../CONTRIBUTING.md)
 and the [API protocol](protocol.md).

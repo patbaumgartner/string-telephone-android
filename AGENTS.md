@@ -9,14 +9,18 @@ to get wrong. If a convention changes, correct this file in the same commit.
 
 Gradle needs the SDK location from `ANDROID_HOME` or `sdk.dir` in
 `local.properties`. The build runs on JDK 27 (bytecode target stays 17);
-CI builds on JDK 27 too. `:server:api:test` needs a running Docker daemon
-(Testcontainers provisions PostgreSQL per test JVM; GitHub-hosted runners
-provide Docker already).
+CI builds on JDK 27 too. Install Android SDK Platform 37.1
+(`compileSdkMinor = 1`; `targetSdk` stays 37). `:server:api:test` needs a
+running Docker daemon (Testcontainers provisions PostgreSQL per test JVM;
+GitHub-hosted runners provide Docker already). The remaining local gates use
+Git, Node.js 24, yamllint and ShellCheck; setup/prototype helpers also use
+OpenSSL and curl.
 
 ```bash
 export ANDROID_HOME="$HOME/Android/Sdk"
 ./gradlew --no-daemon :core:test :core:pitest :app:testDebugUnitTest :app:lintDebug \
-  :app:assembleDebug :app:assembleRelease :server:api:test :server:api:installDist
+  :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease \
+  :server:api:test :server:api:installDist
 yamllint .
 find . -name '*.sh' -not -path './*/build/*' -exec shellcheck {} +
 node scripts/check-adrs.mjs
@@ -24,14 +28,18 @@ node scripts/check-ci-jdk.mjs
 node scripts/check-dockerfile-jdk.mjs
 node scripts/check-docs-jdk.mjs
 node scripts/check-protocol-doc.mjs
+node scripts/check-release-sdk.mjs
 node scripts/check-secrets.mjs
-node --test scripts/test-deploy.mjs
+node --test scripts/test-deploy.mjs scripts/test-admin-ui.mjs scripts/test-auto-merge.mjs
 node --test scripts/test-provisioning.mjs
 node scripts/check-design.mjs
 ```
 
-`check-design.mjs` is a local gate only (requires the design reference project
-next to this one; not run in CI). The full CI gate is everything above it.
+`check-design.mjs` is a local-only gate (requires the design reference project
+next to this one; not run in CI). Every other command above is the full CI
+build-job gate. CI's separate emulator job additionally runs
+`connectedDebugAndroidTest`; locally that connected task needs a ready target,
+while the included `assembleDebugAndroidTest` does not.
 
 See [docs/architecture.md](docs/architecture.md) for the module map,
 [docs/protocol.md](docs/protocol.md) for contracts, and
@@ -150,7 +158,13 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    screen to
    `app/build/screenshots/` — refresh `docs/screenshots/` in the same commit
    whenever UI output changes.
-2. Static gates: `node scripts/check-adrs.mjs`,
+2. Instrumented UI: `OnboardingTest` launches the real `MainActivity`, grants the
+   notification permission to avoid a system-dialog overlay, and proves separate
+   API/SIP credentials are required before sign-in can make a network request.
+   `:app:assembleDebugAndroidTest` compiles/packages the suite without a device;
+   `:app:connectedDebugAndroidTest` runs it on a ready emulator or device with a
+   fresh, signed-out debug installation. CI uses an API 34 x86_64 emulator.
+3. Static gates: `node scripts/check-adrs.mjs`,
    `node scripts/check-secrets.mjs`, and locally
    `node scripts/check-design.mjs`, plus YAML lint, ShellCheck, and
    `node --test scripts/test-deploy.mjs`. Feature oracles
@@ -165,7 +179,7 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    run from the gate ledgers; the last eleven are
    also appended to `scripts/run-session-verify.sh`
    (`verify-screenshots.mjs` needs the suite's `app/build/screenshots`).
-3. Live prototype: `scripts/test-prototype.sh` (Docker) proves REGISTER,
+4. Live prototype: `scripts/test-prototype.sh` (Docker) proves REGISTER,
    INVITE/BYE, and the negative auth path against real Asterisk config.
    It also proves read receipts end to end (send, author-may-not-mark,
    recipient mark, history `readAt`, idempotence), video negotiation (VP8
@@ -174,8 +188,10 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    deletes only its own volumes; stop a demo first to free SIP/RTP ports.
    It starts only the services it exercises (Asterisk, PostgreSQL, API) and
    does not verify Android audio/video or the media store.
-4. CI runs 1 + assemble + lint + `:core:pitest` + API installDist on main
-   pushes and pull requests.
+5. CI runs 1 + assemble + lint + `:core:pitest` + API installDist, plus 2 on
+   an emulator, on main pushes and pull requests. The required
+   **Test, lint, and package** check is an aggregate that fails unless both the
+   **Build and unit tests** and **Instrumented tests (emulator)** jobs succeed.
    Security CI builds app and API for CodeQL and reviews PR dependency changes.
    `.github/workflows/release.yml` additionally publishes APKs to GitHub
    Releases (ADR-0016): a `snapshot` prerelease with signed per-ABI APKs +
@@ -191,6 +207,13 @@ not manage emulator processes. Mocked helper tests require Node.js 24.
    (or an ignored `keystore.properties` locally) and signs only when
    `SR_KEYSTORE_FILE` is set. Every published APK is verified with `apksigner`
    and the job fails on an unsigned APK. Never commit keystores or APKs.
-   Dependabot patch/minor auto-merge requires repository auto-merge and branch
-   protection settings; see CONTRIBUTING.md. Never check out PR code in its
-   write-token `pull_request_target` workflow.
+   Stable → Snapshot updates in place. Snapshot → Stable is a versionCode
+   downgrade; myApps makes that switch manual-only with a local-data-loss
+   warning, never an automatic uninstall.
+   Dependabot patch/minor auto-merge requires repository auto-merge and an
+   active `main` ruleset; a paginated, read-only rules-metadata gate verifies
+   the aggregate check is required before queueing a merge. Metadata/preflight
+   use `GITHUB_TOKEN`; only the final merge uses the guarded `AUTO_MERGE_TOKEN`.
+   See CONTRIBUTING.md for its fine-grained scopes and the post-merge CI/snapshot
+   purpose. Never check out PR code in its write-token `pull_request_target`
+   workflow.

@@ -35,7 +35,10 @@ page:
 - **Snapshot** (prerelease, rebuilt on every push to `main`): the latest
   signed per-ABI APKs for testing.
 
-Both use the same release key, so they install over each other as updates.
+Both use the same release key. Stable → Snapshot installs as an in-place update.
+Snapshot → Stable is a versionCode downgrade, so Android cannot install it
+directly. myApps makes that switch manual-only and warns that uninstalling and
+reinstalling erases local app data; it does not automatically uninstall the app.
 Sideloading on Android 8+ requires allowing "Install unknown apps" for the
 app you open the APK with. Note: v0.1.0 was signed with an earlier key, so
 installing a later release over v0.1.0 requires a one-time uninstall.
@@ -160,16 +163,20 @@ after a UI change and copy updated images into `docs/screenshots/`.
 
 ## Build
 
-Install JDK 27 (the build also runs on JDK 17–26) and an Android SDK (API 37),
-then:
+Install JDK 27 (the build also runs on JDK 17–26) and Android SDK Platform 37.1
+(`compileSdk = 37`, `compileSdkMinor = 1`; `targetSdk` stays 37), then:
 
 ```bash
 export ANDROID_HOME="$HOME/Android/Sdk"
 ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug \
-  :app:assembleDebug :app:assembleRelease :server:api:test :server:api:installDist
+  :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease \
+  :server:api:test :server:api:installDist
 ```
 
 Neither the app nor the server needs real credentials to build or unit-test.
+An on-device smoke test also launches the real onboarding activity and verifies
+credential validation without a server. CI runs it on an API 34 emulator; the
+`:app:assembleDebugAndroidTest` task above only compiles and packages it locally.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 
 ### Install on a device or emulator

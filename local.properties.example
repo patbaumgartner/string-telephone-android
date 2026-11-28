@@ -1,4 +1,5 @@
-sdk.dir=/home/patbaumgartner/Android/Sdk
+# Replace with your absolute SDK path, or omit sdk.dir and set ANDROID_HOME.
+sdk.dir=/path/to/Android/Sdk
 
 stringtelephone.serverUrl=
 stringtelephone.username=

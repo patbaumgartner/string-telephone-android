@@ -7,6 +7,8 @@ All notable changes are documented here. The project follows
 
 ### Fixed
 
+- Notifications now use the readable deep-cyan accent (`#0079A3`) on light
+  surfaces; bright cyan remains the launcher and primary brand colour.
 - Tag-triggered releases failed at `:app:buildReleasePreBundle` with "multiple
   shrunk-resources files": AGP cannot build an AAB while per-ABI splits are
   enabled (issuetracker 402800800). The release workflow now builds the signed
@@ -28,7 +30,8 @@ All notable changes are documented here. The project follows
 ### Changed
 
 - Snapshots are now signed release builds (not debug APKs) and share the
-  release key with tagged releases, so they install over each other as updates
+  release key with tagged releases. Stable → Snapshot updates in place;
+  Snapshot → Stable is a versionCode downgrade, not an in-place update
 - Release signing secrets renamed `ANDROID_KEYSTORE_*` → `SR_KEYSTORE_*`
   (`ST_KEYSTORE_*` → `SR_KEYSTORE_*` environment variables; local
   `keystore.properties` now uses `storeFile`/`storePassword`/`keyAlias`/

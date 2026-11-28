@@ -25,7 +25,8 @@ Facts used:
 - `minSdk = 26` (Android 8.0): below that, Core-Telecom self-managed calls
   and modern notification handling degrade; SDK floor is 23 but 26 keeps
   the Telecom path uniform.
-- `targetSdk = 37`, `compileSdk = 37`. The build runs on **JDK 27**
+- `targetSdk = 37`, `compileSdk = 37`, `compileSdkMinor = 1` (SDK Platform
+  37.1). The build runs on **JDK 27**
   (17–26 also work); the bytecode target stays **17** for Android D8
   compatibility. CI builds on JDK 27 (Temurin); the API image builds with
   `gradle:9.8.1-jdk27` and runs on `eclipse-temurin:27-jre`.
